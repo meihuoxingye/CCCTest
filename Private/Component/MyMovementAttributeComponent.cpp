@@ -7,6 +7,8 @@
 #include "GameFramework/CharacterMovementComponent.h"
 // 角色
 #include "GameFramework/Character.h"
+// 移动数据资产配置
+#include "Component/MyInputMovementComponent/MyMovementDataAsset.h"
 
 // Sets default values for this component's properties
 UMyMovementAttributeComponent::UMyMovementAttributeComponent()
@@ -31,21 +33,28 @@ void UMyMovementAttributeComponent::BeginPlay()
 
 void UMyMovementAttributeComponent::SyncMovementProperties()
 {
-	if (ACharacter* OwnerCharacter = Cast<ACharacter>(GetOwner()))
+	// 增加安全性检查：确保资产和所有者都存在
+	if (MovementConfig && GetOwner())
 	{
-		UCharacterMovementComponent* CMC = OwnerCharacter->GetCharacterMovement();
-		if (CMC)
+		if (ACharacter* OwnerCharacter = Cast<ACharacter>(GetOwner()))
 		{
-			// 将你的简易参数同步给复杂的原生参数
-			CMC->MaxWalkSpeed = MaxWalkSpeed;
-			CMC->MaxAcceleration = MaxAcceleration;
-			CMC->JumpZVelocity = JumpSpeed;
-			CMC->AirControl = AirControl;
-			CMC->GravityScale = GravityScale;
-
-			// 别忘了设置刹车，否则停不下来
-			CMC->BrakingDecelerationWalking = MoveDeceleration;
+			UCharacterMovementComponent* CMC = OwnerCharacter->GetCharacterMovement();
+			if (CMC)
+			{
+				// 从数据资产中读取数值并应用
+				CMC->MaxWalkSpeed = MovementConfig->MaxWalkSpeed;
+				CMC->MaxAcceleration = MovementConfig->MaxAcceleration;
+				CMC->JumpZVelocity = MovementConfig->JumpSpeed;
+				CMC->AirControl = MovementConfig->AirControl;
+				CMC->GravityScale = MovementConfig->GravityScale;
+				CMC->BrakingDecelerationWalking = MovementConfig->MoveDeceleration;
+			}
 		}
+	}
+	else if (!MovementConfig)
+	{
+		// 提醒开发者记得在编辑器里指定资产
+		UE_LOG(LogTemp, Warning, TEXT("[%s] 未分配 MovementConfig 资产！"), *GetOwner()->GetName());
 	}
 }
 

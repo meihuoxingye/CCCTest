@@ -76,6 +76,8 @@ void ATopPlayerController::OnPossess(APawn* InPawn)
 
 void ATopPlayerController::OnUnPossess()
 {
+	Super::OnUnPossess();
+
 	CachedMyInputMovementComp = nullptr;
 	CachedMyCharacter = nullptr;
 }
@@ -87,10 +89,7 @@ void ATopPlayerController::Move(const FInputActionValue& InputActionValue)
 	// 键盘 X 表示 A/D，键盘 Y 表示 W/S，其中 D、W 为正值
 	const FVector2D InputAxisVector = InputActionValue.Get<FVector2D>();
 
-	// 获取当前控制的 Pawn
-	APawn* ControlledPawn = GetPawn();
-
-	if (ControlledPawn && CachedMyInputMovementComp)
+	if (CachedMyInputMovementComp)
 	{
 		// 让组件去处理具体的移动逻辑
 		CachedMyInputMovementComp->HandleMoveInput(InputAxisVector);

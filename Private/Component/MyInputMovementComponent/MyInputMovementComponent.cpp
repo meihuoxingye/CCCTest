@@ -37,8 +37,6 @@ void UMyInputMovementComponent::BeginPlay()
 
 void UMyInputMovementComponent::HandleMoveInput(const FVector2D& InputAxisVector)
 {
-	CachedControlledPawn = Cast<APawn>(GetOwner());
-
 	if (CachedControlledPawn)
 	{
 		//处理移动
