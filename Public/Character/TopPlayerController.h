@@ -25,21 +25,23 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
-	
-	TObjectPtr<class ACharacter> MyCharacter;
-	TObjectPtr<class UMyInputMovementComponent> UMIMComponent;
-
 	// 键位绑定回调函数
 	virtual void SetupInputComponent() override;
 
 
-	/** 缓存找到的自定义输入移动组件，避免每帧都寻找 */
+	/** 缓存找到的指针，避免每帧都寻找 */
 	// 缓存组件指针，避免每一帧调用 FindComponentByClass
 	UPROPERTY()
 	TObjectPtr<class UMyInputMovementComponent> CachedMyInputMovementComp;
 
-	// 当控制器开始控制一个 Pawn 时触发，缓存找到的自定义输入移动组件，只找一次
+	// 缓存角色指针
+	UPROPERTY()
+	TObjectPtr<class ACharacter> CachedMyCharacter;
+
+	// 当控制器开始控制一个 Pawn 时触发，缓存找到的自定义输入移动组件与角色，只找一次
 	virtual void OnPossess(APawn* InPawn) override;
+	// 不再控制时将指针清空
+	virtual void OnUnPossess() override;
 	/** 缓存找到的自定义输入移动组件，避免每帧都寻找 */
 
 private:

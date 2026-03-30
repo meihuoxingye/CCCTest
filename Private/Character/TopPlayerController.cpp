@@ -66,9 +66,18 @@ void ATopPlayerController::OnPossess(APawn* InPawn)
 
 	if (InPawn)
 	{
-		// 只找自定义输入移动组件这一次，然后存起来
+		// 只找自定义输入移动组件这一次，然后缓存
 		CachedMyInputMovementComp = InPawn->FindComponentByClass<UMyInputMovementComponent>();
+
+		// 缓存角色
+		CachedMyCharacter = Cast<ACharacter>(InPawn);
 	}
+}
+
+void ATopPlayerController::OnUnPossess()
+{
+	CachedMyInputMovementComp = nullptr;
+	CachedMyCharacter = nullptr;
 }
 
 void ATopPlayerController::Move(const FInputActionValue& InputActionValue)
@@ -90,19 +99,17 @@ void ATopPlayerController::Move(const FInputActionValue& InputActionValue)
 
 void ATopPlayerController::Jump()
 {
-	MyCharacter = Cast<ACharacter>(GetPawn());
-	if (MyCharacter)
+	if (CachedMyCharacter)
 	{
-		MyCharacter->Jump();
+		CachedMyCharacter->Jump();
 	}
 }
 
 void ATopPlayerController::StopJump()
 {
-	MyCharacter = Cast<ACharacter>(GetPawn());
-	if (MyCharacter)
+	if (CachedMyCharacter)
 	{
-		MyCharacter->StopJumping();
+		CachedMyCharacter->StopJumping();
 	}
 }
 

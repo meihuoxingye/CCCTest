@@ -10,9 +10,17 @@
 
 UMyInputMovementComponent::UMyInputMovementComponent()
 {
-	PrimaryComponentTick.bCanEverTick = false;
+	// 组件在逻辑上有每帧更新的需求
+	PrimaryComponentTick.bCanEverTick = true;
+	// 初始状态为每帧不更新
+	PrimaryComponentTick.bStartWithTickEnabled = false;
+}
 
+void UMyInputMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
+	SmoothRotate(DeltaTime);
 }
 
 
@@ -21,16 +29,17 @@ void UMyInputMovementComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-
-	
+	CachedControlledPawn = Cast<APawn>(GetOwner());
+	CachedCharacter = Cast<ACharacter>(CachedControlledPawn);
+	CachedMesh = CachedCharacter->GetMesh();
 }
 
 
 void UMyInputMovementComponent::HandleMoveInput(const FVector2D& InputAxisVector)
 {
-	ControlledPawn = Cast<APawn>(GetOwner());
+	CachedControlledPawn = Cast<APawn>(GetOwner());
 
-	if (ControlledPawn)
+	if (CachedControlledPawn)
 	{
 		//处理移动
 		UpdateMovement(InputAxisVector);
@@ -43,12 +52,12 @@ void UMyInputMovementComponent::HandleMoveInput(const FVector2D& InputAxisVector
 void UMyInputMovementComponent::UpdateMovement(const FVector2D& InputAxisVector)
 {
 	// 向前，世界坐标系而不是角色坐标系
-	ControlledPawn->AddMovementInput(
+	CachedControlledPawn->AddMovementInput(
 		FVector(1, 0, 0),
 		InputAxisVector.X
 	);
 	// 向上
-	ControlledPawn->AddMovementInput(
+	CachedControlledPawn->AddMovementInput(
 		FVector(0, -1, 0),
 		InputAxisVector.Y
 	);
@@ -81,35 +90,23 @@ void UMyInputMovementComponent::UpdateRotation(const FVector2D& InputAxisVector)
 
 			// 按键与朝向一致
 			bWasFacingRight = bCurrentlyMovingRight;
-
-			// 如果定时器还没跑，或者已经跑完了，重新启动它
-			if (!GetWorld()->GetTimerManager().IsTimerActive(RotationTimerHandle))
-			{
-				GetWorld()->GetTimerManager().SetTimer(
-					RotationTimerHandle,
-					this,
-					&UMyInputMovementComponent::SmoothRotate,
-					Time,
-					true
-				);
-			}
+			// 唤醒帧更新
+			SetComponentTickEnabled(true);
 		}
 	}
 }
 
-void UMyInputMovementComponent::SmoothRotate()
+void UMyInputMovementComponent::SmoothRotate(float Time)
 {
-	if (!ControlledPawn) return;
+	if (!CachedControlledPawn) return;
 
-	ACharacter* Character = Cast<ACharacter>(ControlledPawn);
-	if (!Character) return;
+	if (!CachedCharacter) return;
 
-	USkeletalMeshComponent* Mesh = Character->GetMesh();
-	if (!Mesh) return;
+	if (!CachedMesh) return;
 
 
 	// 获取当前的 Yaw 值（普通浮点数）
-	float CurrentYaw = Mesh->GetRelativeRotation().Yaw;
+	float CurrentYaw = CachedMesh->GetRelativeRotation().Yaw;
 
 	// CurrentYaw - TargetYaw（求绝对距离），例如 175 - (-180) = 355
 	// FMath::UnwindDegrees(...)（寻找捷径），355 转为 -5
@@ -119,8 +116,10 @@ void UMyInputMovementComponent::SmoothRotate()
 	// 检查是否插值到位
 	if (FMath::IsNearlyEqual(AdjustedCurrentYaw, TargetYaw, 0.5f))
 	{
-		Mesh->SetRelativeRotation(FRotator(0.f, TargetYaw, 0.f));
-		GetWorld()->GetTimerManager().ClearTimer(RotationTimerHandle);
+		// 旋转值取整
+		CachedMesh->SetRelativeRotation(FRotator(0.f, TargetYaw, 0.f));
+		// 停止帧更新
+		SetComponentTickEnabled(false);
 		return;
 	}
 
@@ -130,6 +129,6 @@ void UMyInputMovementComponent::SmoothRotate()
 	float NewYaw = FMath::FInterpTo(AdjustedCurrentYaw, TargetYaw, Time, RotationInterpSpeed);
 
 	// 只旋转模型组件，不触动胶囊体和根节点
-	Mesh->SetRelativeRotation(FRotator(0.f, NewYaw, 0.f));
+	CachedMesh->SetRelativeRotation(FRotator(0.f, NewYaw, 0.f));
 }
 

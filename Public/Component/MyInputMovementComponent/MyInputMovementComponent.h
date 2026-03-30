@@ -16,11 +16,11 @@ public:
 	// Sets default values for this component's properties
 	UMyInputMovementComponent();
 
+    // Called every frame
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
 	// 处理移动与转向
 	void HandleMoveInput(const FVector2D& InputAxisVector);
-
-
-
 
 protected:
 	// Called when the game starts
@@ -28,12 +28,8 @@ protected:
 
 
     /** 移动与转向函数及参数 */
-    // 定时器句柄，用来管理“转身循环”
-    FTimerHandle RotationTimerHandle;
-    TObjectPtr<APawn> ControlledPawn;
-
     // 平滑旋转插值函数
-    void SmoothRotate();
+    void SmoothRotate(float Time);
 
     // 移动逻辑
     void UpdateMovement(const FVector2D& InputAxisVector);
@@ -48,13 +44,22 @@ protected:
     // 平滑转向插值速度
     UPROPERTY(EditAnywhere, Category = "Smooth Rotation Interpolation Parameters")
     float RotationInterpSpeed = 10.f;
-
-    // 更新转向单位计时器时间
-    UPROPERTY(EditAnywhere, Category = "Smooth Rotation Interpolation Parameters")
-    float Time = 0.01f;
     /** 旋转插值函数及参数 */
 
 
+    /** 缓存找到的指针，避免每帧都寻找 */
+    // 缓存 Pawn
+    UPROPERTY()
+    TObjectPtr<class APawn> CachedControlledPawn;
+
+    // 缓存角色
+    UPROPERTY()
+    TObjectPtr<class ACharacter> CachedCharacter;
+
+    // 缓存网格
+    UPROPERTY()
+    TObjectPtr<class USkeletalMeshComponent> CachedMesh;
+    /** 缓存找到的自定义输入移动组件，避免每帧都寻找 */
 
 private:
     
