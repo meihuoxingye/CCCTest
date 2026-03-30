@@ -2,7 +2,9 @@
 
 
 #include "Component/MyInputMovementComponent/MyInputMovementComponent.h"
+// 角色
 #include "GameFramework/Character.h"
+// 移动组件
 #include "GameFramework/CharacterMovementComponent.h"
 
 
@@ -124,7 +126,8 @@ void UMyInputMovementComponent::SmoothRotate()
 
 	// 使用 FInterpTo 而不是 RInterpTo
 	// 它会像在数轴上走一样，0 到 -180 必须经过负数，绝不会往正数绕
-	float NewYaw = FMath::FInterpTo(AdjustedCurrentYaw, TargetYaw, 0.01f, RotationInterpSpeed);
+	// 计算步进为计算器时间
+	float NewYaw = FMath::FInterpTo(AdjustedCurrentYaw, TargetYaw, Time, RotationInterpSpeed);
 
 	// 只旋转模型组件，不触动胶囊体和根节点
 	Mesh->SetRelativeRotation(FRotator(0.f, NewYaw, 0.f));

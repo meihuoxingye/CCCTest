@@ -60,6 +60,17 @@ void ATopPlayerController::SetupInputComponent()
 
 }
 
+void ATopPlayerController::OnPossess(APawn* InPawn)
+{
+	Super::OnPossess(InPawn);
+
+	if (InPawn)
+	{
+		// 只找自定义输入移动组件这一次，然后存起来
+		CachedMyInputMovementComp = InPawn->FindComponentByClass<UMyInputMovementComponent>();
+	}
+}
+
 void ATopPlayerController::Move(const FInputActionValue& InputActionValue)
 {
 	// 移动输入动作是一个 Axis2D 类型，要获取 X 和 Y 轴数据
@@ -70,18 +81,11 @@ void ATopPlayerController::Move(const FInputActionValue& InputActionValue)
 	// 获取当前控制的 Pawn
 	APawn* ControlledPawn = GetPawn();
 
-	if (ControlledPawn)
+	if (ControlledPawn && CachedMyInputMovementComp)
 	{
-		// 寻找自定义移动组件
-		UMIMComponent = ControlledPawn->FindComponentByClass<UMyInputMovementComponent>();
-		
-		if (UMIMComponent)
-		{
-			// 让组件去处理具体的移动逻辑
-			UMIMComponent->HandleMoveInput(InputAxisVector);
-		}
+		// 让组件去处理具体的移动逻辑
+		CachedMyInputMovementComp->HandleMoveInput(InputAxisVector);
 	}
-
 }
 
 void ATopPlayerController::Jump()

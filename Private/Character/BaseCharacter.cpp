@@ -6,12 +6,16 @@
 // 移动组件
 #include "GameFramework/CharacterMovementComponent.h"
 
+// 常用移动属性组件
+#include "Component/MyMovementAttributeComponent.h"
+
 // Sets default values
 ABaseCharacter::ABaseCharacter()
 {
  	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
 
+	MMAComponent = CreateDefaultSubobject<UMyMovementAttributeComponent>(TEXT("常用移动属性组件"));
 }
 
 // Called when the game starts or when spawned
@@ -27,7 +31,7 @@ void ABaseCharacter::BeginPlay()
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationRoll = false;
 
-	SyncMovementProperties();
+	
 }
 
 // Called every frame
@@ -42,25 +46,5 @@ void ABaseCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 
-}
-
-void ABaseCharacter::SyncMovementProperties()
-{
-	if (ACharacter* OwnerCharacter = Cast<ACharacter>(GetOwner()))
-	{
-		UCharacterMovementComponent* CMC = OwnerCharacter->GetCharacterMovement();
-		if (CMC)
-		{
-			// 将你的简易参数同步给复杂的原生参数
-			CMC->MaxWalkSpeed = MaxWalkSpeed;
-			CMC->MaxAcceleration = MaxAcceleration;
-			CMC->JumpZVelocity = JumpSpeed;
-			CMC->AirControl = AirControl;
-			CMC->GravityScale = GravityScale;
-
-			// 别忘了设置刹车，否则停不下来
-			CMC->BrakingDecelerationWalking = MoveDeceleration;
-		}
-	}
 }
 

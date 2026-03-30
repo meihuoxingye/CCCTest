@@ -19,6 +19,8 @@ protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<class UMyMovementAttributeComponent> MMAComponent;
 public:	
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
@@ -27,30 +29,6 @@ public:
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
 private:
-    /** 常用移动属性 */
-    UPROPERTY(EditAnywhere, Category = "Common Movement Properties")
-    float MaxWalkSpeed = 600.f;
 
-    UPROPERTY(EditAnywhere, Category = "Common Movement Properties")
-    float MaxAcceleration = 2048.f;
-
-    // 停止移动时的减速能力
-    UPROPERTY(EditAnywhere, Category = "Common Movement Properties")
-    float MoveDeceleration = 2048.f;
-
-    UPROPERTY(EditAnywhere, Category = "Common Movement Properties")
-    float JumpSpeed = 420.f;
-
-    // 空中方向控制力
-    UPROPERTY(EditAnywhere, Category = "Common Movement Properties")
-    float AirControl = 0.2f;
-
-    // 重力缩放
-    UPROPERTY(EditAnywhere, Category = "Common Movement Properties")
-    float GravityScale = 1.0f;
-
-    // 同步自定义移动属性
-    void SyncMovementProperties();
-    /** 常用移动属性 */
 
 };

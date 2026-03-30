@@ -4,10 +4,11 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "BaseCharacter.h"
 #include "TopCharacter.generated.h"
 
 UCLASS()
-class CCC_API ATopCharacter : public ACharacter
+class CCC_API ATopCharacter : public ABaseCharacter
 {
 	GENERATED_BODY()
 
@@ -28,5 +29,8 @@ public:
 
 	// Called to bind functionality to input
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+
+private:
+
 
 };

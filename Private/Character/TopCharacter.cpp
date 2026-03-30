@@ -10,15 +10,14 @@ ATopCharacter::ATopCharacter()
  	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
 
-	MIMComponent = CreateDefaultSubobject<UMyInputMovementComponent>(TEXT("MyInputMovementComponent"));
+	MIMComponent = CreateDefaultSubobject<UMyInputMovementComponent>(TEXT("自定义输入移动组件"));
 }
 
 // Called when the game starts or when spawned
 void ATopCharacter::BeginPlay()
 {
 	Super::BeginPlay();
-	
-	
+
 }
 
 // Called every frame

@@ -25,16 +25,26 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
+	
 	TObjectPtr<class ACharacter> MyCharacter;
 	TObjectPtr<class UMyInputMovementComponent> UMIMComponent;
 
 	// 键位绑定回调函数
 	virtual void SetupInputComponent() override;
 
+
+	/** 缓存找到的自定义输入移动组件，避免每帧都寻找 */
+	// 缓存组件指针，避免每一帧调用 FindComponentByClass
+	UPROPERTY()
+	TObjectPtr<class UMyInputMovementComponent> CachedMyInputMovementComp;
+
+	// 当控制器开始控制一个 Pawn 时触发，缓存找到的自定义输入移动组件，只找一次
+	virtual void OnPossess(APawn* InPawn) override;
+	/** 缓存找到的自定义输入移动组件，避免每帧都寻找 */
+
 private:
 	UPROPERTY(EditAnywhere, Category = "Input")
 	TObjectPtr<class UInputMappingContext> TopContext;
-
 	UPROPERTY(EditAnywhere, Category = "Input")
 	TObjectPtr<class UInputAction> MoveAction;
 	UPROPERTY(EditAnywhere, Category = "Input")
@@ -43,7 +53,7 @@ private:
 	TObjectPtr<class UInputAction> AttackAction;
 
 
-	/** Input Callback */
+	/** Input Callback Functions*/
 	void Move(const FInputActionValue& InputActionValue);
 	void Jump();
 	void StopJump();
