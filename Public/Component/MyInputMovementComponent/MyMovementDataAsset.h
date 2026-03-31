@@ -9,7 +9,7 @@
 /**
  * 
  */
-UCLASS()
+UCLASS(BlueprintType)
 class CCC_API UMyMovementDataAsset : public UPrimaryDataAsset
 {
 	GENERATED_BODY()

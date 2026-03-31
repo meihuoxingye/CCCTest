@@ -31,7 +31,10 @@ void UMyInputMovementComponent::BeginPlay()
 
 	CachedControlledPawn = Cast<APawn>(GetOwner());
 	CachedCharacter = Cast<ACharacter>(CachedControlledPawn);
-	CachedMesh = CachedCharacter->GetMesh();
+	if (CachedCharacter)
+	{
+		CachedMesh = CachedCharacter->GetMesh();
+	}
 }
 
 
