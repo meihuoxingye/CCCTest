@@ -19,13 +19,14 @@ public:
 	// 在控制器里调用的唯一入口
 	void ExecuteAttack();
 
+	// 切换为当前使用武器的接口，由 Controller 或 Character 调用
+	void SwitchToActiveWeapon(class AMyWeaponBase* NewWeapon);
+
 protected:
 	// Called when the game starts
 	virtual void BeginPlay() override;
 
-	// 添加武器数据资产配置
-	UPROPERTY(EditAnywhere, Category = "Combat Config")
-	TObjectPtr<class UMyWeaponDataAsset> WeaponConfig;
+
 
 public:	
 	// Called every frame
@@ -33,11 +34,15 @@ public:
 
 private:
 	// 执行 射线检测
-	void PerformHitscan();
+	void PerformHitscan(class UMyWeaponDataAsset* Config);
 	// 召唤抛射物实体
-	void SpawnProjectile();
+	void SpawnProjectile(class UMyWeaponDataAsset* Config);
 
 	// 缓存组件拥有者的指针
 	UPROPERTY()
 	TObjectPtr<class ACharacter> CachedOwner;
+
+	// 缓存当前使用的武器
+	UPROPERTY()
+	TObjectPtr<class AMyWeaponBase> CachedActiveWeapon;
 };

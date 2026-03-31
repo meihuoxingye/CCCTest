@@ -21,7 +21,7 @@ protected:
 	virtual void BeginPlay() override;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	TObjectPtr<class UMyInputMovementComponent> MIMComponent;
+	TObjectPtr<class UMyMovementControlComponent> MMCComponent;
 
 public:	
 	// Called every frame

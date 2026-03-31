@@ -32,7 +32,11 @@ protected:
 	/** 缓存找到的指针，避免每帧都寻找 */
 	// 缓存组件指针，避免每一帧调用 FindComponentByClass
 	UPROPERTY()
-	TObjectPtr<class UMyInputMovementComponent> CachedMyInputMovementComp;
+	TObjectPtr<class UMyMovementControlComponent> CachedMyMovementControlComp;
+
+	// 缓存组件指针
+	UPROPERTY()
+	TObjectPtr<class UMyCombatComponent> MyCombatComp;
 
 	// 缓存角色指针
 	UPROPERTY()

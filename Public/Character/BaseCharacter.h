@@ -19,8 +19,13 @@ protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
 
+	// 常用移动属性组件
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<class UMyMovementAttributeComponent> MMAComponent;
+
+	// 自定义战斗组件
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<class UMyCombatComponent> MCComponent;
 public:	
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;

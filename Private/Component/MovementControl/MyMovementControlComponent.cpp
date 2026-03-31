@@ -1,14 +1,14 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "Component/MyInputMovementComponent/MyInputMovementComponent.h"
+#include "Component/MovementControl/MyMovementControlComponent.h"
 // 角色
 #include "GameFramework/Character.h"
 // 移动组件
 #include "GameFramework/CharacterMovementComponent.h"
 
 
-UMyInputMovementComponent::UMyInputMovementComponent()
+UMyMovementControlComponent::UMyMovementControlComponent()
 {
 	// 组件在逻辑上有每帧更新的需求
 	PrimaryComponentTick.bCanEverTick = true;
@@ -16,7 +16,7 @@ UMyInputMovementComponent::UMyInputMovementComponent()
 	PrimaryComponentTick.bStartWithTickEnabled = false;
 }
 
-void UMyInputMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UMyMovementControlComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
@@ -25,7 +25,7 @@ void UMyInputMovementComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 
 
 // Called when the game starts
-void UMyInputMovementComponent::BeginPlay()
+void UMyMovementControlComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
@@ -38,7 +38,7 @@ void UMyInputMovementComponent::BeginPlay()
 }
 
 
-void UMyInputMovementComponent::HandleMoveInput(const FVector2D& InputAxisVector)
+void UMyMovementControlComponent::HandleMoveInput(const FVector2D& InputAxisVector)
 {
 	if (CachedControlledPawn)
 	{
@@ -50,7 +50,7 @@ void UMyInputMovementComponent::HandleMoveInput(const FVector2D& InputAxisVector
 	}
 }
 
-void UMyInputMovementComponent::UpdateMovement(const FVector2D& InputAxisVector)
+void UMyMovementControlComponent::UpdateMovement(const FVector2D& InputAxisVector)
 {
 	// 向前，世界坐标系而不是角色坐标系
 	CachedControlledPawn->AddMovementInput(
@@ -64,7 +64,7 @@ void UMyInputMovementComponent::UpdateMovement(const FVector2D& InputAxisVector)
 	);
 }
 
-void UMyInputMovementComponent::UpdateRotation(const FVector2D& InputAxisVector)
+void UMyMovementControlComponent::UpdateRotation(const FVector2D& InputAxisVector)
 {
 	// 只有当玩家按下 A 或 D（X轴不为0）时，才改变朝向
 	// IsNearlyZero 相比直接用 == 0.0f，它更安全，因为它考虑了浮点数精度误差
@@ -97,7 +97,7 @@ void UMyInputMovementComponent::UpdateRotation(const FVector2D& InputAxisVector)
 	}
 }
 
-void UMyInputMovementComponent::SmoothRotate(float Time)
+void UMyMovementControlComponent::SmoothRotate(float Time)
 {
 	if (!CachedControlledPawn) return;
 

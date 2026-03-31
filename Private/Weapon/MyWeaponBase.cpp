@@ -2,6 +2,7 @@
 
 
 #include "Weapon/MyWeaponBase.h"
+#include "Component/CombatSystem/MyWeaponDataAsset.h"
 
 // Sets default values
 AMyWeaponBase::AMyWeaponBase()

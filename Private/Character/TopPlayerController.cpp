@@ -3,12 +3,21 @@
 
 #include "Character/TopPlayerController.h"
 
+// 增强输入
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h" 
 
+//角色
 #include "Character/TopCharacter.h"
 
-#include "Component/MyInputMovementComponent/MyInputMovementComponent.h"
+// 自定义移动控制组件
+#include "Component/MovementControl/MyMovementControlComponent.h"
+
+// 异步线迹追踪子弹子系统
+#include "Weapon/AsyncLineTraceBullet/MyBulletSubsystem.h"
+
+// 自定义战斗组件
+#include "Component/CombatSystem/MyCombatComponent.h"
 
 ATopPlayerController::ATopPlayerController()
 {
@@ -67,10 +76,13 @@ void ATopPlayerController::OnPossess(APawn* InPawn)
 	if (InPawn)
 	{
 		// 只找自定义输入移动组件这一次，然后缓存
-		CachedMyInputMovementComp = InPawn->FindComponentByClass<UMyInputMovementComponent>();
+		CachedMyMovementControlComp = InPawn->FindComponentByClass<UMyMovementControlComponent>();
 
 		// 缓存角色
 		CachedMyCharacter = Cast<ACharacter>(InPawn);
+
+		// 缓存自定义战斗组件
+		MyCombatComp = InPawn->FindComponentByClass<UMyCombatComponent>();
 	}
 }
 
@@ -78,7 +90,7 @@ void ATopPlayerController::OnUnPossess()
 {
 	Super::OnUnPossess();
 
-	CachedMyInputMovementComp = nullptr;
+	CachedMyMovementControlComp = nullptr;
 	CachedMyCharacter = nullptr;
 }
 
@@ -89,10 +101,10 @@ void ATopPlayerController::Move(const FInputActionValue& InputActionValue)
 	// 键盘 X 表示 A/D，键盘 Y 表示 W/S，其中 D、W 为正值
 	const FVector2D InputAxisVector = InputActionValue.Get<FVector2D>();
 
-	if (CachedMyInputMovementComp)
+	if (CachedMyMovementControlComp)
 	{
 		// 让组件去处理具体的移动逻辑
-		CachedMyInputMovementComp->HandleMoveInput(InputAxisVector);
+		CachedMyMovementControlComp->HandleMoveInput(InputAxisVector);
 	}
 }
 
@@ -114,7 +126,7 @@ void ATopPlayerController::StopJump()
 
 void ATopPlayerController::Attack()
 {
-
+	MyCombatComp->ExecuteAttack();
 }
 
 void ATopPlayerController::AttackEnd()

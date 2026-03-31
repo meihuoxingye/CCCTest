@@ -7,7 +7,10 @@
 #include "GameFramework/CharacterMovementComponent.h"
 
 // 常用移动属性组件
-#include "Component/MyMovementAttributeComponent.h"
+#include "Component/MovementAttribute/MyMovementAttributeComponent.h"
+
+// 自定义战斗组件
+#include "Component/CombatSystem/MyCombatComponent.h"
 
 // Sets default values
 ABaseCharacter::ABaseCharacter()
@@ -16,6 +19,8 @@ ABaseCharacter::ABaseCharacter()
 	PrimaryActorTick.bCanEverTick = true;
 
 	MMAComponent = CreateDefaultSubobject<UMyMovementAttributeComponent>(TEXT("常用移动属性组件"));
+	MCComponent = CreateDefaultSubobject<UMyCombatComponent>(TEXT("自定义战斗组件"));
+
 }
 
 // Called when the game starts or when spawned

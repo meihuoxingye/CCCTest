@@ -11,8 +11,8 @@
 UENUM(BlueprintType)
 enum class EWeaponFireType : uint8
 {
-    // 线迹追踪
-	Hitscan    UMETA(DisplayName = "LineTrace"),
+    // 异步线迹追踪
+	Hitscan    UMETA(DisplayName = "AsyncLineTrace"),
     // 抛射物
 	Projectile UMETA(DisplayName = "Projectile")
 };

@@ -2,7 +2,7 @@
 
 
 #include "Character/TopCharacter.h"
-#include "Component/MyInputMovementComponent/MyInputMovementComponent.h"
+#include "Component/MovementControl/MyMovementControlComponent.h"
 
 // Sets default values
 ATopCharacter::ATopCharacter()
@@ -10,7 +10,7 @@ ATopCharacter::ATopCharacter()
  	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
 
-	MIMComponent = CreateDefaultSubobject<UMyInputMovementComponent>(TEXT("自定义输入移动组件"));
+	MMCComponent = CreateDefaultSubobject<UMyMovementControlComponent>(TEXT("自定义输入移动组件"));
 }
 
 // Called when the game starts or when spawned
