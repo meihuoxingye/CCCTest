@@ -38,12 +38,15 @@ struct FVirtualBulletData
 {
     GENERATED_BODY()
 
+    // 哪里开的枪
     UPROPERTY()
     FVector Position;
 
+    // 速度 = 方向 * 速度大小
     UPROPERTY()
     FVector Velocity;
 
+    // 子弹寿命
     UPROPERTY()
     float RemainingLife;
 
@@ -58,7 +61,7 @@ class CCC_API UMyBulletSubsystem : public UWorldSubsystem, public FTickableGameO
 	GENERATED_BODY()
 	
 public:
-    // 外部调用入口：发射子弹
+    // 外部调用入口，输入子弹参数并把子弹添加到子弹池
     // FVector 占 24 字节，按值传递会产生内存拷贝
     // 只读的输入参数，最佳实践是使用常量引用
     void FireBullet(AActor* InOwner, const FVector& StartLoc, const FVector& Direction, float Speed, float LifeTime);
@@ -70,9 +73,12 @@ public:
     // -------------------------------
 
 private:
+    // 动态数组，储存所有活跃的子弹数据
     TArray<FVirtualBulletData> ActiveBullets;
 
+    // 累积时间，累积到 TargetUpdateInterval 清零一次
     float Accumulator = 0.f;
-    const float TargetUpdateInterval = 1.f / 30.f; // 30Hz 更新，即便游戏 60 帧，性能再翻倍
+    // 30Hz 更新，即便游戏 60 帧，性能再翻倍
+    const float TargetUpdateInterval = 1.f / 30.f;
 };
 

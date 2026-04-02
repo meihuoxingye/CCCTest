@@ -163,7 +163,7 @@ void UMyCombatComponent::PerformHitscan()
 	// 发射子弹
 	if (CachedBulletSubsystem)
 	{
-		// 传参：谁开的枪，哪里开的，方向，速度（从 DataAsset 拿），寿命
+		// 传参：谁开的枪，哪里开的，方向，速度，寿命
 		CachedBulletSubsystem->FireBullet(CachedOwner, MuzzleLoc, Dir, CachedConfig->BulletSpeed, CachedConfig->BulletLifespan);
 	}
 }
