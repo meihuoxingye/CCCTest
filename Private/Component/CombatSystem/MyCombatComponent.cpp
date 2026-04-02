@@ -35,11 +35,11 @@ void UMyCombatComponent::ExecuteAttack()
 	// 根据数据资产配置决定执行线迹追踪还是生成抛射物
 	if (CachedConfig->FireType == EWeaponFireType::Hitscan)
 	{
-		PerformHitscan(CachedConfig);
+		PerformHitscan();
 	}
 	else
 	{
-		SpawnProjectile(CachedConfig);
+		SpawnProjectile();
 	}
 }
 
@@ -60,6 +60,16 @@ void UMyCombatComponent::SwitchToActiveWeapon(AMyWeaponBase* NewWeapon)
 
 void UMyCombatComponent::SpawnDefaultWeapon()
 {
+	// 检查是否忘记设置插槽名
+	if (CachedConfig->WeaponSocketName.IsNone())
+	{
+		// 在控制台和日志中输出警告，%s 会替换为当前武器数据资产的名字
+		UE_LOG(LogTemp, Warning, TEXT("武器数据资产 [%s] 忘记设置 WeaponSocketName 了！"), *CachedConfig->GetName());
+
+		// 可选：在此处直接返回，防止子弹从角色原点发射
+		return;
+	}
+
 	// 配置生成参数
 	// 定义一个生成参数清单，它的大多数值都是空的，所以需要手动填上最重要的两项
 	FActorSpawnParameters SpawnParams;
@@ -107,42 +117,43 @@ void UMyCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 	// ...
 }
 
-void UMyCombatComponent::PerformHitscan(const UMyWeaponDataAsset* Config)
+void UMyCombatComponent::PerformHitscan()
 {
 	// 未识别到武器网格则退出
 	if (!CachedWeaponMesh) return;
 
 	// 检查是否忘记设置插槽名
-	if (Config->MuzzleSocketName.IsNone())
+	if (CachedConfig->MuzzleSocketName.IsNone())
 	{
 		// 在控制台和日志中输出警告，%s 会替换为当前武器数据资产的名字
-		UE_LOG(LogTemp, Warning, TEXT("武器数据资产 [%s] 忘记设置 MuzzleSocketName 了！"), *Config->GetName());
+		// 编译器期望接收到的是一个底层的 C 风格字符指针，所以要加*
+		UE_LOG(LogTemp, Warning, TEXT("武器数据资产 [%s] 忘记设置 MuzzleSocketName 了！"), *CachedConfig->GetName());
 
 		// 可选：在此处直接返回，防止子弹从角色原点发射
 		return;
 	}
 
 	// 射线检测起点，某插槽位置
-	const FVector MuzzleLoc = CachedWeaponMesh->GetSocketLocation(Config->MuzzleSocketName);
+	const FVector MuzzleLoc = CachedWeaponMesh->GetSocketLocation(CachedConfig->MuzzleSocketName);
 	// 获取插槽旋转，然后用 Vector() 将欧拉角（旋转）转为前向向量
-	const FVector Dir = CachedWeaponMesh->GetSocketRotation(Config->MuzzleSocketName).Vector();
+	const FVector Dir = CachedWeaponMesh->GetSocketRotation(CachedConfig->MuzzleSocketName).Vector();
 
 	// 发射子弹
 	if (CachedBulletSubsystem)
 	{
 		// 传参：谁开的枪，哪里开的，方向，速度（从 DataAsset 拿），寿命
-		CachedBulletSubsystem->FireBullet(CachedOwner, MuzzleLoc, Dir, Config->BulletSpeed, Config->BulletLifespan);
+		CachedBulletSubsystem->FireBullet(CachedOwner, MuzzleLoc, Dir, CachedConfig->BulletSpeed, CachedConfig->BulletLifespan);
 	}
 }
 
 
 // 待修改
-void UMyCombatComponent::SpawnProjectile(const UMyWeaponDataAsset* Config)
+void UMyCombatComponent::SpawnProjectile()
 {
-	if (!Config->ProjectileClass) return;
+	if (!CachedConfig->ProjectileClass) return;
 
 	// 锁定生成位置和旋转，这些值计算出来后本帧内是固定的
-	const FVector Loc = CachedOwner->GetMesh()->GetSocketLocation(Config->MuzzleSocketName);
+	const FVector Loc = CachedOwner->GetMesh()->GetSocketLocation(CachedConfig->MuzzleSocketName);
 	const FRotator Rot = CachedOwner->GetActorRotation();
 
 	FActorSpawnParameters Params;
@@ -150,5 +161,5 @@ void UMyCombatComponent::SpawnProjectile(const UMyWeaponDataAsset* Config)
 	Params.Instigator = CachedOwner;
 
 	// 生成那个“带着原生抛射物组件”的子弹，生成后逻辑交给子弹自己
-	GetWorld()->SpawnActor<AMyBaseProjectile>(Config->ProjectileClass, Loc, Rot, Params);
+	GetWorld()->SpawnActor<AMyBaseProjectile>(CachedConfig->ProjectileClass, Loc, Rot, Params);
 }

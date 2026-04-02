@@ -38,9 +38,9 @@ public:
 
 private:
 	// 执行 射线检测
-	void PerformHitscan(const class UMyWeaponDataAsset* Config);
+	void PerformHitscan();
 	// 召唤抛射物实体
-	void SpawnProjectile(const class UMyWeaponDataAsset* Config);
+	void SpawnProjectile();
 
 
 	// 缓存组件拥有者的指针
