@@ -60,6 +60,20 @@ void UMyCombatComponent::SwitchToActiveWeapon(AMyWeaponBase* NewWeapon)
 
 void UMyCombatComponent::SpawnDefaultWeapon()
 {
+	// 配置生成参数
+	// 定义一个生成参数清单，它的大多数值都是空的，所以需要手动填上最重要的两项
+	FActorSpawnParameters SpawnParams;
+	// 这把枪属于谁
+	SpawnParams.Owner = CachedOwner;
+	// 谁发起的这次行为
+	SpawnParams.Instigator = CachedOwner;
+
+	// 生成武器实体
+	AMyWeaponBase* SpawnedWeapon = GetWorld()->SpawnActor<AMyWeaponBase>(CachedOwner->GetDefaultWeaponClass(), SpawnParams);
+
+	// 将生成的武器切换为当前使用武器，并缓存相关数据
+	SwitchToActiveWeapon(SpawnedWeapon);
+
 	// 检查是否忘记设置插槽名
 	if (CachedConfig->WeaponSocketName.IsNone())
 	{
@@ -70,27 +84,17 @@ void UMyCombatComponent::SpawnDefaultWeapon()
 		return;
 	}
 
-	// 配置生成参数
-	// 定义一个生成参数清单，它的大多数值都是空的，所以需要手动填上最重要的两项
-	FActorSpawnParameters SpawnParams;
-	// 这把枪属于谁
-	SpawnParams.Owner = CachedOwner;
-	// 谁发起的这次行为
-	SpawnParams.Instigator = CachedOwner;
+	// 吸附到角色插槽上
+	AttachWeaponToSocket(CachedActiveWeapon);
+}
 
-	// 生成武器实体
-	if (AMyWeaponBase* SpawnedWeapon = GetWorld()->SpawnActor<AMyWeaponBase>(CachedOwner->GetDefaultWeaponClass(), SpawnParams))
-	{
-		// 将武器吸附到角色的骨骼插槽上
-		SpawnedWeapon->AttachToComponent(
-			CachedOwner->GetMesh(),
-			FAttachmentTransformRules::SnapToTargetNotIncludingScale,
-			CachedConfig->WeaponSocketName
-		);
-
-		// 将生成的武器切换为当前使用武器，并缓存相关数据
-		SwitchToActiveWeapon(SpawnedWeapon);
-	}
+void UMyCombatComponent::AttachWeaponToSocket(AMyWeaponBase* SpawnedWeapon)
+{
+	CachedActiveWeapon->AttachToComponent(
+		CachedOwner->GetMesh(),
+		FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+		CachedConfig->WeaponSocketName
+	);
 }
 
 // Called when the game starts

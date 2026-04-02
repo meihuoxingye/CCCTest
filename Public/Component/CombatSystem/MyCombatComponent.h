@@ -19,12 +19,11 @@ public:
 	// 在控制器里调用的唯一入口
 	void ExecuteAttack();
 
-	// 将 NewWeapon 切换为当前使用武器，并获取武器的网格与数据资产配置的接口，然后缓存它们
-	// 由 Controller 或 Character 调用
-	void SwitchToActiveWeapon(class AMyWeaponBase* NewWeapon);
-
 	// 为拥有该组件的角色生成默认武器
+	// 由基础角色调用
 	void SpawnDefaultWeapon();
+	// 将生成的默认武器吸附到角色的骨骼插槽上
+	void AttachWeaponToSocket(class AMyWeaponBase* SpawnedWeapon);
 
 protected:
 	// Called when the game starts
@@ -41,6 +40,10 @@ private:
 	void PerformHitscan();
 	// 召唤抛射物实体
 	void SpawnProjectile();
+	// 将 NewWeapon 切换为当前使用武器，并获取武器的网格与数据资产配置的接口，然后缓存它们
+	void SwitchToActiveWeapon(class AMyWeaponBase* NewWeapon);
+
+
 
 
 	// 缓存组件拥有者的指针
