@@ -41,7 +41,7 @@ void ABaseCharacter::BeginPlay()
 	bUseControllerRotationRoll = false;
 
 	// 检查是否配置了武器类以及当前世界是否存在
-	if (DefaultWeaponClass || GetWorld())
+	if (DefaultWeaponClass && GetWorld())
 	{
 		// 生成默认武器
 		MCComponent->SpawnDefaultWeapon();

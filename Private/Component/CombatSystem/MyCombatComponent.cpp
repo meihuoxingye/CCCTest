@@ -27,10 +27,8 @@ UMyCombatComponent::UMyCombatComponent()
 
 void UMyCombatComponent::ExecuteAttack()
 {
-	// 未设置武器数据资产配置或拥有组件者不是 Charater
-	if (!CachedActiveWeapon || !CachedOwner) return;
-
-	if (!CachedConfig) return;
+	// 当前没有使用的武器、未设置武器数据资产配置或拥有组件者不是 Charater
+	if (!CachedActiveWeapon || !CachedOwner || !CachedConfig) return;
 
 	// 根据数据资产配置决定执行线迹追踪还是生成抛射物
 	if (CachedConfig->FireType == EWeaponFireType::Hitscan)
@@ -43,19 +41,34 @@ void UMyCombatComponent::ExecuteAttack()
 	}
 }
 
-void UMyCombatComponent::SwitchToActiveWeapon(AMyWeaponBase* NewWeapon)
+bool UMyCombatComponent::SwitchToActiveWeapon(AMyWeaponBase* NewWeapon)
 {
+	if (!NewWeapon) return false;
+
+	// 先尝试获取网格，如果没有网格，直接拒绝装配，并报错！
+	if (!NewWeapon->GetWeaponMuzzleComponent())
+	{
+		UE_LOG(LogTemp, Error, TEXT("武器 [%s] 忘记配置静态网格！拒绝装配！"), *NewWeapon->GetName());
+		return false;
+	}
+
+	// 先尝试获取配置，如果忘了配数据，直接拒绝装配，并报错！
+	if (!NewWeapon->GetWeaponConfig())
+	{
+		UE_LOG(LogTemp, Error, TEXT("武器 [%s] 忘记配置 WeaponConfig 数据资产！拒绝装配！"), *NewWeapon->GetName());
+		return false;
+	}
+
 	// 缓存当前使用武器
 	CachedActiveWeapon = NewWeapon;
 
-	if (CachedActiveWeapon)
-	{
-		// 缓存当前武器网格
-		CachedWeaponMesh = CachedActiveWeapon->GetWeaponMuzzleComponent();
+	// 缓存当前武器网格
+	CachedWeaponMesh = CachedActiveWeapon->GetWeaponMuzzleComponent();
 
-		// 缓存武器携带的数据资产配置
-		CachedConfig = CachedActiveWeapon->GetWeaponConfig();
-	}
+	// 缓存武器携带的数据资产配置
+	CachedConfig = CachedActiveWeapon->GetWeaponConfig();
+
+	return true;
 }
 
 void UMyCombatComponent::SpawnDefaultWeapon()
@@ -71,8 +84,16 @@ void UMyCombatComponent::SpawnDefaultWeapon()
 	// 生成武器实体
 	AMyWeaponBase* SpawnedWeapon = GetWorld()->SpawnActor<AMyWeaponBase>(CachedOwner->GetDefaultWeaponClass(), SpawnParams);
 
-	// 将生成的武器切换为当前使用武器，并缓存相关数据
-	SwitchToActiveWeapon(SpawnedWeapon);
+	// 如果生成失败则退出
+	if (!SpawnedWeapon) return;
+
+	// 生成成功，实体在世界里了，但装配失败
+	if (!SwitchToActiveWeapon(SpawnedWeapon))
+	{
+		// 必须亲手杀掉刚才生成的实体，把它从关卡里抹除
+		SpawnedWeapon->Destroy();
+		return;
+	}
 
 	// 检查是否忘记设置插槽名
 	if (CachedConfig->WeaponSocketName.IsNone())
@@ -90,7 +111,7 @@ void UMyCombatComponent::SpawnDefaultWeapon()
 
 void UMyCombatComponent::AttachWeaponToSocket(AMyWeaponBase* SpawnedWeapon)
 {
-	CachedActiveWeapon->AttachToComponent(
+	SpawnedWeapon->AttachToComponent(
 		CachedOwner->GetMesh(),
 		FAttachmentTransformRules::SnapToTargetNotIncludingScale,
 		CachedConfig->WeaponSocketName
@@ -123,9 +144,6 @@ void UMyCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 
 void UMyCombatComponent::PerformHitscan()
 {
-	// 未识别到武器网格则退出
-	if (!CachedWeaponMesh) return;
-
 	// 检查是否忘记设置插槽名
 	if (CachedConfig->MuzzleSocketName.IsNone())
 	{
@@ -154,11 +172,11 @@ void UMyCombatComponent::PerformHitscan()
 // 待修改
 void UMyCombatComponent::SpawnProjectile()
 {
-	if (!CachedConfig->ProjectileClass) return;
+	if (!CachedConfig->ProjectileClass || !CachedWeaponMesh) return;
 
-	// 锁定生成位置和旋转，这些值计算出来后本帧内是固定的
-	const FVector Loc = CachedOwner->GetMesh()->GetSocketLocation(CachedConfig->MuzzleSocketName);
-	const FRotator Rot = CachedOwner->GetActorRotation();
+	// 从武器网格体插槽上获取枪口位置和旋转
+	const FVector Loc = CachedWeaponMesh->GetSocketLocation(CachedConfig->MuzzleSocketName);
+	const FRotator Rot = CachedWeaponMesh->GetSocketRotation(CachedConfig->MuzzleSocketName);
 
 	FActorSpawnParameters Params;
 	Params.Owner = GetOwner();

@@ -41,9 +41,8 @@ private:
 	// 召唤抛射物实体
 	void SpawnProjectile();
 	// 将 NewWeapon 切换为当前使用武器，并获取武器的网格与数据资产配置的接口，然后缓存它们
-	void SwitchToActiveWeapon(class AMyWeaponBase* NewWeapon);
-
-
+	// 设置为布尔值，缓存失败返回 false，用于在其他函数里进行条件判断
+	bool SwitchToActiveWeapon(class AMyWeaponBase* NewWeapon);
 
 
 	// 缓存组件拥有者的指针
