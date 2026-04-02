@@ -12,6 +12,12 @@ AMyWeaponBase::AMyWeaponBase()
 
 }
 
+UStaticMeshComponent* AMyWeaponBase::GetWeaponMuzzleComponent() const
+{
+	// 静态网格体也有插槽
+	return FindComponentByClass<UStaticMeshComponent>();
+}
+
 // Called when the game starts or when spawned
 void AMyWeaponBase::BeginPlay()
 {
@@ -25,4 +31,3 @@ void AMyWeaponBase::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 
 }
-

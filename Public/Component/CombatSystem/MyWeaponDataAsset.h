@@ -42,8 +42,18 @@ public:
     // 子弹速度
     UPROPERTY(EditAnywhere, Category = "Stats")
     float BulletSpeed = 1000.f;
+    // 子弹生命周期
+    UPROPERTY(EditAnywhere, Category = "Stats")
+    float BulletLifespan = 5.f;
 
-    // 选择枪口插槽，默认为 Muzzle_Socket
+    // 设置枪口插槽
+    // 当前可填写 Muzzle_Socket
     UPROPERTY(EditAnywhere, Category = "Visuals")
-    FName MuzzleSocketName = FName("Muzzle_Socket");
+    FName MuzzleSocketName;
+
+    // 设置角色身上的武器装备插槽
+    // 当前可填写 WeaponSocket
+    UPROPERTY(EditAnywhere, Category = "Visuals")
+    FName WeaponSocketName;
+
 };

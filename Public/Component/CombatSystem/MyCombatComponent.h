@@ -19,8 +19,12 @@ public:
 	// 在控制器里调用的唯一入口
 	void ExecuteAttack();
 
-	// 切换为当前使用武器的接口，由 Controller 或 Character 调用
+	// 将 NewWeapon 切换为当前使用武器，并获取武器的网格与数据资产配置的接口，然后缓存它们
+	// 由 Controller 或 Character 调用
 	void SwitchToActiveWeapon(class AMyWeaponBase* NewWeapon);
+
+	// 为拥有该组件的角色生成默认武器
+	void SpawnDefaultWeapon();
 
 protected:
 	// Called when the game starts
@@ -34,15 +38,31 @@ public:
 
 private:
 	// 执行 射线检测
-	void PerformHitscan(class UMyWeaponDataAsset* Config);
+	void PerformHitscan(const class UMyWeaponDataAsset* Config);
 	// 召唤抛射物实体
-	void SpawnProjectile(class UMyWeaponDataAsset* Config);
+	void SpawnProjectile(const class UMyWeaponDataAsset* Config);
+
 
 	// 缓存组件拥有者的指针
 	UPROPERTY()
-	TObjectPtr<class ACharacter> CachedOwner;
+	TObjectPtr<class ABaseCharacter> CachedOwner;
 
 	// 缓存当前使用的武器
 	UPROPERTY()
 	TObjectPtr<class AMyWeaponBase> CachedActiveWeapon;
+
+	// 缓存当前使用的武器的数据资产配置
+	// 获取数据资产配置的 GetWeaponConfig 被 const 保护，这里也要加 const
+	// 指针+const，保护的是指针指向的数据，不影响设置指针指向哪
+	UPROPERTY()
+	TObjectPtr<const class UMyWeaponDataAsset> CachedConfig;
+
+	// 缓存当前使用的武器的网格
+	// 静态网格也能使用插槽，且性能更好
+	UPROPERTY()
+	TObjectPtr<const class UStaticMeshComponent> CachedWeaponMesh;
+
+	// 缓存子弹子系统指针
+	UPROPERTY()
+	TObjectPtr<class UMyBulletSubsystem> CachedBulletSubsystem;
 };

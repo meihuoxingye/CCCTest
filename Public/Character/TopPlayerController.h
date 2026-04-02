@@ -36,7 +36,7 @@ protected:
 
 	// 缓存组件指针
 	UPROPERTY()
-	TObjectPtr<class UMyCombatComponent> MyCombatComp;
+	TObjectPtr<class UMyCombatComponent> CachedMyCombatComp;
 
 	// 缓存角色指针
 	UPROPERTY()
@@ -44,7 +44,7 @@ protected:
 
 	// 当控制器开始控制一个 Pawn 时触发，缓存找到的自定义输入移动组件与角色，只找一次
 	virtual void OnPossess(APawn* InPawn) override;
-	// 不再控制时将指针清空
+	// 当控制器不再控制时将指针清空
 	virtual void OnUnPossess() override;
 	/** 缓存找到的自定义输入移动组件，避免每帧都寻找 */
 

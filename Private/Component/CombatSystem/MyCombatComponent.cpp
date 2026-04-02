@@ -2,11 +2,17 @@
 
 
 #include "Component/CombatSystem/MyCombatComponent.h"
-#include "GameFramework/Character.h"
+// 基础角色类
+#include "Character/BaseCharacter.h"
+// 系统函数库，可用来调试打印
 #include "Kismet/KismetSystemLibrary.h"
+// 基础抛射物类
 #include "Weapon/Projectile/MyBaseProjectile.h"
+// 子弹子系统类
 #include "Weapon/AsyncLineTraceBullet/MyBulletSubsystem.h"
+// 武器基类
 #include "Weapon/MyWeaponBase.h"
+// 武器数据资产配置类
 #include "Component/CombatSystem/MyWeaponDataAsset.h"
 
 // Sets default values for this component's properties
@@ -24,25 +30,57 @@ void UMyCombatComponent::ExecuteAttack()
 	// 未设置武器数据资产配置或拥有组件者不是 Charater
 	if (!CachedActiveWeapon || !CachedOwner) return;
 
-	// 2. 核心：在判定时直接引用武器携带的数据资产
-	// 这就是你要求的“补上引用”，保证了逻辑始终基于当前武器的最新配置
-	UMyWeaponDataAsset* Config = CachedActiveWeapon->GetWeaponConfig();
-	if (!Config) return;
+	if (!CachedConfig) return;
 
 	// 根据数据资产配置决定执行线迹追踪还是生成抛射物
-	if (Config->FireType == EWeaponFireType::Hitscan)
+	if (CachedConfig->FireType == EWeaponFireType::Hitscan)
 	{
-		PerformHitscan(Config);
+		PerformHitscan(CachedConfig);
 	}
 	else
 	{
-		SpawnProjectile(Config);
+		SpawnProjectile(CachedConfig);
 	}
 }
 
 void UMyCombatComponent::SwitchToActiveWeapon(AMyWeaponBase* NewWeapon)
 {
+	// 缓存当前使用武器
 	CachedActiveWeapon = NewWeapon;
+
+	if (CachedActiveWeapon)
+	{
+		// 缓存当前武器网格
+		CachedWeaponMesh = CachedActiveWeapon->GetWeaponMuzzleComponent();
+
+		// 缓存武器携带的数据资产配置
+		CachedConfig = CachedActiveWeapon->GetWeaponConfig();
+	}
+}
+
+void UMyCombatComponent::SpawnDefaultWeapon()
+{
+	// 配置生成参数
+	// 定义一个生成参数清单，它的大多数值都是空的，所以需要手动填上最重要的两项
+	FActorSpawnParameters SpawnParams;
+	// 这把枪属于谁
+	SpawnParams.Owner = CachedOwner;
+	// 谁发起的这次行为
+	SpawnParams.Instigator = CachedOwner;
+
+	// 生成武器实体
+	if (AMyWeaponBase* SpawnedWeapon = GetWorld()->SpawnActor<AMyWeaponBase>(CachedOwner->GetDefaultWeaponClass(), SpawnParams))
+	{
+		// 将武器吸附到角色的骨骼插槽上
+		SpawnedWeapon->AttachToComponent(
+			CachedOwner->GetMesh(),
+			FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+			CachedConfig->WeaponSocketName
+		);
+
+		// 将生成的武器切换为当前使用武器，并缓存相关数据
+		SwitchToActiveWeapon(SpawnedWeapon);
+	}
 }
 
 // Called when the game starts
@@ -51,7 +89,13 @@ void UMyCombatComponent::BeginPlay()
 	Super::BeginPlay();
 
 	// 缓存组件拥有者
-	CachedOwner = Cast<ACharacter>(GetOwner());
+	CachedOwner = Cast<ABaseCharacter>(GetOwner());
+
+	// 缓存子弹子系统
+	CachedBulletSubsystem = GetWorld()->GetSubsystem<UMyBulletSubsystem>();
+
+	// 缓存当前使用武器与武器网格
+	// SwitchToActiveWeapon(AMyWeaponBase* NewWeapon)
 }
 
 
@@ -63,26 +107,43 @@ void UMyCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 	// ...
 }
 
-void UMyCombatComponent::PerformHitscan(UMyWeaponDataAsset* Config)
+void UMyCombatComponent::PerformHitscan(const UMyWeaponDataAsset* Config)
 {
-	FVector MuzzleLoc = CachedOwner->GetMesh()->GetSocketLocation(Config->MuzzleSocketName);
-	FVector Dir = CachedOwner->GetActorForwardVector();
+	// 未识别到武器网格则退出
+	if (!CachedWeaponMesh) return;
 
-	// 获取子系统并开火
-	UMyBulletSubsystem* BulletSubsystem = GetWorld()->GetSubsystem<UMyBulletSubsystem>();
-	if (BulletSubsystem)
+	// 检查是否忘记设置插槽名
+	if (Config->MuzzleSocketName.IsNone())
+	{
+		// 在控制台和日志中输出警告，%s 会替换为当前武器数据资产的名字
+		UE_LOG(LogTemp, Warning, TEXT("武器数据资产 [%s] 忘记设置 MuzzleSocketName 了！"), *Config->GetName());
+
+		// 可选：在此处直接返回，防止子弹从角色原点发射
+		return;
+	}
+
+	// 射线检测起点，某插槽位置
+	const FVector MuzzleLoc = CachedWeaponMesh->GetSocketLocation(Config->MuzzleSocketName);
+	// 获取插槽旋转，然后用 Vector() 将欧拉角（旋转）转为前向向量
+	const FVector Dir = CachedWeaponMesh->GetSocketRotation(Config->MuzzleSocketName).Vector();
+
+	// 发射子弹
+	if (CachedBulletSubsystem)
 	{
 		// 传参：谁开的枪，哪里开的，方向，速度（从 DataAsset 拿），寿命
-		BulletSubsystem->FireBullet(GetOwner(), MuzzleLoc, Dir, Config->BulletSpeed, 5.0f);
+		CachedBulletSubsystem->FireBullet(CachedOwner, MuzzleLoc, Dir, Config->BulletSpeed, Config->BulletLifespan);
 	}
 }
 
-void UMyCombatComponent::SpawnProjectile(UMyWeaponDataAsset* Config)
+
+// 待修改
+void UMyCombatComponent::SpawnProjectile(const UMyWeaponDataAsset* Config)
 {
 	if (!Config->ProjectileClass) return;
 
-	FVector Loc = CachedOwner->GetMesh()->GetSocketLocation(Config->MuzzleSocketName);
-	FRotator Rot = CachedOwner->GetActorRotation();
+	// 锁定生成位置和旋转，这些值计算出来后本帧内是固定的
+	const FVector Loc = CachedOwner->GetMesh()->GetSocketLocation(Config->MuzzleSocketName);
+	const FRotator Rot = CachedOwner->GetActorRotation();
 
 	FActorSpawnParameters Params;
 	Params.Owner = GetOwner();

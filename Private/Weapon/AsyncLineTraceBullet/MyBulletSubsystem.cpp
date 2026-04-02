@@ -5,7 +5,7 @@
 #include "Engine/World.h"
 #include "Kismet/KismetSystemLibrary.h"
 
-void UMyBulletSubsystem::FireBullet(AActor* InOwner, FVector StartLoc, FVector Direction, float Speed, float LifeTime)
+void UMyBulletSubsystem::FireBullet(AActor* InOwner, const FVector& StartLoc, const FVector& Direction, float Speed, float LifeTime)
 {
     FVirtualBulletData NewBullet;
     NewBullet.Position = StartLoc;
@@ -33,8 +33,8 @@ void UMyBulletSubsystem::Tick(float DeltaTime)
     {
         FVirtualBulletData& Bullet = ActiveBullets[i];
 
-        // 计算这一段位移
-        FVector NextLoc = Bullet.Position + (Bullet.Velocity * SubstepTime);
+        // 计算这一段位移,这一步计算的下一步位置，计算完就固定了
+        const FVector NextLoc = Bullet.Position + (Bullet.Velocity * SubstepTime);
 
         FHitResult Hit;
         FCollisionQueryParams Params;

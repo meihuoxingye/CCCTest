@@ -12,15 +12,19 @@
 // 自定义战斗组件
 #include "Component/CombatSystem/MyCombatComponent.h"
 
+// 基础武器类
+#include "Weapon/MyWeaponBase.h"
+
 // Sets default values
 ABaseCharacter::ABaseCharacter()
 {
  	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
 
-	MMAComponent = CreateDefaultSubobject<UMyMovementAttributeComponent>(TEXT("常用移动属性组件"));
-	MCComponent = CreateDefaultSubobject<UMyCombatComponent>(TEXT("自定义战斗组件"));
+	MMAComponent = CreateDefaultSubobject<UMyMovementAttributeComponent>(TEXT("MyMovementAttributeComponent"));
+	MCComponent = CreateDefaultSubobject<UMyCombatComponent>(TEXT("MyCombatComponent"));
 
+	
 }
 
 // Called when the game starts or when spawned
@@ -36,8 +40,15 @@ void ABaseCharacter::BeginPlay()
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationRoll = false;
 
-	
+	// 检查是否配置了武器类以及当前世界是否存在
+	if (DefaultWeaponClass || GetWorld())
+	{
+		// 生成默认武器
+		MCComponent->SpawnDefaultWeapon();
+	}
+
 }
+
 
 // Called every frame
 void ABaseCharacter::Tick(float DeltaTime)
@@ -52,4 +63,3 @@ void ABaseCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 
 }
-

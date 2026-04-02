@@ -59,7 +59,9 @@ class CCC_API UMyBulletSubsystem : public UWorldSubsystem, public FTickableGameO
 	
 public:
     // 外部调用入口：发射子弹
-    void FireBullet(AActor* InOwner, FVector StartLoc, FVector Direction, float Speed, float LifeTime);
+    // FVector 占 24 字节，按值传递会产生内存拷贝
+    // 只读的输入参数，最佳实践是使用常量引用
+    void FireBullet(AActor* InOwner, const FVector& StartLoc, const FVector& Direction, float Speed, float LifeTime);
 
     // --- FTickableGameObject 接口 ---
     virtual void Tick(float DeltaTime) override;

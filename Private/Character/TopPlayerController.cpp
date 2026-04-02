@@ -82,7 +82,7 @@ void ATopPlayerController::OnPossess(APawn* InPawn)
 		CachedMyCharacter = Cast<ACharacter>(InPawn);
 
 		// 缓存自定义战斗组件
-		MyCombatComp = InPawn->FindComponentByClass<UMyCombatComponent>();
+		CachedMyCombatComp = InPawn->FindComponentByClass<UMyCombatComponent>();
 	}
 }
 
@@ -126,7 +126,10 @@ void ATopPlayerController::StopJump()
 
 void ATopPlayerController::Attack()
 {
-	MyCombatComp->ExecuteAttack();
+	if (CachedMyCombatComp)
+	{
+		CachedMyCombatComp->ExecuteAttack();
+	}
 }
 
 void ATopPlayerController::AttackEnd()
