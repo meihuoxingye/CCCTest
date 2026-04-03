@@ -15,6 +15,9 @@
 // 基础武器类
 #include "Weapon/MyWeaponBase.h"
 
+// 角色属性数据资产配置
+#include "Character/CharacterAttributeDataAsset.h"
+
 // Sets default values
 ABaseCharacter::ABaseCharacter()
 {
@@ -23,8 +26,6 @@ ABaseCharacter::ABaseCharacter()
 
 	MMAComponent = CreateDefaultSubobject<UMyMovementAttributeComponent>(TEXT("MyMovementAttributeComponent"));
 	MCComponent = CreateDefaultSubobject<UMyCombatComponent>(TEXT("MyCombatComponent"));
-
-	
 }
 
 // Called when the game starts or when spawned
@@ -46,7 +47,6 @@ void ABaseCharacter::BeginPlay()
 		// 生成默认武器
 		MCComponent->SpawnDefaultWeapon();
 	}
-
 }
 
 

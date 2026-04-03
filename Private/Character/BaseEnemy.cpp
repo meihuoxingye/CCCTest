@@ -1,5 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "Component/MovementAttribute/MyMovementDataAsset.h"
+#include "Character/BaseEnemy.h"
 
+ABaseEnemy::ABaseEnemy()
+{
+
+}

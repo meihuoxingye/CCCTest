@@ -20,10 +20,6 @@ protected:
 	// Called when the game starts
 	virtual void BeginPlay() override;
 
-	// 存储指向数据资产的指针
-	// Configuration 配置
-	UPROPERTY(EditAnywhere, Category = "Movement Data Asset")
-	TObjectPtr<class UMyMovementDataAsset> MovementConfig;
     // 同步自定义移动属性
     void SyncMovementProperties();
 

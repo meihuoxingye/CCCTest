@@ -31,6 +31,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Combat")
 	TSubclassOf<class AMyWeaponBase> DefaultWeaponClass;
 
+	// 添加角色属性数据资产配置
+	UPROPERTY(EditAnywhere, Category = "Config")
+	TObjectPtr<const class UCharacterAttributeDataAsset> AttributeConfig;
+
 public:	
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
@@ -41,6 +45,8 @@ public:
 	// 给外接开放一个获取武器的接口
 	FORCEINLINE TSubclassOf<AMyWeaponBase> GetDefaultWeaponClass() const { return DefaultWeaponClass; }
 
+	// 给外接开放一个获取角色属性数据资产配置的接口
+	FORCEINLINE TObjectPtr<const UCharacterAttributeDataAsset> GetAttributeConfig() const { return AttributeConfig; }
 private:
 
 

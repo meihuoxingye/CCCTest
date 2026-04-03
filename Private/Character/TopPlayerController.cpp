@@ -13,9 +13,6 @@
 // 自定义移动控制组件
 #include "Component/MovementControl/MyMovementControlComponent.h"
 
-// 异步线迹追踪子弹子系统
-#include "Weapon/AsyncLineTraceBullet/MyBulletSubsystem.h"
-
 // 自定义战斗组件
 #include "Component/CombatSystem/MyCombatComponent.h"
 
@@ -73,17 +70,17 @@ void ATopPlayerController::OnPossess(APawn* InPawn)
 {
 	Super::OnPossess(InPawn);
 
-	if (InPawn)
-	{
-		// 只找自定义输入移动组件这一次，然后缓存
-		CachedMyMovementControlComp = InPawn->FindComponentByClass<UMyMovementControlComponent>();
+	if (InPawn) return;
 
-		// 缓存角色
-		CachedMyCharacter = Cast<ACharacter>(InPawn);
+	// 只找自定义输入移动组件这一次，然后缓存
+	CachedMyMovementControlComp = InPawn->FindComponentByClass<UMyMovementControlComponent>();
 
-		// 缓存自定义战斗组件
-		CachedMyCombatComp = InPawn->FindComponentByClass<UMyCombatComponent>();
-	}
+	// 缓存角色
+	CachedMyCharacter = Cast<ACharacter>(InPawn);
+
+	// 缓存自定义战斗组件
+	// 不用 CachedMyCharacter，如果转换失败这里也会崩
+	CachedMyCombatComp = InPawn->FindComponentByClass<UMyCombatComponent>();
 }
 
 void ATopPlayerController::OnUnPossess()

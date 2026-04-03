@@ -5,10 +5,10 @@
 
 // 移动组件
 #include "GameFramework/CharacterMovementComponent.h"
-// 角色
-#include "GameFramework/Character.h"
-// 移动数据资产配置
-#include "Component/MovementAttribute/MyMovementDataAsset.h"
+// 基础角色
+#include "Character/BaseCharacter.h"
+// 角色属性数据资产配置
+#include "Character/CharacterAttributeDataAsset.h"
 
 // Sets default values for this component's properties
 UMyMovementAttributeComponent::UMyMovementAttributeComponent()
@@ -33,13 +33,14 @@ void UMyMovementAttributeComponent::BeginPlay()
 
 void UMyMovementAttributeComponent::SyncMovementProperties()
 {
-	// 增加安全性检查：确保资产和所有者都存在
-	if (MovementConfig && GetOwner())
+	// 增加安全性检查：确保所有者存在
+	if (GetOwner())
 	{
-		if (ACharacter* OwnerCharacter = Cast<ACharacter>(GetOwner()))
+		if (ABaseCharacter* OwnerCharacter = Cast<ABaseCharacter>(GetOwner()))
 		{
+			const UCharacterAttributeDataAsset* MovementConfig = OwnerCharacter->GetAttributeConfig();
 			UCharacterMovementComponent* CMC = OwnerCharacter->GetCharacterMovement();
-			if (CMC)
+			if (CMC && MovementConfig)
 			{
 				// 从数据资产中读取数值并应用
 				CMC->MaxWalkSpeed = MovementConfig->MaxWalkSpeed;
