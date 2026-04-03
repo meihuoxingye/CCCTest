@@ -18,7 +18,7 @@ public:
 	AMyAIController();
 
 protected:
-	// 当目标被检测到
+	// 回调函数，当检测到目标时执行
 	void OnTargetDetected(AActor* Actor, struct FAIStimulus Stimulus);
 
 	// 感知组件
@@ -29,19 +29,19 @@ protected:
 	UPROPERTY()
 	TObjectPtr<class UAISenseConfig_Sight> SightConfig;
 private:
-	// 缓存 Pawn 指针
+	// 缓存被 AI 控制的 Pawn 指针
 	UPROPERTY()
 	TObjectPtr<APawn> CachedMyPawn;
 
-	// 缓存角色指针
+	// 缓存被 AI 控制的角色指针
 	UPROPERTY()
 	TObjectPtr<class ABaseCharacter> CachedMyCharacter;
 
-	// 缓存角色属性数据资产配置指针
+	// 缓存被 AI 控制的角色属性数据资产配置指针
 	UPROPERTY()
 	TObjectPtr<const class UCharacterAttributeDataAsset> CachedMyCharacterConfig;
 
-	// 缓存被感知目标的战斗组件指针
+	// 缓存被 AI 控制的 Pawn 的战斗组件指针
 	UPROPERTY()
 	TObjectPtr<class UMyCombatComponent> CachedMyCombatComp;
 

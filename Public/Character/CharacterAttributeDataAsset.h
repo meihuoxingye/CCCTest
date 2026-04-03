@@ -6,14 +6,16 @@
 #include "Engine/DataAsset.h"
 #include "CharacterAttributeDataAsset.generated.h"
 
-// 自定义枚举类，确定是玩家还是敌人
+// 自定义枚举类，确定是友方、敌人还是中立
 UENUM(BlueprintType)
 enum class ECharacterType : uint8
 {
-	// 玩家
-	Player	UMETA(DisplayName = "Player"),
+	// 友方
+	Friendly	UMETA(DisplayName = "Friendly"),
 	// 敌人
-	Enemy	UMETA(DisplayName = "Enemy")
+	Enemy	UMETA(DisplayName = "Enemy"),
+	// 中立
+	Neutral	UMETA(DisplayName = "Neutral")
 };
 
 // AI 检测等级
@@ -38,11 +40,15 @@ class CCC_API UCharacterAttributeDataAsset : public UPrimaryDataAsset
 public:
 	// 角色类型，枚举类
 	UPROPERTY(EditAnywhere, Category = "Logic")
-	ECharacterType CharacterType = ECharacterType::Player;
+	ECharacterType CharacterType = ECharacterType::Friendly;
 
 	// AI 检测等级，枚举类
 	UPROPERTY(EditAnywhere, Category = "Logic")
 	EAIDetectionLevel AIDetectionLevel = EAIDetectionLevel::NoPerception;
+
+	// AI 将检测的目标类型，数组形式
+	UPROPERTY(EditAnywhere, Category = "Logic", meta = (EditCondition = "AIDetectionLevel != EAIDetectionLevel::NoPerception", EditConditionHides))
+	TArray<ECharacterType> TargetTypes;
 
 	// 最大生命值
 	// 当前生命值应在对应类的成员变量里
@@ -54,12 +60,12 @@ public:
 	#pragma region AI_Perception
 	// 检测范围
 	// 有感知才会显示此项
-	UPROPERTY(EditAnywhere, Category = "Attributes|AI", meta = (EditCondition = "CharacterType == ECharacterType::Enemy && AIDetectionLevel != EAIDetectionLevel::NoPerception", EditConditionHides))
+	UPROPERTY(EditAnywhere, Category = "AIPerception", meta = (EditCondition = "CharacterType == ECharacterType::Enemy && AIDetectionLevel != EAIDetectionLevel::NoPerception", EditConditionHides))
 	float DetectionRange = 1200.f;
 
 	// 视角角度
 	// 有感知才会显示此项
-	UPROPERTY(EditAnywhere, Category = "Attributes|AI", meta = (EditCondition = "CharacterType == ECharacterType::Enemy && AIDetectionLevel != EAIDetectionLevel::NoPerception", EditConditionHides))
+	UPROPERTY(EditAnywhere, Category = "AIPerception", meta = (EditCondition = "CharacterType == ECharacterType::Enemy && AIDetectionLevel != EAIDetectionLevel::NoPerception", EditConditionHides))
 	float VisionAngle = 60.f;
 	#pragma endregion
 

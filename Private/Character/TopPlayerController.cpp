@@ -70,7 +70,7 @@ void ATopPlayerController::OnPossess(APawn* InPawn)
 {
 	Super::OnPossess(InPawn);
 
-	if (InPawn) return;
+	if (!InPawn) return;
 
 	// 只找自定义输入移动组件这一次，然后缓存
 	CachedMyMovementControlComp = InPawn->FindComponentByClass<UMyMovementControlComponent>();

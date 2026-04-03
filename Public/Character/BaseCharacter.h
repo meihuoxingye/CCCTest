@@ -27,6 +27,10 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<class UMyCombatComponent> MCComponent;
 
+	// 刺激源组件
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<class UAIPerceptionStimuliSourceComponent> StimuliSourceComp;
+
 	// 为角色指定专属的初始武器类
 	UPROPERTY(EditDefaultsOnly, Category = "Combat")
 	TSubclassOf<class AMyWeaponBase> DefaultWeaponClass;

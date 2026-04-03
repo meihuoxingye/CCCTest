@@ -30,12 +30,18 @@ AMyAIController::AMyAIController()
 	// 创建感知配置
 	SightConfig = CreateDefaultSubobject<UAISenseConfig_Sight>(TEXT("SightConfig"));
 
-	// 将配置应用到组件
+	// 将感知配置应用到组件
 	PerceptionComp->ConfigureSense(*SightConfig);
 	PerceptionComp->SetDominantSense(SightConfig->GetSenseImplementation());
 
 	// 绑定检测到后的回调函数
 	PerceptionComp->OnTargetPerceptionUpdated.AddDynamic(this, &AMyAIController::OnTargetDetected);
+
+	// 设置对敌人、友方和中立目标的检查
+	// 实际上并不使用虚幻自带的阵营系统，而用自己设置的标签判断，但这三行仍必须要有
+	SightConfig->DetectionByAffiliation.bDetectEnemies = true;
+	SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
+	SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
 }
 
 void AMyAIController::OnPossess(APawn* InPawn)
@@ -63,18 +69,15 @@ void AMyAIController::OnPossess(APawn* InPawn)
 		return;
 	}
 
-	// 缓存被控制的 Pawn
+
 	// AI 控制器不一定只控制角色
 	CachedMyPawn = InPawn;
 
-	// 缓存被控制的角色
 	CachedMyCharacter = Cast<ABaseCharacter>(InPawn);
 
-	// 缓存被控制的角色的属性资产配置
 	CachedMyCharacterConfig = CachedMyCharacter->GetAttributeConfig();
 	SyncPerceptionProperties();
 
-	// 缓存自定义战斗组件
 	CachedMyCombatComp = InPawn->FindComponentByClass<UMyCombatComponent>();
 }
 
@@ -93,9 +96,11 @@ void AMyAIController::OnUnPossess()
 
 void AMyAIController::OnTargetDetected(AActor* Actor, FAIStimulus Stimulus)
 {
-	// 检查战斗组件是否存在，且当前是“看见”目标还是“跟丢”目标
-	if (CachedMyCombatComp && Stimulus.WasSuccessfullySensed())
+	// 检查战斗组件、属性配置是否存在，且当前是看见目标还是跟丢目标
+	// 看见目标
+	if (CachedMyCombatComp && CachedMyCharacterConfig && Stimulus.WasSuccessfullySensed())
 	{
+		// 补充
 		/**
 		设置焦点与对这个交点的转向优先级
 		若设置了角色移动组件里的 bUseControllerRotationYaw，那么角色就会自动转向焦点位置
@@ -108,9 +113,39 @@ void AMyAIController::OnTargetDetected(AActor* Actor, FAIStimulus Stimulus)
 		*/
 
 
-		// 执行被感知目标的战斗组件的开火函数
-		CachedMyCombatComp->ExecuteAttack();
+		// 是否为有效目标
+		bool bIsValidTarget = false;
+
+		// 遍历被控制的 Pawn 的检测目标类型数组
+		for (ECharacterType TargetType : CachedMyCharacterConfig->TargetTypes)
+		{
+			FName TargetTagToLookFor;
+
+			// 将枚举翻译为对应的 Tag
+			switch (TargetType)
+			{
+			case ECharacterType::Friendly:	TargetTagToLookFor = FName("Friendly");	break;
+			case ECharacterType::Enemy:		TargetTagToLookFor = FName("Enemy");	break;
+			case ECharacterType::Neutral:	TargetTagToLookFor = FName("Neutral");	break;
+			}
+
+			// 检查进入视线的目标，身上有没有这个 Tag
+			if (!TargetTagToLookFor.IsNone() && Actor->ActorHasTag(TargetTagToLookFor))
+			{
+				bIsValidTarget = true;
+				// 只要确认应该感知到这个进入视线的目标，就退出循环
+				break; 
+			}
+		}
+
+		// 如果在名单上找到了匹配项，则开火
+		if (bIsValidTarget)
+		{
+			CachedMyCombatComp->ExecuteAttack();
+		}
 	}
+
+	// 跟丢目标
 	else
 	{
 		

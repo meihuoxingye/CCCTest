@@ -18,6 +18,11 @@
 // 角色属性数据资产配置
 #include "Character/CharacterAttributeDataAsset.h"
 
+// 刺激源组件，使此类型能够被感知系统识别到
+#include "Perception/AIPerceptionStimuliSourceComponent.h"
+// 视觉感官标识类，设置发送哪种信号给接收者（视觉 Sight、听觉 Hearing、伤害 Damage等）
+#include "Perception/AISense_Sight.h"  
+
 // Sets default values
 ABaseCharacter::ABaseCharacter()
 {
@@ -26,6 +31,14 @@ ABaseCharacter::ABaseCharacter()
 
 	MMAComponent = CreateDefaultSubobject<UMyMovementAttributeComponent>(TEXT("MyMovementAttributeComponent"));
 	MCComponent = CreateDefaultSubobject<UMyCombatComponent>(TEXT("MyCombatComponent"));
+
+	// 刺激源组件
+	StimuliSourceComp = CreateDefaultSubobject<UAIPerceptionStimuliSourceComponent>(TEXT("StimuliSourceComp"));
+	if (StimuliSourceComp)
+	{
+		// 把此类型发送的信号注册到视觉频道
+		StimuliSourceComp->RegisterForSense(UAISense_Sight::StaticClass());
+	}
 }
 
 // Called when the game starts or when spawned
@@ -46,6 +59,21 @@ void ABaseCharacter::BeginPlay()
 	{
 		// 生成默认武器
 		MCComponent->SpawnDefaultWeapon();
+	}
+
+	// 根据属性配置设置自身标签
+	if (AttributeConfig)
+	{
+		FName MyTag;
+		switch (AttributeConfig->CharacterType)
+		{
+		case ECharacterType::Friendly:	MyTag = FName("Friendly");	break;
+		case ECharacterType::Enemy:		MyTag = FName("Enemy");		break;
+		case ECharacterType::Neutral:	MyTag = FName("Neutral");	break;
+		}
+
+		// 将翻译好的 Tag 贴到自己身上
+		this->Tags.AddUnique(MyTag);
 	}
 }
 
