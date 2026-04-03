@@ -19,6 +19,8 @@ public:
 
 protected:
 	// 回调函数，当检测到目标时执行
+	// 动态多播委托必须依赖反射系统
+	UFUNCTION()
 	void OnTargetDetected(AActor* Actor, struct FAIStimulus Stimulus);
 
 	// 感知组件

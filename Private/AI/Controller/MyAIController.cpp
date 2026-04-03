@@ -93,9 +93,10 @@ void AMyAIController::OnUnPossess()
 }
 
 
-
 void AMyAIController::OnTargetDetected(AActor* Actor, FAIStimulus Stimulus)
 {
+	if (!Actor) return;
+
 	// 检查战斗组件、属性配置是否存在，且当前是看见目标还是跟丢目标
 	// 看见目标
 	if (CachedMyCombatComp && CachedMyCharacterConfig && Stimulus.WasSuccessfullySensed())
@@ -160,4 +161,11 @@ void AMyAIController::SyncPerceptionProperties()
 	SightConfig->LoseSightRadius = CachedMyCharacterConfig->DetectionRange + 200.f;
 	// 视角
 	SightConfig->PeripheralVisionAngleDegrees = CachedMyCharacterConfig->VisionAngle;
+
+	// 重启一次视觉频道，强制底层清空旧缓存并重新读取新数值
+	if (PerceptionComp)
+	{
+		PerceptionComp->SetSenseEnabled(UAISense_Sight::StaticClass(), false);
+		PerceptionComp->SetSenseEnabled(UAISense_Sight::StaticClass(), true);
+	}
 }
