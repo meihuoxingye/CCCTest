@@ -39,11 +39,11 @@ public:
 	// 外部调用：按下左键 / AI 决定开火
 	// 在外部把开火的战斗组件传入到子系统定义的结构体中，将此结构体添加到开火名单数组中
 	// 开火间隔参数 Interval 也在外部传进来，而不是在内部调用其他头文件的值，优化性能
-	void RegisterShooter(UMyCombatComponent* Shooter, float Interval);
+	void RegisterShooter(class UMyCombatComponent* Shooter, float Interval);
 
 	// 外部调用：松开左键 / AI 停止开火
 	// 通过比对停止开火对象的战斗组件，从开火名单数组中删去对应的结构体
-	void UnregisterShooter(UMyCombatComponent* Shooter);
+	void UnregisterShooter(class UMyCombatComponent* Shooter);
 
 	// --- FTickableGameObject 接口 ---
 	virtual void Tick(float DeltaTime) override;

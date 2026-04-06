@@ -11,7 +11,7 @@ void UFiringSubsystem::RegisterShooter(UMyCombatComponent* Shooter, float Interv
 	if (!Shooter) return;
 
 	// 检查数组里的结构体的成员变量 CombatComp 是否与传入的战斗组件 Shooter 相同
-	// 传入 Lambda 逻辑，遍历数组中结构体里的成员变量 CombatComp 到 Data，与 Shooter 比较
+	// 传入 Lambda 逻辑，遍历数组中结构体传给 Data，然后 Data 的成员变量 CombatComp 与 Shooter 比较
 	bool bAlreadyExists = ActiveShooters.ContainsByPredicate([Shooter](const FActiveShooterData& Data) {
 		return Data.CombatComp == Shooter;
 		});
@@ -33,7 +33,7 @@ void UFiringSubsystem::UnregisterShooter(UMyCombatComponent* Shooter)
 
 	// 使用 RemoveAllSwap 实现 O(1) 级别的极速删除
 	// ActiveShooters.RemoveAllSwap 会把数组里所有结构体传入 Data，而外部调用传入的 UMyCombatComponent 会传入 Shooter
-	// Shooter 与 Data 传入 Lambda 逻辑，遍历数组中结构体里的成员变量 CombatComp 到 Data，与 Shooter 比较
+	// Shooter 与 Data 传入 Lambda 逻辑，遍历数组中结构体传给 Data，然后 Data 的成员变量 CombatComp 与 Shooter 比较
 	// 为什么不直接删，因为要删的是数组里的结构体，判断是否要删的条件是比对结构体里的成员变量
 	ActiveShooters.RemoveAllSwap([Shooter](const FActiveShooterData& Data) {
 		return Data.CombatComp == Shooter;
