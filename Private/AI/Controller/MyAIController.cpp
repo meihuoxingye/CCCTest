@@ -139,17 +139,18 @@ void AMyAIController::OnTargetDetected(AActor* Actor, FAIStimulus Stimulus)
 			}
 		}
 
-		// 如果在名单上找到了匹配项，则开火
+		// 如果感知到的目标属于被控制 Pawn 的目标类型数组，则开火
 		if (bIsValidTarget)
 		{
-			CachedMyCombatComp->ExecuteAttack();
+			CachedMyCombatComp->StartWeaponFire();
 		}
 	}
 
 	// 跟丢目标
 	else
 	{
-		
+		// 告诉战斗组件：停火！被控制 Pawn 的战斗组件会自动去子系统里注销自己
+		CachedMyCombatComp->StopWeaponFire();
 	}
 }
 

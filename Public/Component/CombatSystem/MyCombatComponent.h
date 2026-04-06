@@ -16,8 +16,12 @@ public:
 	// Sets default values for this component's properties
 	UMyCombatComponent();
 
-	// 在控制器里调用的唯一入口
+	// 外部调用，执行开火逻辑
 	void ExecuteAttack();
+	// 外部调用，将组件注册进射击子系统的开火冷却名单数组中
+	void StartWeaponFire();
+	// 外部调用，将组件从射击子系统的开火冷却名单数组中移除
+	void StopWeaponFire();
 
 	// 为拥有该组件的角色生成默认武器
 	// 由基础角色调用

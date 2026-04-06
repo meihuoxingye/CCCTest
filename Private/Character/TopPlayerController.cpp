@@ -61,7 +61,8 @@ void ATopPlayerController::SetupInputComponent()
 		EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &ATopPlayerController::Move);
 		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &ATopPlayerController::Jump);
 		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &ATopPlayerController::StopJump);
-		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Triggered, this, &ATopPlayerController::Attack);
+		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Started, this, &ATopPlayerController::Attack);
+		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Completed, this, &ATopPlayerController::AttackEnd);
 	}
 
 }
@@ -125,11 +126,16 @@ void ATopPlayerController::Attack()
 {
 	if (CachedMyCombatComp)
 	{
-		CachedMyCombatComp->ExecuteAttack();
+		// 告诉战斗组件：开始射击
+		CachedMyCombatComp->StartWeaponFire();
 	}
 }
 
 void ATopPlayerController::AttackEnd()
 {
-
+	if (CachedMyCombatComp)
+	{
+		// 告诉战斗组件：停止射击
+		CachedMyCombatComp->StopWeaponFire();
+	}
 }

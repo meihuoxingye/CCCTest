@@ -14,6 +14,8 @@
 #include "Weapon/MyWeaponBase.h"
 // 武器数据资产配置类
 #include "Component/CombatSystem/MyWeaponDataAsset.h"
+//
+#include "Weapon/FiringSubsystem.h"
 
 // Sets default values for this component's properties
 UMyCombatComponent::UMyCombatComponent()
@@ -69,6 +71,26 @@ bool UMyCombatComponent::SwitchToActiveWeapon(AMyWeaponBase* NewWeapon)
 	CachedConfig = CachedActiveWeapon->GetWeaponConfig();
 
 	return true;
+}
+
+void UMyCombatComponent::StartWeaponFire()
+{
+	if (!CachedActiveWeapon || !CachedConfig) return;
+
+	// 获取开火子系统，把我自己注册进“射击大名单”
+	if (UFiringSubsystem* CombatSubsystem = GetWorld()->GetSubsystem<UFiringSubsystem>())
+	{
+		CombatSubsystem->RegisterShooter(this, CachedConfig->RefireTime);
+	}
+}
+
+void UMyCombatComponent::StopWeaponFire()
+{
+	// 告诉开火子系统，把我从大名单里划掉
+	if (UFiringSubsystem* CombatSubsystem = GetWorld()->GetSubsystem<UFiringSubsystem>())
+	{
+		CombatSubsystem->UnregisterShooter(this);
+	}
 }
 
 void UMyCombatComponent::SpawnDefaultWeapon()

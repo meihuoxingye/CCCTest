@@ -27,7 +27,7 @@ void UMyBulletSubsystem::Tick(float DeltaTime)
     Accumulator += DeltaTime;
 
     // 性能优化策略：用 while 循环！只要累积时间超过 1/30，就按标准的 1/30 切割并执行
-    // 
+    // 宁愿多算几次，也不能让子弹穿墙，保证每 1/30s 检测一次碰撞
     while (Accumulator >= TargetUpdateInterval)
     {
         // 每次只消耗掉 1/30 秒，没用完的时间留在 Accumulator 里等下一帧！
