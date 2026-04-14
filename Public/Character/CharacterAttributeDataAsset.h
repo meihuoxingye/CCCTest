@@ -69,6 +69,15 @@ public:
 	float VisionAngle = 60.f;
 	#pragma endregion
 
+
+	// --- 组队功能配置 ---
+	UPROPERTY(EditAnywhere, Category = "Logic|Squad")
+	bool bEnableSquadGrouping = false; // 是否启用动态组队功能
+
+	UPROPERTY(EditAnywhere, Category = "Logic|Squad", meta = (EditCondition = "bEnableSquadGrouping"))
+	float GroupingRadius = 800.f; // 感应队友的半径
+
+
 	#pragma region 常用移动属性
 	UPROPERTY(EditAnywhere, Category = "Common Movement Properties")
 	float MaxWalkSpeed = 600.f;

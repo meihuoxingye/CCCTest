@@ -23,6 +23,9 @@
 // 视觉感官标识类，设置发送哪种信号给接收者（视觉 Sight、听觉 Hearing、伤害 Damage等）
 #include "Perception/AISense_Sight.h"  
 
+// 组队子系统
+#include "SquadUp/MySquadSubsystem.h"
+
 // Sets default values
 ABaseCharacter::ABaseCharacter()
 {
@@ -75,6 +78,28 @@ void ABaseCharacter::BeginPlay()
 		// 将翻译好的 Tag 贴到自己身上
 		this->Tags.AddUnique(MyTag);
 	}
+
+
+	// 只要配置里开启了组队功能，就去子系统注册，不分敌我
+	if (AttributeConfig && AttributeConfig->bEnableSquadGrouping)
+	{
+		if (UMySquadSubsystem* SquadSub = GetWorld()->GetSubsystem<UMySquadSubsystem>())
+		{
+			SquadSub->RegisterCandidate(this); //
+		}
+	}
+}
+
+void ABaseCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// 销毁时自动注销
+	if (UMySquadSubsystem* SquadSub = GetWorld()->GetSubsystem<UMySquadSubsystem>())
+	{
+		SquadSub->UnregisterCandidate(this); //
+	}
+	
+	// 2. 必须调用基类的 EndPlay（通常放在函数末尾）
+	Super::EndPlay(EndPlayReason);
 }
 
 

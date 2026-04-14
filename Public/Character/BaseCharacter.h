@@ -18,6 +18,8 @@ public:
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
+	// EEndPlayReason::Type EndPlayReason，这个 Actor 究竟是因为什么原因而停止运行
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	// 常用移动属性组件
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
