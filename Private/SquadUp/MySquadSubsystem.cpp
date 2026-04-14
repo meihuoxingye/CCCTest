@@ -55,6 +55,10 @@ void UMySquadSubsystem::UpdateGroupingLogic()
         {
             FSquadGroup NewGroup;
             for (auto* M : Found) { NewGroup.Members.Add(M); Candidates.Remove(M); }
+
+            // 给每个小组一个随机的初始时间偏移，让它们的 Y 轴上下移动节奏错开
+            NewGroup.YTimer = FMath::RandRange(0.f, 6.28f);
+
             ActiveGroups.Add(NewGroup);
             --i;
         }
@@ -66,6 +70,7 @@ void UMySquadSubsystem::UpdateMovementLogic(float DeltaTime)
     APawn* Player = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
     if (!Player) return;
 
+    // 1. 基础移动逻辑计算
     for (auto& Group : ActiveGroups)
     {
         FVector SumPos = FVector::ZeroVector;
@@ -77,12 +82,31 @@ void UMySquadSubsystem::UpdateMovementLogic(float DeltaTime)
         FVector DirToPlayer = (Player->GetActorLocation() - Center).GetSafeNormal();
         float Dist = FVector::Dist(Center, Player->GetActorLocation());
 
-        // 战术位移
         FVector Base = Center;
         if (Dist > 800.f) Base += DirToPlayer * 100.f;
         else if (Dist < 400.f) Base -= DirToPlayer * 150.f;
 
-        // Y轴波动走位
+        // --- 新增：组间斥力逻辑 ---
+        FVector RepulsionForce = FVector::ZeroVector;
+        float GroupAvoidanceRadius = 400.f; // 组与组之间的安全距离
+
+        for (const auto& OtherGroup : ActiveGroups)
+        {
+            // 不要和自己排斥
+            if (&Group == &OtherGroup) continue;
+
+            float GroupDist = FVector::Dist(Group.AnchorLocation, OtherGroup.AnchorLocation);
+            if (GroupDist < GroupAvoidanceRadius && GroupDist > 0.1f)
+            {
+                // 计算排斥方向：从“他人”指向“自己”
+                FVector PushDir = (Group.AnchorLocation - OtherGroup.AnchorLocation).GetSafeNormal();
+                // 距离越近，推力越大
+                RepulsionForce += PushDir * (GroupAvoidanceRadius - GroupDist);
+            }
+        }
+        Base += RepulsionForce; // 应用斥力，将小组中心推开
+        // -----------------------
+
         Group.YTimer += DeltaTime * 2.0f;
         Group.AnchorLocation = FVector(Base.X, Player->GetActorLocation().Y + FMath::Sin(Group.YTimer) * 200.f, Base.Z);
     }
@@ -95,8 +119,13 @@ FVector UMySquadSubsystem::GetTacticalLocation(ABaseCharacter* Character)
         int32 Idx = Group.Members.Find(Character);
         if (Idx != INDEX_NONE)
         {
-            // 每个成员根据索引获得偏移，且带有随机抖动
-            return Group.AnchorLocation + FVector(Idx * -100.f, Idx * 50.f, 0.f) + FVector(FMath::RandRange(-20.f, 20.f));
+            // 调大 X 和 Y 的间距（例如从 100 调到 150）
+            FVector FormationOffset = FVector(Idx * -150.f, Idx * 100.f, 0.f);
+
+            // 增加一点随机扰动，防止过于僵硬
+            FVector RandomJitter = FVector(FMath::RandRange(-30.f, 30.f), FMath::RandRange(-30.f, 30.f), 0.f);
+
+            return Group.AnchorLocation + FormationOffset + RandomJitter;
         }
     }
     return Character->GetActorLocation();

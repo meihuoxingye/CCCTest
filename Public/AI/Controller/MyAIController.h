@@ -16,6 +16,7 @@ class CCC_API AMyAIController : public AAIController
 	
 public:
 	AMyAIController();
+	virtual void Tick(float DeltaTime) override;
 
 protected:
 	// 回调函数，当检测到目标时执行

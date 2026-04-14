@@ -37,6 +37,11 @@ public:
     virtual ETickableTickType GetTickableTickType() const override { return ETickableTickType::Always; }
     virtual TStatId GetStatId() const override { RETURN_QUICK_DECLARE_CYCLE_STAT(UMySquadSubsystem, STATGROUP_Tickables); }
 
+    /** * 公开接口：允许 AI 控制器获取当前的候选人列表进行避障计算
+     * 使用 FORCEINLINE 保证性能，const 确保安全性
+     */
+    FORCEINLINE const TArray<TWeakObjectPtr<class ABaseCharacter>>& GetCandidates() const { return Candidates; }
+
 private:
     UPROPERTY()
     TArray<TWeakObjectPtr<class ABaseCharacter>> Candidates; // 待组队池

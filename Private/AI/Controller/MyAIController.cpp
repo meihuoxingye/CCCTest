@@ -22,6 +22,14 @@
 // 基础感知数据结构，包含 FAIStimulus 数据结构
 #include "Perception/AIPerceptionTypes.h"
 
+// 组队子系统
+#include "SquadUp/MySquadSubsystem.h"
+// 规避工具
+#include "Avoidance/MyAvoidanceUtils.h"
+
+// 移动组件
+#include "GameFramework/CharacterMovementComponent.h"
+
 AMyAIController::AMyAIController()
 {
 	// 创建感知组件
@@ -42,6 +50,34 @@ AMyAIController::AMyAIController()
 	SightConfig->DetectionByAffiliation.bDetectEnemies = true;
 	SightConfig->DetectionByAffiliation.bDetectFriendlies = true;
 	SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
+}
+
+void AMyAIController::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	if (!CachedMyCharacter) return;
+
+	UMySquadSubsystem* SquadSub = GetWorld()->GetSubsystem<UMySquadSubsystem>();
+	if (!SquadSub) return;
+
+	// 1. 获取战术期望：我要去哪？
+	FVector TargetLoc = SquadSub->GetTacticalLocation(CachedMyCharacter);
+	FVector DesiredDir = (TargetLoc - CachedMyCharacter->GetActorLocation()).GetSafeNormal();
+	FVector DesiredVel = DesiredDir * CachedMyCharacter->GetCharacterMovement()->MaxWalkSpeed;
+
+	// 2. 委托工具类计算避障：怎么不撞人地去那？
+	// 传入当前状态和子系统里的全场候选人
+	FVector ComputedVel = UMyAvoidanceUtils::CalculateAvoidanceVelocity(
+		CachedMyCharacter->GetActorLocation(),
+		CachedMyCharacter->GetVelocity(),
+		DesiredVel,
+		CachedMyCharacter->GetCharacterMovement()->MaxWalkSpeed,
+		SquadSub->GetCandidates()
+	);
+
+	// 3. 执行最终位移
+	CachedMyCharacter->AddMovementInput(ComputedVel.GetSafeNormal(), 1.0f);
 }
 
 void AMyAIController::OnPossess(APawn* InPawn)
