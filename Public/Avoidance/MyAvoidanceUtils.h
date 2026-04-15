@@ -35,4 +35,13 @@ public:
 private:
     // 计算碰撞预警时间 (Time To Collision)
     static float GetTimeToCollision(const FVector& RelPos, const FVector& RelVel, float Radius);
+
+    /**
+ * 判定目标是否在锥形范围内
+ * @param ConeOrigin 锥形顶点（玩家位置）
+ * @param ConeDirection 锥形朝向（玩家前向向量）
+ * @param TargetPos 目标位置
+ * @param AngleDegrees 锥形半角角度
+ */
+    static bool IsInsideCone(const FVector& ConeOrigin, const FVector& ConeDirection, const FVector& TargetPos, float AngleDegrees);
 };

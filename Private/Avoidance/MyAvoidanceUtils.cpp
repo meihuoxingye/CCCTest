@@ -65,3 +65,10 @@ float UMyAvoidanceUtils::GetTimeToCollision(const FVector& RelPos, const FVector
     float t = (-b - FMath::Sqrt(Discriminant)) / (2.0f * a);
     return (t > 0) ? t : -1.f;
 }
+
+bool UMyAvoidanceUtils::IsInsideCone(const FVector& ConeOrigin, const FVector& ConeDirection, const FVector& TargetPos, float AngleDegrees)
+{
+    FVector DirToTarget = (TargetPos - ConeOrigin).GetSafeNormal();
+    float CosAngle = FMath::Cos(FMath::DegreesToRadians(AngleDegrees));
+    return FVector::DotProduct(ConeDirection, DirToTarget) > CosAngle;
+}

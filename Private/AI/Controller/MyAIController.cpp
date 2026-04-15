@@ -58,6 +58,12 @@ void AMyAIController::Tick(float DeltaTime)
 
 	if (!CachedMyCharacter) return;
 
+	// 如果正在开火，直接跳过位移输入，实现“射击时停止移动”
+	//if (CachedMyCombatComp && CachedMyCombatComp->IsCurrentlyFiring())
+	//{
+	//	return;
+	//}
+
 	UMySquadSubsystem* SquadSub = GetWorld()->GetSubsystem<UMySquadSubsystem>();
 	if (!SquadSub) return;
 
@@ -105,6 +111,12 @@ void AMyAIController::OnPossess(APawn* InPawn)
 		return;
 	}
 
+	// 先尝试获取战斗组件，获取失败则退出并报错！
+	if (!Cast<ABaseCharacter>(InPawn)->GetCombatComponent())
+	{
+		UE_LOG(LogTemp, Error, TEXT("获取 Pawn[%s] 装换为的角色的战斗组件失败"), *InPawn->GetName());
+		return;
+	}
 
 	// AI 控制器不一定只控制角色
 	CachedMyPawn = InPawn;
@@ -114,7 +126,7 @@ void AMyAIController::OnPossess(APawn* InPawn)
 	CachedMyCharacterConfig = CachedMyCharacter->GetAttributeConfig();
 	SyncPerceptionProperties();
 
-	CachedMyCombatComp = InPawn->FindComponentByClass<UMyCombatComponent>();
+	CachedMyCombatComp = CachedMyCharacter->GetCombatComponent();
 }
 
 void AMyAIController::OnUnPossess()

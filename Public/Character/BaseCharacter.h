@@ -53,6 +53,10 @@ public:
 
 	// 给外接开放一个获取角色属性数据资产配置的接口
 	FORCEINLINE TObjectPtr<const UCharacterAttributeDataAsset> GetAttributeConfig() const { return AttributeConfig; }
+
+	// 给外接开放一个获取战斗组件的接口
+	FORCEINLINE TObjectPtr<UMyCombatComponent> GetCombatComponent() const { return MCComponent; }
+
 private:
 
 

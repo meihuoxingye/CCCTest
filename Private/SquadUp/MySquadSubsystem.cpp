@@ -70,47 +70,68 @@ void UMySquadSubsystem::UpdateMovementLogic(float DeltaTime)
     APawn* Player = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
     if (!Player) return;
 
-    // 1. 基础移动逻辑计算
+    FVector PlayerLoc = Player->GetActorLocation();
+    FVector PlayerForward = Player->GetActorForwardVector(); // 以角色为顶点的锥形方向
+
     for (auto& Group : ActiveGroups)
     {
-        FVector SumPos = FVector::ZeroVector;
-        int32 Count = 0;
-        for (auto& M : Group.Members) if (M.IsValid()) { SumPos += M->GetActorLocation(); Count++; }
-        if (Count == 0) continue;
+        // 1. 计算小组当前重心
+        FVector Center = GetGroupCenter(Group); // 提取出的计算重心函数
+        FVector DirToGroup = (Center - PlayerLoc).GetSafeNormal();
 
-        FVector Center = SumPos / Count;
-        FVector DirToPlayer = (Player->GetActorLocation() - Center).GetSafeNormal();
-        float Dist = FVector::Dist(Center, Player->GetActorLocation());
+        // 2. 锥形范围判定 (使用点积)
+        // 假设锥形半角为 45 度，cos(45) ≈ 0.707
+        float DotValue = FVector::DotProduct(PlayerForward, DirToGroup);
+        bool bInCone = DotValue > 0.707f;
 
-        FVector Base = Center;
-        if (Dist > 800.f) Base += DirToPlayer * 100.f;
-        else if (Dist < 400.f) Base -= DirToPlayer * 150.f;
-
-        // --- 新增：组间斥力逻辑 ---
-        FVector RepulsionForce = FVector::ZeroVector;
-        float GroupAvoidanceRadius = 400.f; // 组与组之间的安全距离
-
-        for (const auto& OtherGroup : ActiveGroups)
+        // 3. 检查小组成员是否正在射击 (射击时停止移动)
+        /*
+        bool bAnyMemberShooting = false;
+        for (auto& M : Group.Members)
         {
-            // 不要和自己排斥
-            if (&Group == &OtherGroup) continue;
-
-            float GroupDist = FVector::Dist(Group.AnchorLocation, OtherGroup.AnchorLocation);
-            if (GroupDist < GroupAvoidanceRadius && GroupDist > 0.1f)
+            if (ABaseCharacter* BC = Cast<ABaseCharacter>(M.Get()))
             {
-                // 计算排斥方向：从“他人”指向“自己”
-                FVector PushDir = (Group.AnchorLocation - OtherGroup.AnchorLocation).GetSafeNormal();
-                // 距离越近，推力越大
-                RepulsionForce += PushDir * (GroupAvoidanceRadius - GroupDist);
+                // 这里需要你在 CombatComponent 里加一个 IsShooting() 接口
+                // 或者通过检测是否在 FiringSubsystem 的名单里
+                if (BC->GetCombatComponent()->IsCurrentlyFiring())
+                {
+                    bAnyMemberShooting = true;
+                    break;
+                }
             }
         }
-        Base += RepulsionForce; // 应用斥力，将小组中心推开
-        // -----------------------
+        */
 
-        Group.YTimer += DeltaTime * 2.0f;
-        Group.AnchorLocation = FVector(Base.X, Player->GetActorLocation().Y + FMath::Sin(Group.YTimer) * 200.f, Base.Z);
+        // 4. 状态机驱动位移
+        /*
+        if (bAnyMemberShooting)
+        {
+            // 射击时：锁定锚点不动
+            continue;
+        }
+        */
+
+        if (!bInCone)
+        {
+            // 范围外：主动进入锥形范围
+            // 计算目标：玩家前方的一个点
+            FVector TargetPoint = PlayerLoc + (PlayerForward * 600.f);
+            Group.AnchorLocation = FMath::VInterpTo(Group.AnchorLocation, TargetPoint, DeltaTime, 1.5f);
+        }
+        else
+        {
+            // 范围内：缓慢上下来回移动 (一会动一会不动可以通过计时器实现)
+            Group.YTimer += DeltaTime * 1.0f; // 降低频率
+            float YWave = FMath::Sin(Group.YTimer) * 150.f;
+
+            // 缓慢向玩家平移，同时保持 Y 轴震荡
+            FVector SlowMove = FMath::VInterpTo(Group.AnchorLocation, PlayerLoc + (DirToGroup * 400.f), DeltaTime, 0.5f);
+            Group.AnchorLocation = FVector(SlowMove.X, SlowMove.Y + YWave, SlowMove.Z);
+        }
     }
 }
+
+
 
 FVector UMySquadSubsystem::GetTacticalLocation(ABaseCharacter* Character)
 {
@@ -129,4 +150,22 @@ FVector UMySquadSubsystem::GetTacticalLocation(ABaseCharacter* Character)
         }
     }
     return Character->GetActorLocation();
+}
+
+FVector UMySquadSubsystem::GetGroupCenter(const FSquadGroup& Group) const
+{
+    FVector SumLocation = FVector::ZeroVector;
+    int32 ValidCount = 0;
+
+    for (const auto& MemberPtr : Group.Members)
+    {
+        if (ABaseCharacter* Member = MemberPtr.Get())
+        {
+            SumLocation += Member->GetActorLocation();
+            ValidCount++;
+        }
+    }
+
+    // 防止除以 0（万一小组里没人了）
+    return (ValidCount > 0) ? (SumLocation / (float)ValidCount) : FVector::ZeroVector;
 }

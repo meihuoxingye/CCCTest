@@ -75,13 +75,14 @@ void ATopPlayerController::OnPossess(APawn* InPawn)
 
 	// 只找自定义输入移动组件这一次，然后缓存
 	CachedMyMovementControlComp = InPawn->FindComponentByClass<UMyMovementControlComponent>();
+	if (!CachedMyMovementControlComp) return;
 
 	// 缓存角色
-	CachedMyCharacter = Cast<ACharacter>(InPawn);
+	CachedMyCharacter = Cast<ATopCharacter>(InPawn);
+	if (!CachedMyCharacter) return;
 
 	// 缓存自定义战斗组件
-	// 不用 CachedMyCharacter，如果转换失败这里也会崩
-	CachedMyCombatComp = InPawn->FindComponentByClass<UMyCombatComponent>();
+	CachedMyCombatComp = CachedMyCharacter->GetCombatComponent();
 }
 
 void ATopPlayerController::OnUnPossess()

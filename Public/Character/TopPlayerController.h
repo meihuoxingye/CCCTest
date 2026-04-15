@@ -40,7 +40,7 @@ protected:
 
 	// 缓存角色指针
 	UPROPERTY()
-	TObjectPtr<class ACharacter> CachedMyCharacter;
+	TObjectPtr<class ATopCharacter> CachedMyCharacter;
 
 	// 当控制器开始控制一个 Pawn 时触发，缓存找到的自定义输入移动组件与角色，只找一次
 	virtual void OnPossess(APawn* InPawn) override;

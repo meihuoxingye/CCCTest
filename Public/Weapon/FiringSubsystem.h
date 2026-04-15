@@ -37,7 +37,7 @@ class CCC_API UFiringSubsystem : public UWorldSubsystem, public FTickableGameObj
 	
 public:
 	// 外部调用：按下左键 / AI 决定开火
-	// 在外部把开火的战斗组件传入到子系统定义的结构体中，将此结构体添加到开火名单数组中
+	// 在外部（战斗组件）把开火的战斗组件传入到子系统定义的结构体中，将此结构体添加到开火名单数组中
 	// 开火间隔参数 Interval 也在外部传进来，而不是在内部调用其他头文件的值，优化性能
 	void RegisterShooter(class UMyCombatComponent* Shooter, float Interval);
 

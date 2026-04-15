@@ -52,4 +52,6 @@ private:
     void UpdateGroupingLogic();
     void UpdateMovementLogic(float DeltaTime);
 	
+    /** * 计算指定小组所有成员的几何中心点（重心） */
+    FVector GetGroupCenter(const FSquadGroup& Group) const;
 };
