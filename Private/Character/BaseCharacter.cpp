@@ -80,25 +80,25 @@ void ABaseCharacter::BeginPlay()
 	}
 
 
-	// 只要配置里开启了组队功能，就去子系统注册，不分敌我
+	// 只要配置里开启了组队功能，就去子系统注册到待组队池，不分敌我
 	if (AttributeConfig && AttributeConfig->bEnableSquadGrouping)
 	{
 		if (UMySquadSubsystem* SquadSub = GetWorld()->GetSubsystem<UMySquadSubsystem>())
 		{
-			SquadSub->RegisterCandidate(this); //
+			SquadSub->RegisterCandidate(this);
 		}
 	}
 }
 
 void ABaseCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	// 销毁时自动注销
+	// 销毁时自动从待组队池或已形成的小组中注销
 	if (UMySquadSubsystem* SquadSub = GetWorld()->GetSubsystem<UMySquadSubsystem>())
 	{
-		SquadSub->UnregisterCandidate(this); //
+		SquadSub->UnregisterCharacter(this); 
 	}
 	
-	// 2. 必须调用基类的 EndPlay（通常放在函数末尾）
+	// 必须调用基类的 EndPlay，通常放在函数末尾
 	Super::EndPlay(EndPlayReason);
 }
 

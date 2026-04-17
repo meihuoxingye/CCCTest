@@ -30,6 +30,11 @@
 // 移动组件
 #include "GameFramework/CharacterMovementComponent.h"
 
+// 原生寻找路径
+#include "NavigationSystem.h"
+// 原生读取路标
+#include "NavigationPath.h"
+
 AMyAIController::AMyAIController()
 {
 	// 创建感知组件
@@ -52,44 +57,11 @@ AMyAIController::AMyAIController()
 	SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
 }
 
-void AMyAIController::Tick(float DeltaTime)
-{
-	Super::Tick(DeltaTime);
-
-	if (!CachedMyCharacter) return;
-
-	// 如果正在开火，直接跳过位移输入，实现“射击时停止移动”
-	//if (CachedMyCombatComp && CachedMyCombatComp->IsCurrentlyFiring())
-	//{
-	//	return;
-	//}
-
-	UMySquadSubsystem* SquadSub = GetWorld()->GetSubsystem<UMySquadSubsystem>();
-	if (!SquadSub) return;
-
-	// 1. 获取战术期望：我要去哪？
-	FVector TargetLoc = SquadSub->GetTacticalLocation(CachedMyCharacter);
-	FVector DesiredDir = (TargetLoc - CachedMyCharacter->GetActorLocation()).GetSafeNormal();
-	FVector DesiredVel = DesiredDir * CachedMyCharacter->GetCharacterMovement()->MaxWalkSpeed;
-
-	// 2. 委托工具类计算避障：怎么不撞人地去那？
-	// 传入当前状态和子系统里的全场候选人
-	FVector ComputedVel = UMyAvoidanceUtils::CalculateAvoidanceVelocity(
-		CachedMyCharacter->GetActorLocation(),
-		CachedMyCharacter->GetVelocity(),
-		DesiredVel,
-		CachedMyCharacter->GetCharacterMovement()->MaxWalkSpeed,
-		SquadSub->GetCandidates()
-	);
-
-	// 3. 执行最终位移
-	CachedMyCharacter->AddMovementInput(ComputedVel.GetSafeNormal(), 1.0f);
-}
-
 void AMyAIController::OnPossess(APawn* InPawn)
 {
 	Super::OnPossess(InPawn);
 
+	#pragma region 缓存报错区
 	// 先尝试获取 Pawn，获取失败则退出并报错！
 	if (!InPawn)
 	{
@@ -118,6 +90,15 @@ void AMyAIController::OnPossess(APawn* InPawn)
 		return;
 	}
 
+	// 先尝试获取移动组件，获取失败则退出并报错！
+	if (!Cast<ABaseCharacter>(InPawn)->GetCharacterMovement())
+	{
+		UE_LOG(LogTemp, Error, TEXT("获取 Pawn[%s] 装换为的角色的移动组件失败"), *InPawn->GetName());
+		return;
+	}
+	#pragma endregion
+
+	#pragma region 缓存区
 	// AI 控制器不一定只控制角色
 	CachedMyPawn = InPawn;
 
@@ -127,6 +108,71 @@ void AMyAIController::OnPossess(APawn* InPawn)
 	SyncPerceptionProperties();
 
 	CachedMyCombatComp = CachedMyCharacter->GetCombatComponent();
+
+	CachedMovementComp = CachedMyCharacter->GetCharacterMovement();
+	#pragma endregion
+
+	// 将移动组件的移动模式改为 NavWalking，使角色不会离开导航网格
+	CachedMovementComp->SetMovementMode(MOVE_NavWalking);
+	// 当角色前方的地面高度差超过了最大上坡/下坡高度或者没有地面时，角色会停住
+	CachedMovementComp->bCanWalkOffLedges = false;
+}
+
+void AMyAIController::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	if (!CachedMyCharacter) return;
+
+	// 获取导航网格的全局管理器，用来调用各种原生的导航功能
+	UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
+	// 获取小组子系统
+	UMySquadSubsystem* SquadSub = GetWorld()->GetSubsystem<UMySquadSubsystem>();
+	if (!NavSys || !SquadSub) return;
+
+	// 1. 获取决策点
+	FVector GoalLocation = SquadSub->GetTacticalLocation(CachedMyCharacter);
+
+	// --- 【原生优化：降低寻路频率，提升灵敏度】 ---
+	static FVector LastGoal;
+	static FVector NextWaypoint;
+	// 只有目标移动超过 50 厘米，才重新计算路径，否则沿用旧路点
+	if (FVector::DistSquared(GoalLocation, LastGoal) > 2500.f)
+	{
+		UNavigationPath* NavPath = NavSys->FindPathToLocationSynchronously(this, CachedMyCharacter->GetActorLocation(), GoalLocation);
+		if (NavPath && NavPath->PathPoints.Num() > 1)
+		{
+			NextWaypoint = NavPath->PathPoints[1];
+		}
+		LastGoal = GoalLocation;
+	}
+
+	// 2. 【你的避障逻辑】：只负责处理“活”的队友
+	FVector DesiredDir = (NextWaypoint - CachedMyCharacter->GetActorLocation()).GetSafeNormal();
+	float MaxSpeed = CachedMyCharacter->GetCharacterMovement()->MaxWalkSpeed;
+
+	FVector ComputedVel = UMyAvoidanceUtils::CalculateAvoidanceVelocity(
+		CachedMyCharacter->GetActorLocation(),
+		CachedMyCharacter->GetVelocity(),
+		DesiredDir * MaxSpeed,
+		MaxSpeed,
+		SquadSub->GetCandidates()
+	);
+
+	// 3. 执行位移
+	CachedMyCharacter->AddMovementInput(ComputedVel.GetSafeNormal(), 1.0f);
+
+	// --- 【原生边界保护：强制位置吸附】 ---
+	// 这是原生 MoveTo 的核心：如果物理推力让你稍微出界了，瞬间把你拉回来
+	FNavLocation NavLoc;
+	// XY轴给100厘米容差，Z轴给500厘米（支持你要求的 Z 轴位移）
+	if (NavSys->ProjectPointToNavigation(CachedMyCharacter->GetActorLocation(), NavLoc, FVector(100.f, 100.f, 500.f)))
+	{
+		// 关键：只修正 XY 轴，保留 Z 轴的物理（跳跃/下落）
+		FVector CorrectedLoc = NavLoc.Location;
+		CorrectedLoc.Z = CachedMyCharacter->GetActorLocation().Z;
+		CachedMyCharacter->SetActorLocation(CorrectedLoc);
+	}
 }
 
 void AMyAIController::OnUnPossess()
@@ -181,6 +227,7 @@ void AMyAIController::OnTargetDetected(AActor* Actor, FAIStimulus Stimulus)
 			// 检查进入视线的目标，身上有没有这个 Tag
 			if (!TargetTagToLookFor.IsNone() && Actor->ActorHasTag(TargetTagToLookFor))
 			{
+				// 如果是有效目标
 				bIsValidTarget = true;
 				// 只要确认应该感知到这个进入视线的目标，就退出循环
 				break; 
@@ -191,6 +238,12 @@ void AMyAIController::OnTargetDetected(AActor* Actor, FAIStimulus Stimulus)
 		if (bIsValidTarget)
 		{
 			CachedMyCombatComp->StartWeaponFire();
+
+			// 【核心修改】通知小组：我们进入战斗状态（Aggro），开始移动！
+			if (auto* SS = GetWorld()->GetSubsystem<UMySquadSubsystem>())
+			{
+				SS->SetGroupAggro(CachedMyCharacter, true);
+			}
 		}
 	}
 
