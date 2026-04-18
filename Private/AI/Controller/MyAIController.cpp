@@ -134,15 +134,20 @@ void AMyAIController::Tick(float DeltaTime)
 	FVector GoalLocation = SquadSub->GetTacticalLocation(CachedMyCharacter);
 
 	// --- 【原生优化：降低寻路频率，提升灵敏度】 ---
-	static FVector LastGoal;
-	static FVector NextWaypoint;
 	// 只有目标移动超过 50 厘米，才重新计算路径，否则沿用旧路点
+	// 只有目标移动超过 50 厘米，才重新计算路径
 	if (FVector::DistSquared(GoalLocation, LastGoal) > 2500.f)
 	{
 		UNavigationPath* NavPath = NavSys->FindPathToLocationSynchronously(this, CachedMyCharacter->GetActorLocation(), GoalLocation);
+
+		// 修正：如果就在原地，路点就设为当前位置，不要保留旧值
 		if (NavPath && NavPath->PathPoints.Num() > 1)
 		{
 			NextWaypoint = NavPath->PathPoints[1];
+		}
+		else
+		{
+			NextWaypoint = GoalLocation;
 		}
 		LastGoal = GoalLocation;
 	}

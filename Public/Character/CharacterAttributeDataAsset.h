@@ -71,11 +71,13 @@ public:
 
 
 	// --- 组队功能配置 ---
+	// 是否启用动态组队功能
 	UPROPERTY(EditAnywhere, Category = "Logic|Squad")
-	bool bEnableSquadGrouping = false; // 是否启用动态组队功能
+	bool bEnableSquadGrouping = false; 
 
+	// 感应队友的半径
 	UPROPERTY(EditAnywhere, Category = "Logic|Squad", meta = (EditCondition = "bEnableSquadGrouping"))
-	float GroupingRadius = 800.f; // 感应队友的半径
+	float GroupingRadius = 800.f; 
 
 
 	#pragma region 常用移动属性

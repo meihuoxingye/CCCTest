@@ -49,27 +49,19 @@ void UMySquadSubsystem::Tick(float DeltaTime)
 
         #pragma region 日志输出小组成员
         // 实时打印小队状态到 Output Log
-        // 我们可以复用 0.2s 的计时器，没必要每帧都刷日志，否则滚动太快看不清
-        static float LogTimer = 0.f;
-        LogTimer += DeltaTime;
-        if (LogTimer >= 0.2f)
+        // 打印一个分割线，方便在日志里区分不同时间点的数据
+        UE_LOG(LogSquadSystem, Log, TEXT("--------- 实时战术面板 (%d 个小组) ---------"), ActiveGroups.Num());
+
+        for (int32 i = 0; i < ActiveGroups.Num(); ++i)
         {
-            LogTimer = 0.f;
-
-            // 打印一个分割线，方便在日志里区分不同时间点的数据
-            UE_LOG(LogSquadSystem, Log, TEXT("--------- 实时战术面板 (%d 个小组) ---------"), ActiveGroups.Num());
-
-            for (int32 i = 0; i < ActiveGroups.Num(); ++i)
+            FString MemberList;
+            for (auto& M : ActiveGroups[i].Members)
             {
-                FString MemberList;
-                for (auto& M : ActiveGroups[i].Members)
-                {
-                    if (M.IsValid()) MemberList += FString::Printf(TEXT("[%s] "), *M->GetName());
-                }
-
-                // 输出到日志：小组索引、成员数、具体的成员名字
-                UE_LOG(LogSquadSystem, Log, TEXT("小组 %d | 成员数: %d | 成员列表: %s"), i, ActiveGroups[i].Members.Num(), *MemberList);
+                if (M.IsValid()) MemberList += FString::Printf(TEXT("[%s] "), *M->GetName());
             }
+
+            // 输出到日志：小组索引、成员数、具体的成员名字
+            UE_LOG(LogSquadSystem, Log, TEXT("小组 %d | 成员数: %d | 成员列表: %s"), i, ActiveGroups[i].Members.Num(), *MemberList);
         }
         #pragma endregion
     }
@@ -108,41 +100,64 @@ void UMySquadSubsystem::UpdateGroupingLogic()
     }
 
     TSet<ABaseCharacter*> Processed;
+    TArray<ABaseCharacter*> Found; // --- 优化点：Found 池移出循环，复用内存 ---
+    Found.Reserve(4);
 
-    for (int32 i = 0; i < Candidates.Num(); ++i)
+    // --- 优化点：改用 while 循环，实现即时从待组队池移除 ---
+    while (Candidates.Num() > 0)
     {
-        ABaseCharacter* A = Candidates[i].Get();
+        // 每次从末尾弹出一个“领队”，避免数组元素大面积移动
+        ABaseCharacter* A = Candidates.Pop().Get();
+
+        // 如果该角色在之前的循环中已作为“队员”被拉进别的小组，则跳过
         if (!A || Processed.Contains(A)) continue;
 
-        TArray<ABaseCharacter*> Found;
+        Found.Reset();
         Found.Add(A);
 
-        FIntPoint CenterIdx = GetGridIndex(A->GetActorLocation());
-        float RadiusSq = FMath::Square(A->GetAttributeConfig()->GroupingRadius);
+        FVector ALoc = A->GetActorLocation();
+        float RadiusSq = FMath::Square(A->GetAttributeConfig()->GroupingRadius); //
+        ECharacterType AType = A->GetAttributeConfig()->CharacterType;
 
-        // 只搜索自身及相邻的 3x3 栅格
-        for (int32 x = -1; x <= 1; ++x)
+        // --- 核心优化：象限判断逻辑 (2x2 搜索) ---
+        // 通过坐标与栅格起点的偏移，判断邻居可能存在的方向
+        int32 GridX = FMath::FloorToInt(ALoc.X / GridSize);
+        int32 GridY = FMath::FloorToInt(ALoc.Y / GridSize);
+
+        // 算出在该栅格内的相对位置（0.0 ~ 1.0）
+        // 如果偏移小于 0.5，说明靠左/靠下，应检查 -1 方向；反之检查 +1
+        int32 OffsetX = ((ALoc.X / GridSize) - GridX < 0.5f) ? -1 : 1;
+        int32 OffsetY = ((ALoc.Y / GridSize) - GridY < 0.5f) ? -1 : 1;
+
+        // 只定义 4 个需要搜索的栅格索引
+        FIntPoint CellsToCheck[4] = {
+            {GridX, GridY},           // 当前格
+            {GridX + OffsetX, GridY}, // 水平邻格
+            {GridX, GridY + OffsetY}, // 垂直邻格
+            {GridX + OffsetX, GridY + OffsetY} // 对角邻格
+        };
+
+        // 扁平化搜索：只看这 4 个格子
+        for (const FIntPoint& TargetIdx : CellsToCheck)
         {
-            for (int32 y = -1; y <= 1; ++y)
+            if (TArray<ABaseCharacter*>* Cell = GridMap.Find(TargetIdx))
             {
-                if (TArray<ABaseCharacter*>* Cell = GridMap.Find(CenterIdx + FIntPoint(x, y)))
+                for (ABaseCharacter* B : *Cell)
                 {
-                    for (ABaseCharacter* B : *Cell)
-                    {
-                        if (B == A || Processed.Contains(B)) continue;
+                    if (B == A || Processed.Contains(B)) continue;
+                    if (B->GetAttributeConfig()->CharacterType != AType) continue;
 
-                        if (A->GetAttributeConfig()->CharacterType == B->GetAttributeConfig()->CharacterType)
-                        {
-                            // 使用距离平方比较，省去 60+ 人规模下昂贵的开根号运算
-                            if (FVector::DistSquared(A->GetActorLocation(), B->GetActorLocation()) < RadiusSq)
-                            {
-                                Found.Add(B);
-                                if (Found.Num() >= 4) break;
-                            }
-                        }
+                    if (FVector::DistSquared(ALoc, B->GetActorLocation()) < RadiusSq)
+                    {
+                        Found.Add(B);
+                        Processed.Add(B);
+                        // --- 优化点：队员一旦入组，立刻从待组队池中抽离 ---
+                        // RemoveSingleSwap 会把末尾元素挪过来填补空缺，时间复杂度 O(N) 但比重排数组快得多
+                        Candidates.RemoveSingleSwap(TWeakObjectPtr<ABaseCharacter>(B));
+
+                        if (Found.Num() >= 4) break;
                     }
                 }
-                if (Found.Num() >= 4) break;
             }
             if (Found.Num() >= 4) break;
         }
@@ -150,22 +165,14 @@ void UMySquadSubsystem::UpdateGroupingLogic()
         if (Found.Num() >= 2)
         {
             FSquadGroup NewGroup;
-            FVector Sum = FVector::ZeroVector;
-            for (auto* M : Found)
-            {
-                NewGroup.Members.Add(M);
-                Sum += M->GetActorLocation();
-                Processed.Add(M);
-            }
-            NewGroup.AnchorLocation = Sum / (float)Found.Num();
+            Processed.Add(A); // 领队也要标记
+            for (auto* M : Found) NewGroup.Members.Add(M);
+
+            // 解决你之前反馈的“回头望”：直接以领队 A 为锚点
+            NewGroup.AnchorLocation = ALoc;
             ActiveGroups.Add(NewGroup);
         }
     }
-
-    // 批量移除已入组的成员，比在循环内逐个 Remove 性能高得多
-    Candidates.RemoveAll([&Processed](const TWeakObjectPtr<ABaseCharacter>& C) {
-        return !C.IsValid() || Processed.Contains(C.Get());
-        });
 }
 
 void UMySquadSubsystem::UpdateMovementLogic(float DeltaTime)
@@ -174,7 +181,7 @@ void UMySquadSubsystem::UpdateMovementLogic(float DeltaTime)
     if (!Player) return;
     FVector PlayerLoc = Player->GetActorLocation();
 
-    // --- 新增逻辑：计算小组间的排斥偏置，确保队与队之间隔开 ---
+    // 1. 计算小组间的排斥偏置
     TArray<FVector> GroupSeparations;
     GroupSeparations.SetNumZeroed(ActiveGroups.Num());
 
@@ -188,22 +195,19 @@ void UMySquadSubsystem::UpdateMovementLogic(float DeltaTime)
             if (DistSq < FMath::Square(MinDist))
             {
                 float Dist = FMath::Sqrt(DistSq);
-                FVector Push = (Dir / (Dist + 0.1f)) * (MinDist - Dist) * 0.5f;
+                // ✅ 解决“推力太强”：大幅降低系数 (0.5f -> 0.1f)，让避让变平滑
+                FVector Push = (Dir / (Dist + 0.1f)) * (MinDist - Dist) * 0.1f;
                 GroupSeparations[i] += Push;
                 GroupSeparations[j] -= Push;
             }
         }
     }
 
-    // --- 下面进入你原本的逻辑循环 ---
     for (int32 i = 0; i < ActiveGroups.Num(); ++i)
     {
         auto& Group = ActiveGroups[i];
-
-        // 1. 基础安全检查：如果小组里没人，直接跳过
         if (Group.Members.Num() == 0) continue;
 
-        // 2. 检测与仇恨逻辑
         ABaseCharacter* Representative = nullptr;
         for (auto& M : Group.Members) { if (M.IsValid()) { Representative = M.Get(); break; } }
         if (!Representative) continue;
@@ -211,39 +215,31 @@ void UMySquadSubsystem::UpdateMovementLogic(float DeltaTime)
         bool bCanMove = (Representative->GetAttributeConfig()->AIDetectionLevel == EAIDetectionLevel::NoPerception || Group.bIsAggro);
         if (!bCanMove) continue;
 
-        // --- 核心修改：动态更新锚点位置 ---
-
-        // 3. 计算当前的物理重心
         FVector CurrentCenter = GetGroupCenter(Group);
-
-        // ---【新增：解决紧贴与挤在一起的关键】---
-        // 计算从玩家指向当前小队的向量
         FVector DirFromPlayer = (CurrentCenter - PlayerLoc).GetSafeNormal();
 
-        // 设定停止距离
-        float StopDistance = 100.f;
+        // ✅ 解决“紧贴角色”：把停止距离从 100 调大到 600~800
+        float StopDistance = 600.f;
 
-        // 计算“环绕偏置”：让不同的小队在圆周上错开，防止挤在一条线上
-        // 利用小组索引 i 来计算一个左右偏转角（比如每组偏 30 度）
         float OffsetAngle = (i % 2 == 0 ? 1.0f : -1.0f) * (i * 0.5f);
-        FVector SurroundPos = DirFromPlayer.RotateAngleAxis(OffsetAngle * 20.f, FVector::UpVector) * StopDistance;
+        FVector SurroundPos = DirFromPlayer.RotateAngleAxis(OffsetAngle * 25.f, FVector::UpVector) * StopDistance;
 
-        // 4. 计算锚点的目标偏移
-        // FinalTarget 现在是：玩家位置 + 8米开外的环绕点 + 队间排斥力
-        FVector FinalTarget = PlayerLoc + SurroundPos + GroupSeparations[i];
+        // ✅ 解决“挤在一起”：给排斥力加限制，防止目的地被推飞
+        FVector FinalTarget = PlayerLoc + SurroundPos + GroupSeparations[i].GetClampedToMaxSize(500.f);
 
-        FVector Diff = CurrentCenter - FinalTarget;
+        // ✅ 解决“不跟着走”的关键：插值起点必须是 AnchorLocation 自身！
+        // 不能用 CurrentCenter，否则锚点永远会被 AI 的延迟位置拉回去
+        FVector Diff = Group.AnchorLocation - FinalTarget;
         bool bInRect = FMath::Abs(Diff.X) < 600.f && FMath::Abs(Diff.Y) < 400.f;
 
         if (!bInRect)
         {
-            // 在远处时，锚点以较快速度向玩家逼近
-            Group.AnchorLocation = FMath::VInterpTo(CurrentCenter, FinalTarget, DeltaTime, 1.5f);
+            // 锚点自己向前插值，引导 AI 追赶
+            Group.AnchorLocation = FMath::VInterpTo(Group.AnchorLocation, FinalTarget, DeltaTime, 1.5f);
         }
         else
         {
-            // 进入战术范围内，锚点移动变慢，并开始加入你之前的随机晃动（Jitter）
-            Group.AnchorLocation = FMath::VInterpTo(CurrentCenter, FinalTarget, DeltaTime, 0.5f);
+            Group.AnchorLocation = FMath::VInterpTo(Group.AnchorLocation, FinalTarget, DeltaTime, 0.5f);
 
             Group.YTimer += DeltaTime;
             FVector Wobble(

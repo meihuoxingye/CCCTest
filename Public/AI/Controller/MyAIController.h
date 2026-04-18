@@ -61,4 +61,7 @@ private:
 	// 同步自定义感知属性
 	void SyncPerceptionProperties();
 	
+
+	FVector LastGoal = FVector::ZeroVector;
+	FVector NextWaypoint = FVector::ZeroVector;
 };
