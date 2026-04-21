@@ -6,6 +6,8 @@
 #include "Character/CharacterAttributeDataAsset.h"
 #include "Kismet/GameplayStatics.h"
 
+#include "SquadUp/SquadTypes.h"
+
 
 // --- 必须加上这一行，它是日志频道的本体 ---
 DEFINE_LOG_CATEGORY(LogSquadSystem);
@@ -40,42 +42,56 @@ void UMySquadSubsystem::RemoveFromGroup(ABaseCharacter* Character)
 void UMySquadSubsystem::Tick(float DeltaTime)
 {
     // 针对 60+ 人规模，组队逻辑改为每 0.5 秒执行一次，防止每一帧执行导致掉帧
-    static float GroupingTimer = 0.f;
     GroupingTimer += DeltaTime;
+
     if (GroupingTimer >= 0.5f)
     {
         UpdateGroupingLogic();
         GroupingTimer = 0.f;
-
-        #pragma region 日志输出小组成员
-        // 实时打印小队状态到 Output Log
-        // 打印一个分割线，方便在日志里区分不同时间点的数据
-        UE_LOG(LogSquadSystem, Log, TEXT("--------- 实时战术面板 (%d 个小组) ---------"), ActiveGroups.Num());
-
-        for (int32 i = 0; i < ActiveGroups.Num(); ++i)
-        {
-            FString MemberList;
-            for (auto& M : ActiveGroups[i].Members)
-            {
-                if (M.IsValid()) MemberList += FString::Printf(TEXT("[%s] "), *M->GetName());
-            }
-
-            // 输出到日志：小组索引、成员数、具体的成员名字
-            UE_LOG(LogSquadSystem, Log, TEXT("小组 %d | 成员数: %d | 成员列表: %s"), i, ActiveGroups[i].Members.Num(), *MemberList);
-        }
-        #pragma endregion
     }
-
-    UpdateMovementLogic(DeltaTime);
 }
 
 void UMySquadSubsystem::UpdateGroupingLogic()
 {
+    #pragma region 日志输出小组成员
+    // 实时打印小队状态到 Output Log
+    // 打印一个分割线，方便在日志里区分不同时间点的数据
+    UE_LOG(LogSquadSystem, Log, TEXT("--------- 实时战术面板 (%d 个小组) ---------"), ActiveGroups.Num());
+    UE_LOG(LogSquadSystem, Log, TEXT("--------- 待组队池 (%d 个人) ---------"), Candidates.Num());
+
+    for (int32 i = 0; i < ActiveGroups.Num(); ++i)
+    {
+        FString MemberList;
+        for (auto& M : ActiveGroups[i].Members)
+        {
+            if (M.IsValid()) MemberList += FString::Printf(TEXT("[%s] "), *M->GetName());
+        }
+
+        // 输出到日志：小组索引、成员数、具体的成员名字
+        UE_LOG(LogSquadSystem, Log, TEXT("小组 %d | 成员数: %d | 成员列表: %s"), i, ActiveGroups[i].Members.Num(), *MemberList);
+    }
+    #pragma endregion
+
     // 当角色弱指针失效后，从待组队池中全部一起清除掉
     Candidates.RemoveAll([](const TWeakObjectPtr<ABaseCharacter>& C) { return !C.IsValid(); });
 
     // 若待组队池中没有角色，则退出组队逻辑
     if (Candidates.Num() == 0) return;
+
+    for (int32 i = ActiveGroups.Num(); i > 0; i--)
+    {
+        // 判断数组元素是否有效用 IsValid()
+        if (!ActiveGroups[i - 1].Captain.IsValid()) continue;
+
+        if (ActiveGroups[i - 1].Members.Num() < 4)
+        {
+            Candidates.Add(ActiveGroups[i - 1].Captain);
+        }
+        else
+        {
+            Candidates.RemoveSingleSwap(TWeakObjectPtr<ABaseCharacter>(ActiveGroups[i - 1].Captain));
+        }
+    }
 
     // 定义局部 Lambda 函数，输入坐标，得到其在 x、y 方向的第几个栅格上
     // FloorToInt 向下取整，如 1.5 变 1
@@ -91,33 +107,51 @@ void UMySquadSubsystem::UpdateGroupingLogic()
     for (auto& WeakC : Candidates)
     {
         // 将弱指针转为原始指针，运行效率更高
+        // 当取出的是弱指针或智能指针，需要用 Get()
         if (ABaseCharacter* C = WeakC.Get())
         {
-            // 根据角色位置计算它所在的栅格索引，将其转为 Key，并开辟临时内存
-            // Add 将角色存入 Key 对应的 Value 中
+            // 根据角色位置计算它所在的栅格索引，如果哈希表中存在这个索引，则返回其对应的 T数组
+            // 若不存在，则将其转为 Key，并在开辟临时内存，然后返回这个新创建的 T数组
+            // Add 将角色存入 Key 对应的 Value（T数组）中
             GridMap.FindOrAdd(GetGridIndex(C->GetActorLocation())).Add(C);
         }
     }
 
-    TSet<ABaseCharacter*> Processed;
-    TArray<ABaseCharacter*> Found; // --- 优化点：Found 池移出循环，复用内存 ---
-    Found.Reserve(4);
+    // Found 池移出循环，复用内存
+    // 使用 staic，跨 Tick 复用内存
+    static TArray<ABaseCharacter*> Found;
+    TArray<ABaseCharacter*> Lose;
+    // 预留五个位置，避免 Found 在 Add 时频繁扩容导致性能下降
+    Found.Reserve(5);
 
-    // --- 优化点：改用 while 循环，实现即时从待组队池移除 ---
+    // 建立队长 - 小队快速索引表，即角色指针 -> 小组结构体指针的映射
+    TMap<ABaseCharacter*, FSquadGroup*> CaptainMap;
+    for (int32 i = 0; i < ActiveGroups.Num(); ++i)
+    {
+        if (ActiveGroups[i].Captain.IsValid())
+        {
+            // 记录队长的指针对应哪个小组，方便后面直接查
+            CaptainMap.Add(ActiveGroups[i].Captain.Get(), &ActiveGroups[i]);
+        }
+    }
+
+    // 处理这种“一边处理一边排空”的池子时，行业标准做法是使用 while
     while (Candidates.Num() > 0)
     {
-        // 每次从末尾弹出一个“领队”，避免数组元素大面积移动
+        // 每次从末尾移除并使其作为一个“领队”，避免数组元素大面积移动
         ABaseCharacter* A = Candidates.Pop().Get();
+        if (!A) continue;
 
-        // 如果该角色在之前的循环中已作为“队员”被拉进别的小组，则跳过
-        if (!A || Processed.Contains(A)) continue;
-
+        // 清空元素数量，但不释放内存，复用 Found 池的内存，避免每次都重新分配内存导致性能下降
         Found.Reset();
+        // 小组最大组员数
+        int32 TargetSize = -1;
         Found.Add(A);
 
+        // 获取 A 的位置
         FVector ALoc = A->GetActorLocation();
-        float RadiusSq = FMath::Square(A->GetAttributeConfig()->GroupingRadius); //
-        ECharacterType AType = A->GetAttributeConfig()->CharacterType;
+        // 获取 A 的组队半径的平方
+        float RadiusSq = FMath::Square(A->GetAttributeConfig()->GroupingRadius);
 
         // --- 核心优化：象限判断逻辑 (2x2 搜索) ---
         // 通过坐标与栅格起点的偏移，判断邻居可能存在的方向
@@ -129,7 +163,7 @@ void UMySquadSubsystem::UpdateGroupingLogic()
         int32 OffsetX = ((ALoc.X / GridSize) - GridX < 0.5f) ? -1 : 1;
         int32 OffsetY = ((ALoc.Y / GridSize) - GridY < 0.5f) ? -1 : 1;
 
-        // 只定义 4 个需要搜索的栅格索引
+        // 只定义 4 个需要搜索的栅格索引结构体
         FIntPoint CellsToCheck[4] = {
             {GridX, GridY},           // 当前格
             {GridX + OffsetX, GridY}, // 水平邻格
@@ -140,139 +174,92 @@ void UMySquadSubsystem::UpdateGroupingLogic()
         // 扁平化搜索：只看这 4 个格子
         for (const FIntPoint& TargetIdx : CellsToCheck)
         {
+            // Find 查找哈希表里 Key栅格索引 对应的 Value角色
             if (TArray<ABaseCharacter*>* Cell = GridMap.Find(TargetIdx))
             {
                 for (ABaseCharacter* B : *Cell)
                 {
-                    if (B == A || Processed.Contains(B)) continue;
-                    if (B->GetAttributeConfig()->CharacterType != AType) continue;
+                    if (B == A || Found.Contains(B)) continue;
 
+                    // 计算 A 和 B 的距离平方，避免开根号的性能消耗
                     if (FVector::DistSquared(ALoc, B->GetActorLocation()) < RadiusSq)
                     {
+                        // 获取小队人数上限
+                        if (TargetSize == -1)
+                        {
+                            // 如果 A 已经是老队长，直接从结构体里读出那个“永久”的值
+                            if (FSquadGroup** ExistingPtr = CaptainMap.Find(A))
+                            {
+                                TargetSize = (*ExistingPtr)->FixedMaxCapacity;
+                            }
+                            else
+                            {
+                                // 如果是纯新人，则获取在属性表里配置的随机小队人数上限
+                                TargetSize = A->GetAttributeConfig()->GetRandomSquadSize();
+                            }
+                        }
+
                         Found.Add(B);
-                        Processed.Add(B);
-                        // --- 优化点：队员一旦入组，立刻从待组队池中抽离 ---
+                        // 优化点：队员一旦入组，立刻从待组队池中抽离 ---
                         // RemoveSingleSwap 会把末尾元素挪过来填补空缺，时间复杂度 O(N) 但比重排数组快得多
                         Candidates.RemoveSingleSwap(TWeakObjectPtr<ABaseCharacter>(B));
 
-                        if (Found.Num() >= 4) break;
+                        if (Found.Num() >= TargetSize) break;
                     }
                 }
             }
-            if (Found.Num() >= 4) break;
+
+            // 若小组满员，则跳出栅格循环搜索
+            if (TargetSize != -1 && Found.Num() >= TargetSize) break;
         }
 
         if (Found.Num() >= 2)
         {
-            FSquadGroup NewGroup;
-            Processed.Add(A); // 领队也要标记
-            for (auto* M : Found) NewGroup.Members.Add(M);
-
-            // 解决你之前反馈的“回头望”：直接以领队 A 为锚点
-            NewGroup.AnchorLocation = ALoc;
-            ActiveGroups.Add(NewGroup);
-        }
-    }
-}
-
-void UMySquadSubsystem::UpdateMovementLogic(float DeltaTime)
-{
-    APawn* Player = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
-    if (!Player) return;
-    FVector PlayerLoc = Player->GetActorLocation();
-
-    // 1. 计算小组间的排斥偏置
-    TArray<FVector> GroupSeparations;
-    GroupSeparations.SetNumZeroed(ActiveGroups.Num());
-
-    for (int32 i = 0; i < ActiveGroups.Num(); ++i)
-    {
-        for (int32 j = i + 1; j < ActiveGroups.Num(); ++j)
-        {
-            FVector Dir = ActiveGroups[i].AnchorLocation - ActiveGroups[j].AnchorLocation;
-            float DistSq = Dir.SizeSquared2D();
-            float MinDist = 1200.f;
-            if (DistSq < FMath::Square(MinDist))
+            // 如果 A 已经是老队长，直接把新成员加到原来的小组里
+            if (FSquadGroup** FoundGroupPtr = CaptainMap.Find(A))
             {
-                float Dist = FMath::Sqrt(DistSq);
-                // ✅ 解决“推力太强”：大幅降低系数 (0.5f -> 0.1f)，让避让变平滑
-                FVector Push = (Dir / (Dist + 0.1f)) * (MinDist - Dist) * 0.1f;
-                GroupSeparations[i] += Push;
-                GroupSeparations[j] -= Push;
+                // 双重指针装换为原始指针，拿到原来小组的指针
+                FSquadGroup* ExistingGroup = *FoundGroupPtr;
+                for (ABaseCharacter* Newbie : Found)
+                {
+                    if (Newbie == A) continue;
+                    
+                    // 若小组未满员，则从 found池 加入新成员
+                    if (ExistingGroup->Members.Num() < ExistingGroup->FixedMaxCapacity)
+                    {
+                        ExistingGroup->Members.AddUnique(Newbie);
+                    }
+                }
             }
-        }
-    }
+            else
+            {
+                // 纯新人建新组
+                FSquadGroup NewGroup;
+                for (auto* M : Found) NewGroup.Members.Add(M);
+                NewGroup.Captain = A;
+                
+                NewGroup.FixedMaxCapacity = TargetSize;
+                NewGroup.AnchorLocation = ALoc;
+                ActiveGroups.Add(NewGroup);
 
-    for (int32 i = 0; i < ActiveGroups.Num(); ++i)
-    {
-        auto& Group = ActiveGroups[i];
-        if (Group.Members.Num() == 0) continue;
-
-        ABaseCharacter* Representative = nullptr;
-        for (auto& M : Group.Members) { if (M.IsValid()) { Representative = M.Get(); break; } }
-        if (!Representative) continue;
-
-        bool bCanMove = (Representative->GetAttributeConfig()->AIDetectionLevel == EAIDetectionLevel::NoPerception || Group.bIsAggro);
-        if (!bCanMove) continue;
-
-        FVector CurrentCenter = GetGroupCenter(Group);
-        FVector DirFromPlayer = (CurrentCenter - PlayerLoc).GetSafeNormal();
-
-        // ✅ 解决“紧贴角色”：把停止距离从 100 调大到 600~800
-        float StopDistance = 600.f;
-
-        float OffsetAngle = (i % 2 == 0 ? 1.0f : -1.0f) * (i * 0.5f);
-        FVector SurroundPos = DirFromPlayer.RotateAngleAxis(OffsetAngle * 25.f, FVector::UpVector) * StopDistance;
-
-        // ✅ 解决“挤在一起”：给排斥力加限制，防止目的地被推飞
-        FVector FinalTarget = PlayerLoc + SurroundPos + GroupSeparations[i].GetClampedToMaxSize(500.f);
-
-        // ✅ 解决“不跟着走”的关键：插值起点必须是 AnchorLocation 自身！
-        // 不能用 CurrentCenter，否则锚点永远会被 AI 的延迟位置拉回去
-        FVector Diff = Group.AnchorLocation - FinalTarget;
-        bool bInRect = FMath::Abs(Diff.X) < 600.f && FMath::Abs(Diff.Y) < 400.f;
-
-        if (!bInRect)
-        {
-            // 锚点自己向前插值，引导 AI 追赶
-            Group.AnchorLocation = FMath::VInterpTo(Group.AnchorLocation, FinalTarget, DeltaTime, 1.5f);
+                // 注意：由于 Add 可能会导致 ActiveGroups 内存重排，
+                // 如果后面还要用到 CaptainMap，建议重新构建或直接结束本轮。
+                // 因为是 Candidates.Pop() 模式，这里直接 break 出去处理下一个人是安全的。
+            }
         }
         else
         {
-            Group.AnchorLocation = FMath::VInterpTo(Group.AnchorLocation, FinalTarget, DeltaTime, 0.5f);
-
-            Group.YTimer += DeltaTime;
-            FVector Wobble(
-                FMath::Cos(Group.YTimer * 0.7f) * 120.f * DeltaTime,
-                FMath::Sin(Group.YTimer * 1.3f) * 150.f * DeltaTime,
-                0.f
-            );
-            Group.AnchorLocation += Wobble;
+            // 没凑够 2 个人，A 继续回池子待命
+            Lose.AddUnique(A);
         }
     }
-}
 
-void UMySquadSubsystem::SetGroupAggro(ABaseCharacter* Member, bool bNewAggro)
-{
-    for (auto& G : ActiveGroups) { if (G.Members.Contains(Member)) { G.bIsAggro = bNewAggro; break; } }
-}
-
-FVector UMySquadSubsystem::GetTacticalLocation(ABaseCharacter* Character)
-{
-    for (auto& Group : ActiveGroups)
+    // 将没成队的角色重新加入待组队池
+    while (Lose.Num() > 0)
     {
-        int32 Idx = Group.Members.Find(Character);
-        if (Idx != INDEX_NONE) return Group.AnchorLocation + FVector(Idx * -160.f, Idx * 120.f, 0.f);
+        ABaseCharacter* C = Lose.Pop();
+        // 查找是否存在，不存在则加入
+        // 当有上千个元素时性能消耗较大
+        if (C) Candidates.AddUnique(C);
     }
-    return Character->GetActorLocation();
-}
-
-FVector UMySquadSubsystem::GetGroupCenter(const FSquadGroup& Group) const
-{
-    FVector Sum = FVector::ZeroVector;
-    int32 Count = 0;
-    for (const auto& M : Group.Members) { if (M.IsValid()) { Sum += M->GetActorLocation(); Count++; } }
-
-    // 防止除以 0（万一小组里没人了）
-    return (Count > 0) ? (Sum / (float)Count) : FVector::ZeroVector;
 }

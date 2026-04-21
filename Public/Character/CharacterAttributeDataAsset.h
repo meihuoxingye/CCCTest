@@ -72,13 +72,27 @@ public:
 
 	// --- 组队功能配置 ---
 	// 是否启用动态组队功能
-	UPROPERTY(EditAnywhere, Category = "Logic|Squad")
+	UPROPERTY(EditAnywhere, Category = "Squad")
 	bool bEnableSquadGrouping = false; 
 
 	// 感应队友的半径
-	UPROPERTY(EditAnywhere, Category = "Logic|Squad", meta = (EditCondition = "bEnableSquadGrouping"))
+	UPROPERTY(EditAnywhere, Category = "Squad", meta = (EditCondition = "bEnableSquadGrouping"))
 	float GroupingRadius = 800.f; 
 
+	// 该类角色最小带队人数
+	UPROPERTY(EditAnywhere, Category = "Squad", meta = (EditCondition = "bEnableSquadGrouping"))
+	int32 MinSquadCapacity = 2;
+	// 该类角色最大带队人数
+	UPROPERTY(EditAnywhere, Category = "Squad", meta = (EditCondition = "bEnableSquadGrouping"))
+	int32 MaxSquadCapacity = 5;
+
+	// 根据上下限随机化带队人数
+	// 加上 BlueprintCallable 方便在编辑器里也能调
+	UFUNCTION(BlueprintPure, Category = "Squad")
+	int32 GetRandomSquadSize() const
+	{
+		return FMath::RandRange(MinSquadCapacity, MaxSquadCapacity);
+	}
 
 	#pragma region 常用移动属性
 	UPROPERTY(EditAnywhere, Category = "Common Movement Properties")

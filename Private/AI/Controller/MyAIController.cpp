@@ -152,6 +152,7 @@ void AMyAIController::Tick(float DeltaTime)
 		LastGoal = GoalLocation;
 	}
 
+	
 	// 2. 【你的避障逻辑】：只负责处理“活”的队友
 	FVector DesiredDir = (NextWaypoint - CachedMyCharacter->GetActorLocation()).GetSafeNormal();
 	float MaxSpeed = CachedMyCharacter->GetCharacterMovement()->MaxWalkSpeed;
@@ -163,6 +164,7 @@ void AMyAIController::Tick(float DeltaTime)
 		MaxSpeed,
 		SquadSub->GetCandidates()
 	);
+	
 
 	// 3. 执行位移
 	CachedMyCharacter->AddMovementInput(ComputedVel.GetSafeNormal(), 1.0f);
@@ -243,12 +245,6 @@ void AMyAIController::OnTargetDetected(AActor* Actor, FAIStimulus Stimulus)
 		if (bIsValidTarget)
 		{
 			CachedMyCombatComp->StartWeaponFire();
-
-			// 【核心修改】通知小组：我们进入战斗状态（Aggro），开始移动！
-			if (auto* SS = GetWorld()->GetSubsystem<UMySquadSubsystem>())
-			{
-				SS->SetGroupAggro(CachedMyCharacter, true);
-			}
 		}
 	}
 
