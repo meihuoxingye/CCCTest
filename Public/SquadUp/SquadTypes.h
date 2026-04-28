@@ -2,6 +2,9 @@
 
 #pragma once
 
+#include "CoreMinimal.h"
+#include "SquadTypes.generated.h" // 确保有这一行！
+
 // 一个小组的数据结构
 USTRUCT()
 struct FSquadGroup
@@ -23,4 +26,33 @@ struct FSquadGroup
 
     // 标记该小组是否已进入战斗状态（发现目标）
     bool bIsAggro = false;
+
+
+    // --- 新增：数据自管理方法 ---
+
+    // 检查是否满员
+    bool IsFull() const;
+
+    // 获取有效成员数量（排除死掉的）
+    int32 GetValidMemberCount() const;
+
+    // 若小组未满员，则从 found池 加入新成员
+    bool TryAddMember(ABaseCharacter* NewMember);
+
+
+    // ==========================================
+    // 新增：小队查询与数学计算方法
+    // ==========================================
+
+    // 获取某个角色在队伍里的索引
+    int32 GetMemberIndex(class ABaseCharacter* Character) const;
+
+    // 安全地获取指定索引的队员
+    ABaseCharacter* GetMemberAtIndex(int32 Index) const;
+
+    // 找一个活着的代表（用于判断仇恨/感知状态）
+    ABaseCharacter* GetRepresentative() const;
+
+    // 计算本小队的几何重心
+    FVector GetGroupCenter() const;
 };

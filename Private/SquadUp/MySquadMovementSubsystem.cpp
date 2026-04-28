@@ -4,22 +4,33 @@
 #include "SquadUp/MySquadMovementSubsystem.h"
 #include "SquadUp/SquadTypes.h"
 #include "SquadUp/MySquadSubsystem.h"
+#include "Character/BaseCharacter.h"
+#include "Character/CharacterAttributeDataAsset.h"
+#include "Kismet/GameplayStatics.h"
 
 FVector UMySquadMovementSubsystem::GetTacticalLocation(ABaseCharacter* Character)
 {
-    for (auto& Group : ActiveGroups)
+    // 1. 角色判空（防止 Character->GetActorLocation() 崩溃）
+    if (!Character) return FVector::ZeroVector;
+
+    // 2. 世界指针判空
+    UWorld* World = GetWorld();
+    if (!World) return Character->GetActorLocation();
+
+    // 3. 子系统判空
+    UMySquadSubsystem* SquadSub = World->GetSubsystem<UMySquadSubsystem>();
+    if (!SquadSub) return Character->GetActorLocation();
+
+    // 4. 执行逻辑（使用你已经写好的安全方法）
+    for (auto& Group : SquadSub->GetActiveGroups())
     {
-        int32 Idx = Group.Members.Find(Character);
+        int32 Idx = Group.GetMemberIndex(Character);
         if (Idx == INDEX_NONE) continue;
 
-        // 0号领队：前往小队锚点
         if (Idx == 0) return Group.AnchorLocation;
 
-        // ✅ 修复：衔尾蛇跟随逻辑。后一个人跟在前一个人的正后方 1 米
-        if (Group.Members[Idx - 1].IsValid())
+        if (ABaseCharacter* PrevMember = Group.GetMemberAtIndex(Idx - 1))
         {
-            ABaseCharacter* PrevMember = Group.Members[Idx - 1].Get();
-            // 目标点 = 前一人的位置 - 前一人的朝向向量 * 100单位(1米)
             return PrevMember->GetActorLocation() - PrevMember->GetActorForwardVector() * 100.f;
         }
     }
@@ -33,42 +44,36 @@ void UMySquadMovementSubsystem::Tick(float DeltaTime)
 
 void UMySquadMovementSubsystem::UpdateMovementLogic(float DeltaTime)
 {
-    APawn* Player = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    UMySquadSubsystem* SquadSub = World->GetSubsystem<UMySquadSubsystem>();
+    if (!SquadSub) return;
+
+    APawn* Player = UGameplayStatics::GetPlayerPawn(World, 0);
     if (!Player) return;
     FVector PlayerLoc = Player->GetActorLocation();
 
-    for (auto& Group : ActiveGroups)
+    for (auto& Group : SquadSub->GetActiveGroups())
     {
-        if (Group.Members.Num() == 0) continue;
+        if (Group.GetValidMemberCount() == 0) continue;
 
-        // 获取小队代表判断觉察状态
-        ABaseCharacter* Representative = nullptr;
-        for (auto& M : Group.Members) { if (M.IsValid()) { Representative = M.Get(); break; } }
+        ABaseCharacter* Representative = Group.GetRepresentative();
         if (!Representative) continue;
 
-        // 仅在察觉或进入仇恨状态后移动
-        bool bCanMove = (Representative->GetAttributeConfig()->AIDetectionLevel == EAIDetectionLevel::NoPerception || Group.bIsAggro);
+        const UCharacterAttributeDataAsset* Config = Representative->GetAttributeConfig();
+        // 0xbf8 崩溃最可能的发生地：如果 Config 为空，下一行访问 AIDetectionLevel 必崩
+        if (!Config) continue;
+
+        bool bCanMove = (Config->AIDetectionLevel == EAIDetectionLevel::NoPerception || Group.bIsAggro);
         if (!bCanMove) continue;
 
-        // 计算小队重心到玩家的方向
-        FVector CurrentCenter = GetGroupCenter(Group);
+        FVector CurrentCenter = Group.GetGroupCenter();
         FVector DirFromPlayer = (CurrentCenter - PlayerLoc).GetSafeNormal();
 
-        // 设置跟踪停止距离（例如保持在 6 米外，可根据需要调整）
         float StopDistance = 600.f;
         FVector FinalTarget = PlayerLoc + DirFromPlayer * StopDistance;
 
-        // 锚点直接向目标插值，带动整支队伍
         Group.AnchorLocation = FMath::VInterpTo(Group.AnchorLocation, FinalTarget, DeltaTime, 1.5f);
     }
-}
-
-FVector UMySquadMovementSubsystem::GetGroupCenter(const FSquadGroup& Group) const
-{
-    FVector Sum = FVector::ZeroVector;
-    int32 Count = 0;
-    for (const auto& M : Group.Members) { if (M.IsValid()) { Sum += M->GetActorLocation(); Count++; } }
-
-    // 防止除以 0（万一小组里没人了）
-    return (Count > 0) ? (Sum / (float)Count) : FVector::ZeroVector;
 }

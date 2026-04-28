@@ -35,7 +35,7 @@ void UMySquadSubsystem::RemoveFromGroup(ABaseCharacter* Character)
         // 若移除后只有一人或以下则顺便解散小组
         // RemoveAtSwap 性能更好，删除后直接把末位的元素放到被删除的位置上，不需要移动其他元素
         // 但这样会改变元素的顺序，所以只能在不关心顺序的情况下使用
-        if (ActiveGroups[i].Members.Num() < 2) ActiveGroups.RemoveAtSwap(i);
+        if (ActiveGroups[i].GetValidMemberCount() < 2) ActiveGroups.RemoveAtSwap(i);
     }
 }
 
@@ -53,7 +53,28 @@ void UMySquadSubsystem::Tick(float DeltaTime)
 
 void UMySquadSubsystem::UpdateGroupingLogic()
 {
-    #pragma region 日志输出小组成员
+    // 第 1 步：打印状态
+    PrintSquadStatus();
+
+    // 第 2 步：清理并准备候选人数据
+    PrepareCandidates();
+
+    // 若待组队池中没有角色，直接结束
+    if (Candidates.Num() == 0) return;
+
+    // 第 3 步：构建当前帧的空间网格数据
+
+    // TMap 使用哈希表的技术，按需分配内存，避免了预先分配一个巨大的二维数组，大大节省了内存开销
+    // 但是，数组的内存连续排布，访问效率更高，且成员较少时所占内存比 TMap 更少，所以酌情使用 TMap
+    TMap<FIntPoint, TArray<ABaseCharacter*>> GridMap;
+    BuildSpatialGrid(GridMap);
+
+    // 第 4 步：执行核心搜寻与匹配建队
+    SearchAndFormSquads(GridMap);
+}
+
+void UMySquadSubsystem::PrintSquadStatus()
+{
     // 实时打印小队状态到 Output Log
     // 打印一个分割线，方便在日志里区分不同时间点的数据
     UE_LOG(LogSquadSystem, Log, TEXT("--------- 实时战术面板 (%d 个小组) ---------"), ActiveGroups.Num());
@@ -70,8 +91,10 @@ void UMySquadSubsystem::UpdateGroupingLogic()
         // 输出到日志：小组索引、成员数、具体的成员名字
         UE_LOG(LogSquadSystem, Log, TEXT("小组 %d | 成员数: %d | 成员列表: %s"), i, ActiveGroups[i].Members.Num(), *MemberList);
     }
-    #pragma endregion
+}
 
+void UMySquadSubsystem::PrepareCandidates()
+{
     // 当角色弱指针失效后，从待组队池中全部一起清除掉
     Candidates.RemoveAll([](const TWeakObjectPtr<ABaseCharacter>& C) { return !C.IsValid(); });
 
@@ -83,7 +106,7 @@ void UMySquadSubsystem::UpdateGroupingLogic()
         // 判断数组元素是否有效用 IsValid()
         if (!ActiveGroups[i - 1].Captain.IsValid()) continue;
 
-        if (ActiveGroups[i - 1].Members.Num() < 4)
+        if (ActiveGroups[i - 1].GetValidMemberCount() < ActiveGroups[i - 1].FixedMaxCapacity)
         {
             Candidates.Add(ActiveGroups[i - 1].Captain);
         }
@@ -92,7 +115,10 @@ void UMySquadSubsystem::UpdateGroupingLogic()
             Candidates.RemoveSingleSwap(TWeakObjectPtr<ABaseCharacter>(ActiveGroups[i - 1].Captain));
         }
     }
+}
 
+void UMySquadSubsystem::BuildSpatialGrid(TMap<FIntPoint, TArray<ABaseCharacter*>>& OutGridMap)
+{
     // 定义局部 Lambda 函数，输入坐标，得到其在 x、y 方向的第几个栅格上
     // FloorToInt 向下取整，如 1.5 变 1
     // GridSize 是 Lambda 函数外的外部变量，需要 this 指针才能访问此类的成员变量
@@ -100,9 +126,6 @@ void UMySquadSubsystem::UpdateGroupingLogic()
         return FIntPoint(FMath::FloorToInt(Loc.X / GridSize), FMath::FloorToInt(Loc.Y / GridSize));
         };
 
-    // TMap 使用哈希表的技术，按需分配内存，避免了预先分配一个巨大的二维数组，大大节省了内存开销
-    // 但是，数组的内存连续排布，访问效率更高，且成员较少时所占内存比 TMap 更少，所以酌情使用 TMap
-    TMap<FIntPoint, TArray<ABaseCharacter*>> GridMap;
     // 遍历待组队池中的角色
     for (auto& WeakC : Candidates)
     {
@@ -113,13 +136,18 @@ void UMySquadSubsystem::UpdateGroupingLogic()
             // 根据角色位置计算它所在的栅格索引，如果哈希表中存在这个索引，则返回其对应的 T数组
             // 若不存在，则将其转为 Key，并在开辟临时内存，然后返回这个新创建的 T数组
             // Add 将角色存入 Key 对应的 Value（T数组）中
-            GridMap.FindOrAdd(GetGridIndex(C->GetActorLocation())).Add(C);
+            OutGridMap.FindOrAdd(GetGridIndex(C->GetActorLocation())).Add(C);
         }
     }
+}
 
+void UMySquadSubsystem::SearchAndFormSquads(const TMap<FIntPoint, TArray<ABaseCharacter*>>& OutGridMap)
+{
+    // 从待组队池里捞出的人
     // Found 池移出循环，复用内存
     // 使用 staic，跨 Tick 复用内存
     static TArray<ABaseCharacter*> Found;
+    // 本轮尝试建队（或入队）失败的角色
     TArray<ABaseCharacter*> Lose;
     // 预留五个位置，避免 Found 在 Add 时频繁扩容导致性能下降
     Found.Reserve(5);
@@ -144,8 +172,21 @@ void UMySquadSubsystem::UpdateGroupingLogic()
 
         // 清空元素数量，但不释放内存，复用 Found 池的内存，避免每次都重新分配内存导致性能下降
         Found.Reset();
+
         // 小组最大组员数
-        int32 TargetSize = -1;
+        int32 TargetSize = 0;
+        // 在搜索前，先算好这次到底还需要拉几个人
+        if (FSquadGroup** ExistingPtr = CaptainMap.Find(A))
+        {
+            // 如果是老队长，TargetSize = (队伍最大容量 - 队伍目前存活人数) + 1 (因为 Found 里面包含了队长自己)
+            TargetSize = (*ExistingPtr)->FixedMaxCapacity - (*ExistingPtr)->GetValidMemberCount() + 1;
+        }
+        else
+        {
+            // 纯新人，随机摇一个目标人数
+            TargetSize = A->GetAttributeConfig()->GetRandomSquadSize();
+        }
+
         Found.Add(A);
 
         // 获取 A 的位置
@@ -175,7 +216,7 @@ void UMySquadSubsystem::UpdateGroupingLogic()
         for (const FIntPoint& TargetIdx : CellsToCheck)
         {
             // Find 查找哈希表里 Key栅格索引 对应的 Value角色
-            if (TArray<ABaseCharacter*>* Cell = GridMap.Find(TargetIdx))
+            if (const auto* Cell = OutGridMap.Find(TargetIdx))
             {
                 for (ABaseCharacter* B : *Cell)
                 {
@@ -184,33 +225,20 @@ void UMySquadSubsystem::UpdateGroupingLogic()
                     // 计算 A 和 B 的距离平方，避免开根号的性能消耗
                     if (FVector::DistSquared(ALoc, B->GetActorLocation()) < RadiusSq)
                     {
-                        // 获取小队人数上限
-                        if (TargetSize == -1)
-                        {
-                            // 如果 A 已经是老队长，直接从结构体里读出那个“永久”的值
-                            if (FSquadGroup** ExistingPtr = CaptainMap.Find(A))
-                            {
-                                TargetSize = (*ExistingPtr)->FixedMaxCapacity;
-                            }
-                            else
-                            {
-                                // 如果是纯新人，则获取在属性表里配置的随机小队人数上限
-                                TargetSize = A->GetAttributeConfig()->GetRandomSquadSize();
-                            }
-                        }
-
                         Found.Add(B);
-                        // 优化点：队员一旦入组，立刻从待组队池中抽离 ---
+
+                        // 优化点：队员一旦入组，立刻从待组队池中抽离
                         // RemoveSingleSwap 会把末尾元素挪过来填补空缺，时间复杂度 O(N) 但比重排数组快得多
                         Candidates.RemoveSingleSwap(TWeakObjectPtr<ABaseCharacter>(B));
 
+                        // 本次找到的人数已达到目标指标，跳出内层循环
                         if (Found.Num() >= TargetSize) break;
                     }
                 }
             }
 
-            // 若小组满员，则跳出栅格循环搜索
-            if (TargetSize != -1 && Found.Num() >= TargetSize) break;
+            // 招募名额已满,足以补齐小队，无需继续搜索剩下的栅格
+            if (Found.Num() >= TargetSize) break;
         }
 
         if (Found.Num() >= 2)
@@ -223,12 +251,9 @@ void UMySquadSubsystem::UpdateGroupingLogic()
                 for (ABaseCharacter* Newbie : Found)
                 {
                     if (Newbie == A) continue;
-                    
+
                     // 若小组未满员，则从 found池 加入新成员
-                    if (ExistingGroup->Members.Num() < ExistingGroup->FixedMaxCapacity)
-                    {
-                        ExistingGroup->Members.AddUnique(Newbie);
-                    }
+                    ExistingGroup->TryAddMember(Newbie);
                 }
             }
             else
@@ -237,7 +262,7 @@ void UMySquadSubsystem::UpdateGroupingLogic()
                 FSquadGroup NewGroup;
                 for (auto* M : Found) NewGroup.Members.Add(M);
                 NewGroup.Captain = A;
-                
+
                 NewGroup.FixedMaxCapacity = TargetSize;
                 NewGroup.AnchorLocation = ALoc;
                 ActiveGroups.Add(NewGroup);
@@ -258,8 +283,8 @@ void UMySquadSubsystem::UpdateGroupingLogic()
     while (Lose.Num() > 0)
     {
         ABaseCharacter* C = Lose.Pop();
-        // 查找是否存在，不存在则加入
-        // 当有上千个元素时性能消耗较大
-        if (C) Candidates.AddUnique(C);
+
+        // Lose 是从 Candidates 里 Pop 出来的，确定不在池子里，直接 Add 即可，省去 AddUnique 查重开销
+        if (C) Candidates.Add(C);
     }
 }

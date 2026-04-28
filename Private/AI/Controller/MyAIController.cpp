@@ -26,6 +26,8 @@
 #include "SquadUp/MySquadSubsystem.h"
 // 规避工具
 #include "Avoidance/MyAvoidanceUtils.h"
+// 1. 在文件顶部包含移动子系统的头文件
+#include "SquadUp/MySquadMovementSubsystem.h"
 
 // 移动组件
 #include "GameFramework/CharacterMovementComponent.h"
@@ -128,10 +130,12 @@ void AMyAIController::Tick(float DeltaTime)
 	UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
 	// 获取小组子系统
 	UMySquadSubsystem* SquadSub = GetWorld()->GetSubsystem<UMySquadSubsystem>();
+	// 修复点：获取移动子系统
+	UMySquadMovementSubsystem* MoveSub = GetWorld()->GetSubsystem<UMySquadMovementSubsystem>();
 	if (!NavSys || !SquadSub) return;
 
 	// 1. 获取决策点
-	FVector GoalLocation = SquadSub->GetTacticalLocation(CachedMyCharacter);
+	FVector GoalLocation = MoveSub->GetTacticalLocation(CachedMyCharacter);
 
 	// --- 【原生优化：降低寻路频率，提升灵敏度】 ---
 	// 只有目标移动超过 50 厘米，才重新计算路径，否则沿用旧路点
