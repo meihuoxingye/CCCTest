@@ -33,7 +33,9 @@ protected:
 	// Called when the game starts
 	virtual void BeginPlay() override;
 
-
+	// 缓存组件拥有者的玩家或 AI 控制器
+	// 组件的 BeginPlay 执行时，角色可能还没有被控制器控制，所以不直接在 BeginPlay 里缓存
+	void CachedController();
 
 public:	
 	// Called every frame
@@ -53,6 +55,10 @@ private:
 	UPROPERTY()
 	TObjectPtr<class ABaseCharacter> CachedOwner;
 
+	// 缓存组件拥有者的控制器的指针
+	UPROPERTY()
+	TObjectPtr<class AController> CachedOwnerController;
+
 	// 缓存当前使用的武器
 	UPROPERTY()
 	TObjectPtr<class AMyWeaponBase> CachedActiveWeapon;
@@ -63,12 +69,31 @@ private:
 	UPROPERTY()
 	TObjectPtr<const class UMyWeaponDataAsset> CachedConfig;
 
+
 	// 缓存当前使用的武器的网格
 	// 静态网格也能使用插槽，且性能更好
 	UPROPERTY()
 	TObjectPtr<const class UStaticMeshComponent> CachedWeaponMesh;
 
+	// 缓存当前使用的武器的枪口插槽
+	FName CachedMuzzleSocket;
+
 	// 缓存子弹子系统指针
 	UPROPERTY()
 	TObjectPtr<class UMyBulletSubsystem> CachedBulletSubsystem;
+
+	// 记录是否已经尝试去抓过控制器了
+	bool bControllerChecked = false;
+
+	// 缓存玩家控制器（如果是 AI，则自动为 nullptr）
+	UPROPERTY()
+	TObjectPtr<class APlayerController> CachedPlayerController;
+
+	// 缓存玩家相机管理器（如果是 AI，则自动为 nullptr）
+	UPROPERTY()
+	TObjectPtr<class APlayerCameraManager> CachedCameraManager;
+
+	// 缓存 AI 控制器（如果是 玩家，则自动为 nullptr）
+	UPROPERTY()
+	TObjectPtr<class AAIController> CachedAIController;
 };

@@ -65,6 +65,12 @@ public:
     // 子弹生命周期
     UPROPERTY(EditAnywhere, Category = "Stats")
     float BulletLifespan = 5.f;
+    // 最高射击俯仰角
+    UPROPERTY(EditAnywhere, Category = "Stats")
+    float MaximumPitchAngle = 80.f;
+    // 最低射击俯仰角
+    UPROPERTY(EditAnywhere, Category = "Stats")
+    float MinimumPitchAngle = -80.f;
 
 
     // 设置枪口插槽
