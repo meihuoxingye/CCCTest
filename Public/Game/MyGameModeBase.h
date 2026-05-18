@@ -17,11 +17,11 @@ class CCC_API AMyGameModeBase : public AGameModeBase
 public:
 	// 动态维护当前存活友军的轻量级指针数组
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Roster")
-	TArray<class ABaseCharacter*> FriendlyRoster;
+	TArray<class ATopCharacter*> FriendlyRoster;
 
 	// 外部调用：角色出生时注册
-	void RegisterFriendly(class ABaseCharacter* Character);
+	void RegisterFriendly(class ATopCharacter* Character);
 
 	// 外部调用：角色死亡或销毁时注销
-	void UnregisterFriendly(class ABaseCharacter* Character);
+	void UnregisterFriendly(class ATopCharacter* Character);
 };

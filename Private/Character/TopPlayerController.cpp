@@ -36,8 +36,8 @@ void ATopPlayerController::UpdateHUD()
 	// O(1) 极速调取：向当前 GameMode 索要已过滤好、最干净的存活友军名单
 	if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(GetWorld()->GetAuthGameMode()))
 	{
-		// 传递名单，并将当前玩家所附身的 Pawn 转化为 ABaseCharacter 作为当前活跃单位传入
-		MainHUDInstance->UpdateSquadList(GM->FriendlyRoster, Cast<ABaseCharacter>(GetPawn()));
+		// 传递名单，并将当前玩家所附身的 Pawn 转化为 ATopCharacter 作为当前活跃单位传入
+		MainHUDInstance->UpdateSquadList(GM->FriendlyRoster, Cast<ATopCharacter>(GetPawn()));
 	}
 }
 

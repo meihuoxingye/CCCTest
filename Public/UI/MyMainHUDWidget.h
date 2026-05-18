@@ -25,6 +25,6 @@ public:
 
 	// 核心复用池刷新算法
 	UFUNCTION(BlueprintCallable, Category = "Squad UI")
-	void UpdateSquadList(const TArray<class ABaseCharacter*>& Members, class ABaseCharacter* ActiveChar);
+	void UpdateSquadList(const TArray<class ATopCharacter*>& Members, class ATopCharacter* ActiveChar);
 
 };

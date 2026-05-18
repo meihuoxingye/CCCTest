@@ -42,6 +42,10 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Logic")
 	ECharacterType CharacterType = ECharacterType::Friendly;
 
+	// 角色 ID
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Logic")
+	FName CharacterID = FName("DefaultCharacter");
+
 	// AI 检测等级，枚举类
 	UPROPERTY(EditAnywhere, Category = "Logic")
 	EAIDetectionLevel AIDetectionLevel = EAIDetectionLevel::NoPerception;
@@ -53,8 +57,20 @@ public:
 	// 最大生命值
 	// 当前生命值应在对应类的成员变量里
 	// 因为 DataAsset 在内存中只有一份，写在这里全地图所有的同种角色都会同时掉血
-	UPROPERTY(EditAnywhere, Category = "Base Attribute")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Base Attribute")
 	float MaxHealth = 100.f;
+
+	// 最大技能点数
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Base Attribute")
+	float MaxSP = 100.0f;
+
+	// 初始技能点数
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Base Attribute")
+	float InitialSP = 0.0f;
+
+	// 技能点恢复速度
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Base Attribute")
+	float RegenRate = 10.0f;
 
 
 	#pragma region AI_Perception

@@ -52,7 +52,14 @@ public:
 	FORCEINLINE TSubclassOf<AMyWeaponBase> GetDefaultWeaponClass() const { return DefaultWeaponClass; }
 
 	// 给外接开放一个获取角色属性数据资产配置的接口
-	FORCEINLINE TObjectPtr<const UCharacterAttributeDataAsset> GetAttributeConfig() const { return AttributeConfig; }
+	// 加入虚幻反射系统，使其在蓝图中可见
+	// 返回值不能是 TObjectPtr，蓝图只认原始指针
+	UFUNCTION(BlueprintPure)
+	FORCEINLINE class UCharacterAttributeDataAsset* GetAttributeConfig() const
+	{
+		// 用 const_cast 强行把 const 转掉，因为虚幻蓝图蓝图使用时不支持 const 修饰的返回值
+		return const_cast<UCharacterAttributeDataAsset*>(AttributeConfig.Get());
+	}
 
 	// 给外接开放一个获取战斗组件的接口
 	FORCEINLINE TObjectPtr<UMyCombatComponent> GetCombatComponent() const { return MCComponent; }

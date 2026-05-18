@@ -18,11 +18,11 @@ class CCC_API UMyCharacterStatusWidget : public UUserWidget
 public:
 	// 缓存当前 UI 绑定的角色指针，供蓝图获取血量等属性
 	UPROPERTY(BlueprintReadOnly, Category = "Squad UI")
-	TObjectPtr<class ABaseCharacter> BoundCharacter;
+	TObjectPtr<class ATopCharacter> BoundCharacter;
 
 	// 统一刷新接口
 	UFUNCTION(BlueprintCallable, Category = "Squad UI")
-	void RefreshWidget(class ABaseCharacter* InCharacter, bool bIsSelected);
+	void RefreshWidget(class ATopCharacter* InCharacter, bool bIsSelected);
 
 protected:
 	// 留给蓝图实现的事件：当选中状态更新时，触发 UMG 缩放动画或材质参数调整

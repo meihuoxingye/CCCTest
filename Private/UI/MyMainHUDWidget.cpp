@@ -5,9 +5,9 @@
 
 #include "Components/VerticalBox.h"
 #include "UI/MyCharacterStatusWidget.h"
-#include "Character/BaseCharacter.h"
+#include "Character/TopCharacter.h"
 
-void UMyMainHUDWidget::UpdateSquadList(const TArray<ABaseCharacter*>& Members, ABaseCharacter* ActiveChar)
+void UMyMainHUDWidget::UpdateSquadList(const TArray<ATopCharacter*>& Members, ATopCharacter* ActiveChar)
 {
 	if (!SquadContainer || !CharacterWidgetClass) return;
 

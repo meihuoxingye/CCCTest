@@ -23,7 +23,7 @@ struct FCharacterSPData
 
     // 【核心】快照点数：记录上次一操作（扣除、冻结、升级）时确切定格的技能点
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SP")
-    float SavedSP = 30.0f;
+    float SavedSP = 0.0f;
 
     // 作为时间戳，记录上次同步技能点的游戏时间
     // 采用 double 类型匹配 UE5 Large World Coordinates (LWC) 高精度时间轴

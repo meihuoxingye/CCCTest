@@ -3,7 +3,11 @@
 
 #include "Game/MyGameModeBase.h"
 
-void AMyGameModeBase::RegisterFriendly(ABaseCharacter* Character)
+//角色
+#include "Character/TopCharacter.h"
+
+
+void AMyGameModeBase::RegisterFriendly(ATopCharacter* Character)
 {
 	if (Character)
 	{
@@ -11,7 +15,7 @@ void AMyGameModeBase::RegisterFriendly(ABaseCharacter* Character)
 	}
 }
 
-void AMyGameModeBase::UnregisterFriendly(ABaseCharacter* Character)
+void AMyGameModeBase::UnregisterFriendly(ATopCharacter* Character)
 {
 	if (Character)
 	{

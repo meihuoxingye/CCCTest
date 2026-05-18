@@ -12,6 +12,9 @@
 // 角色属性数据资产配置
 #include "Character/CharacterAttributeDataAsset.h"
 
+// 技能点子系统
+#include "SkillSystem/SkillPointSubsystem.h"
+
 // Sets default values
 ATopCharacter::ATopCharacter()
 {
@@ -26,8 +29,27 @@ void ATopCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// 1. 使用局部的 const 原始指针来接取配置资产（推荐的最佳实践）
+	// 这样可以确保在当前的 BeginPlay 逻辑里，没有任何人能意外修改 Config 内部的数值
+	const UCharacterAttributeDataAsset* Config = AttributeConfig.Get();
+	if (!Config) return;
+
+	// 2. 获取技能点子系统（注意：这里的子系统指针【绝对不能】加 const）
+	if (USkillPointSubsystem* SkillPointSubsystem = GetWorld()->GetSubsystem<USkillPointSubsystem>())
+	{
+		// 3. 直接通过 const 指针读取成员并传入
+		SkillPointSubsystem->AddNewCharacterToSquad(
+			Config->CharacterID,
+			Config->MaxSP,
+			Config->InitialSP,
+			Config->RegenRate
+		);
+	}
+	
+	
+
 	// ===================== 【新增：友军出生自动注册与UI刷新调用】 =====================
-	if (AttributeConfig && AttributeConfig->CharacterType == ECharacterType::Friendly)
+	if (Config && Config->CharacterType == ECharacterType::Friendly)
 	{
 		if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(GetWorld()->GetAuthGameMode()))
 		{
@@ -40,12 +62,20 @@ void ATopCharacter::BeginPlay()
 			}
 		}
 	}
+
+
 }
 
 void ATopCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	// 使用局部的 const 原始指针来接取配置资产（推荐的最佳实践）
+	// 这样可以确保在当前的 BeginPlay 逻辑里，没有任何人能意外修改 Config 内部的数值
+	const UCharacterAttributeDataAsset* Config = AttributeConfig.Get();
+	if (!Config) return;
+
+
 	// ===================== 【友军阵亡自动注销与UI刷新调用】 =====================
-	if (AttributeConfig && AttributeConfig->CharacterType == ECharacterType::Friendly)
+	if (Config && Config->CharacterType == ECharacterType::Friendly)
 	{
 		if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(GetWorld()->GetAuthGameMode()))
 		{

@@ -3,10 +3,10 @@
 
 #include "UI/MyCharacterStatusWidget.h"
 
-#include "Character/BaseCharacter.h"
+#include "Character/TopCharacter.h"
 
 
-void UMyCharacterStatusWidget::RefreshWidget(ABaseCharacter* InCharacter, bool bIsSelected)
+void UMyCharacterStatusWidget::RefreshWidget(ATopCharacter* InCharacter, bool bIsSelected)
 {
 	BoundCharacter = InCharacter;
 
