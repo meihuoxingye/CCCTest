@@ -73,7 +73,7 @@ void UMySquadSubsystem::UpdateGroupingLogic()
     SearchAndFormSquads(GridMap);
 }
 
-void UMySquadSubsystem::PrintSquadStatus()
+void UMySquadSubsystem::PrintSquadStatus() const
 {
     // 实时打印小队状态到 Output Log
     // 打印一个分割线，方便在日志里区分不同时间点的数据
@@ -117,7 +117,7 @@ void UMySquadSubsystem::PrepareCandidates()
     }
 }
 
-void UMySquadSubsystem::BuildSpatialGrid(TMap<FIntPoint, TArray<ABaseCharacter*>>& OutGridMap)
+void UMySquadSubsystem::BuildSpatialGrid(TMap<FIntPoint, TArray<ABaseCharacter*>>& OutGridMap) const
 {
     // 定义局部 Lambda 函数，输入坐标，得到其在 x、y 方向的第几个栅格上
     // FloorToInt 向下取整，如 1.5 变 1

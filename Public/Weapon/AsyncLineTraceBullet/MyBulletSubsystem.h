@@ -51,8 +51,9 @@ struct FVirtualBulletData
     float RemainingLife;
 
     // 记录是谁打的，防止自伤
+    // 优化：改为弱指针！防野指针防内存泄漏
     UPROPERTY()
-    TObjectPtr<AActor> Owner;
+    TWeakObjectPtr<AActor> Owner;
 };
 
 UCLASS()

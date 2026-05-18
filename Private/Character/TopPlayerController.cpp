@@ -16,6 +16,9 @@
 // 自定义战斗组件
 #include "Component/CombatSystem/MyCombatComponent.h"
 
+// 全局时空控制
+#include "Kismet/GameplayStatics.h"
+
 ATopPlayerController::ATopPlayerController()
 {
 	bReplicates = false;
@@ -63,6 +66,7 @@ void ATopPlayerController::SetupInputComponent()
 		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &ATopPlayerController::StopJump);
 		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Started, this, &ATopPlayerController::Attack);
 		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Completed, this, &ATopPlayerController::AttackEnd);
+		EnhancedInputComponent->BindAction(BulletTimeAction, ETriggerEvent::Completed, this, &ATopPlayerController::BulletTime);
 	}
 
 }
@@ -138,5 +142,27 @@ void ATopPlayerController::AttackEnd()
 	{
 		// 告诉战斗组件：停止射击
 		CachedMyCombatComp->StopWeaponFire();
+	}
+}
+
+void ATopPlayerController::BulletTime()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	if (bIsBulletTime == false)
+	{
+		bIsBulletTime = true;
+
+		// 全局（DeltaTime）变慢 10 倍
+		// UI 界面 走的是 RealTimeSeconds（绝对现实时间），天然对时间膨胀免疫
+		UGameplayStatics::SetGlobalTimeDilation(World, 0.1f);
+
+	}
+	else
+	{
+		bIsBulletTime = false;
+		// 时空速度恢复 1.0
+		UGameplayStatics::SetGlobalTimeDilation(World, 1.0f);
 	}
 }

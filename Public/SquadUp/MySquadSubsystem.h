@@ -35,6 +35,8 @@ public:
 
     // 允许外部（如移动子系统）获取活跃小组的引用以更新战术锚点
     TArray<struct FSquadGroup>& GetActiveGroups() { return ActiveGroups; }
+    // 新增：const 重载版本，允许只读访问
+    FORCEINLINE const TArray<struct FSquadGroup>& GetActiveGroups() const { return ActiveGroups; }
 
     // FTickableGameObject 接口实现
     virtual void Tick(float DeltaTime) override;
@@ -58,14 +60,15 @@ private:
     // 核心组队逻辑的分离（管线化步骤）
     // ==========================================
 
-    // 1. 打印战术面板日志
-    void PrintSquadStatus();
+    // 1. 打印战术面板日志,不应该修改任何子系统的变量
+    void PrintSquadStatus() const;
 
     // 2. 清理失效指针，并根据队伍人数将队长退回/抽离待组队池
     void PrepareCandidates();
 
     // 3. 构建空间哈希网格 (Spatial Grid)
-    void BuildSpatialGrid(TMap<FIntPoint, TArray<ABaseCharacter*>>& OutGridMap);
+    // 只负责读取 Candidates 坐标，然后往外部传进来的 OutGridMap 里塞指针，它本身并没有改动子系统的 GridSize、Candidates 等任何成员。可以加 const。
+    void BuildSpatialGrid(TMap<FIntPoint, TArray<ABaseCharacter*>>& OutGridMap) const;
 
     // 4. 2x2 象限搜索，执行人员匹配与组队
     void SearchAndFormSquads(const TMap<FIntPoint, TArray<ABaseCharacter*>>& OutGridMap);

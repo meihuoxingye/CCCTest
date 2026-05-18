@@ -36,6 +36,16 @@ void UMyBulletSubsystem::Tick(float DeltaTime)
         // 永远固定的步长时间
         const float FixedStep = TargetUpdateInterval;
 
+        // 优化：外部缓存 World 指针
+        // 避免在嵌套循环中几十次、上百次地反复调用 GetWorld()
+        UWorld* World = GetWorld();
+        if (!World) return;
+
+        // 将结构体声明在 for 循环外面，只分配一次内存
+        // FCollisionQueryParams 是虚幻引擎提供的一个结构体，相当于一份碰撞规则调查问卷或过滤清单
+        // 这份清单里可以配置很多高级选项，比如：是否要检测复杂碰撞（逐多边形检测）、是否返回物理材质（打中木头还是铁）、以及要忽略哪些物体
+        FCollisionQueryParams Params;
+
         // 倒序遍历数组，处理这段时间内的所有子弹
         // 为什么倒序，因为可能会因为中途撞墙，在循环结束前提前摧毁子弹
         // 正序删除会导致数组元素前移，漏掉一个子弹不处理；倒序删除则不会有这个问题
@@ -49,16 +59,20 @@ void UMyBulletSubsystem::Tick(float DeltaTime)
 
             // 碰撞/命中调查报告
             FHitResult Hit;
-            // FCollisionQueryParams 是虚幻引擎提供的一个结构体，相当于一份碰撞规则调查问卷或过滤清单
-            // 这份清单里可以配置很多高级选项，比如：是否要检测复杂碰撞（逐多边形检测）、是否返回物理材质（打中木头还是铁）、以及要忽略哪些物体
-            FCollisionQueryParams Params;
-            // 把当前这颗子弹的主人加入忽略列表
-            Params.AddIgnoredActor(Bullet.Owner);
+            
+            // 每次循环先清空上次的忽略列表
+            Params.ClearIgnoredActors();
+            if (Bullet.Owner.IsValid())
+            {
+                // 把当前这颗子弹的主人加入忽略列表
+                // 弱指针，用 .Get() 变为原始指针
+                Params.AddIgnoredActor(Bullet.Owner.Get());
+            }
 
             // 这是一个纯正的同步（Synchronous）阻塞函数
             // 异步（解耦）是指结构，主人与子弹开火解耦与生命周期分离
             // 有真正的异步射线检测函数且性能更好，但也有响应的问题且更复杂
-            if (GetWorld()->LineTraceSingleByChannel(Hit, Bullet.Position, NextLoc, ECC_Visibility, Params))
+            if (World->LineTraceSingleByChannel(Hit, Bullet.Position, NextLoc, ECC_Visibility, Params))
             {
                 // 射线命中逻辑
                 if (Hit.GetActor())
@@ -68,7 +82,7 @@ void UMyBulletSubsystem::Tick(float DeltaTime)
                 }
 
                 // 绘制命中点（调试用）
-                DrawDebugSphere(GetWorld(), Hit.ImpactPoint, 10.f, 8, FColor::Red, false, 0.5f);
+                DrawDebugSphere(World, Hit.ImpactPoint, 10.f, 8, FColor::Red, false, 0.5f);
 
                 // 使用 RemoveAtSwap 进一步提升大数组删除效率
                 ActiveBullets.RemoveAtSwap(i); 
@@ -78,7 +92,7 @@ void UMyBulletSubsystem::Tick(float DeltaTime)
 
             // 对于射线没撞到实体的子弹，更新位置并画出“肉眼可见”的轨迹
             // 这里的 0.05f 持续时间略大于 30Hz 间隔，保证视觉连贯无闪烁
-            DrawDebugLine(GetWorld(), Bullet.Position, NextLoc, FColor::Yellow, false, 0.05f, 0, 1.0f);
+            DrawDebugLine(World, Bullet.Position, NextLoc, FColor::Yellow, false, 0.05f, 0, 1.0f);
 
             Bullet.Position = NextLoc;
             // 子弹生命周期自减一次线迹追踪间隔时间

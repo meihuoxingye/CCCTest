@@ -57,6 +57,8 @@ private:
 	TObjectPtr<class UInputAction> JumpAction;
 	UPROPERTY(EditAnywhere, Category = "Input")
 	TObjectPtr<class UInputAction> AttackAction;
+	UPROPERTY(EditAnywhere, Category = "Input")
+	TObjectPtr<class UInputAction> BulletTimeAction;
 
 
 	/** Input Callback Functions*/
@@ -65,4 +67,6 @@ private:
 	void StopJump();
 	void Attack();
 	void AttackEnd();
+	void BulletTime();
+	bool bIsBulletTime = false;
 };
