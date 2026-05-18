@@ -22,6 +22,17 @@ class CCC_API ATopPlayerController : public APlayerController
 public:
 	ATopPlayerController();
 
+	// ===================== 【新增：UI 属性与控制方法】 =====================
+	UPROPERTY(EditDefaultsOnly, Category = "UI")
+	TSubclassOf<class UMyMainHUDWidget> MainHUDClass;
+
+	UPROPERTY()
+	TObjectPtr<class UMyMainHUDWidget> MainHUDInstance;
+
+	// 主动调用以刷新当前界面布局
+	UFUNCTION(BlueprintCallable, Category = "UI")
+	void UpdateHUD();
+
 protected:
 	virtual void BeginPlay() override;
 

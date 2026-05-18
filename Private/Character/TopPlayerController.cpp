@@ -19,9 +19,26 @@
 // 全局时空控制
 #include "Kismet/GameplayStatics.h"
 
+// 引入 UI 及 GameMode 头文件
+#include "UI/MyMainHUDWidget.h"
+#include "Game/MyGameModeBase.h"
+
 ATopPlayerController::ATopPlayerController()
 {
 	bReplicates = false;
+}
+
+void ATopPlayerController::UpdateHUD()
+{
+	// 如果 UI 面板还未就绪，或者不在游戏世界里，直接返回
+	if (!MainHUDInstance || !GetWorld()) return;
+
+	// O(1) 极速调取：向当前 GameMode 索要已过滤好、最干净的存活友军名单
+	if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(GetWorld()->GetAuthGameMode()))
+	{
+		// 传递名单，并将当前玩家所附身的 Pawn 转化为 ABaseCharacter 作为当前活跃单位传入
+		MainHUDInstance->UpdateSquadList(GM->FriendlyRoster, Cast<ABaseCharacter>(GetPawn()));
+	}
 }
 
 void ATopPlayerController::BeginPlay()
@@ -49,6 +66,17 @@ void ATopPlayerController::BeginPlay()
 
 	// 应用键盘鼠标输入配置
 	SetInputMode(InputModeData);
+
+	// ===================== 【新增：HUD 控件的初始化与首帧构建】 =====================
+	if (MainHUDClass)
+	{
+		MainHUDInstance = CreateWidget<UMyMainHUDWidget>(this, MainHUDClass);
+		if (MainHUDInstance)
+		{
+			MainHUDInstance->AddToViewport();
+			UpdateHUD();
+		}
+	}
 }
 
 void ATopPlayerController::SetupInputComponent()
@@ -87,6 +115,9 @@ void ATopPlayerController::OnPossess(APawn* InPawn)
 
 	// 缓存自定义战斗组件
 	CachedMyCombatComp = CachedMyCharacter->GetCombatComponent();
+
+	// ===================== 【新增：当玩家控制权交接时，立即重刷 UI 放大高亮状态】 =====================
+	UpdateHUD();
 }
 
 void ATopPlayerController::OnUnPossess()
