@@ -11,5 +11,6 @@ void UMyCharacterStatusWidget::RefreshWidget(ATopCharacter* InCharacter, bool bI
 	BoundCharacter = InCharacter;
 
 	// 触发蓝图层的视觉动画逻辑
-	OnSelectionUpdated(bIsSelected);
+	// OnSelectionUpdated(bIsSelected);
 }
+

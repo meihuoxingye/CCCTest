@@ -47,23 +47,23 @@ void ATopCharacter::BeginPlay()
 	}
 	
 	
-
-	// ===================== 【新增：友军出生自动注册与UI刷新调用】 =====================
+	// 类型为友好的角色出生自动注册与UI刷新调用
 	if (Config && Config->CharacterType == ECharacterType::Friendly)
 	{
+		// GetAuthGameMode() 向当前关卡世界申请获取基础游戏模式
 		if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(GetWorld()->GetAuthGameMode()))
 		{
+			// 将此角色注册到 MyGameModeBase 的友军名册里
 			GM->RegisterFriendly(this);
 
 			// 通知玩家控制器更新 HUD 列表
+			// GetFirstPlayerController() 获取0号（第一个）玩家控制器
 			if (ATopPlayerController* PC = Cast<ATopPlayerController>(GetWorld()->GetFirstPlayerController()))
 			{
 				PC->UpdateHUD();
 			}
 		}
 	}
-
-
 }
 
 void ATopCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)

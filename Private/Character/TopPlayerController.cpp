@@ -36,7 +36,7 @@ void ATopPlayerController::UpdateHUD()
 	// O(1) 极速调取：向当前 GameMode 索要已过滤好、最干净的存活友军名单
 	if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(GetWorld()->GetAuthGameMode()))
 	{
-		// 传递名单，并将当前玩家所附身的 Pawn 转化为 ATopCharacter 作为当前活跃单位传入
+		// 传递名单，并将当前玩家控制器所附身的 Pawn 转化为 ATopCharacter 作为当前活跃单位传入
 		MainHUDInstance->UpdateSquadList(GM->FriendlyRoster, Cast<ATopCharacter>(GetPawn()));
 	}
 }
@@ -67,13 +67,16 @@ void ATopPlayerController::BeginPlay()
 	// 应用键盘鼠标输入配置
 	SetInputMode(InputModeData);
 
-	// ===================== 【新增：HUD 控件的初始化与首帧构建】 =====================
+	// HUD 控件的初始化与首帧构建
 	if (MainHUDClass)
 	{
+		// 创造主 UI 组件，拥有者为当前玩家控制器
 		MainHUDInstance = CreateWidget<UMyMainHUDWidget>(this, MainHUDClass);
 		if (MainHUDInstance)
 		{
+			// 将主 UI 组件添加到视口
 			MainHUDInstance->AddToViewport();
+			// 更新 UI 界面
 			UpdateHUD();
 		}
 	}
@@ -116,7 +119,7 @@ void ATopPlayerController::OnPossess(APawn* InPawn)
 	// 缓存自定义战斗组件
 	CachedMyCombatComp = CachedMyCharacter->GetCombatComponent();
 
-	// ===================== 【新增：当玩家控制权交接时，立即重刷 UI 放大高亮状态】 =====================
+	// 当玩家控制权交接时，立即重刷 UI
 	UpdateHUD();
 }
 

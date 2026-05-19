@@ -22,7 +22,7 @@ class CCC_API ATopPlayerController : public APlayerController
 public:
 	ATopPlayerController();
 
-	// ===================== 【新增：UI 属性与控制方法】 =====================
+	// ===================== 【UI 属性与控制方法】 =====================
 	UPROPERTY(EditDefaultsOnly, Category = "UI")
 	TSubclassOf<class UMyMainHUDWidget> MainHUDClass;
 
