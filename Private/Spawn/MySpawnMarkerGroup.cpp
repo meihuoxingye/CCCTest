@@ -6,6 +6,9 @@
 #include "Components/BillboardComponent.h" // 引入图标组件
 #include "Spawn/MyEnemySpawnSubsystem.h"
 
+// 识别 UWorld 指针
+#include "Engine/World.h"
+
 AMySpawnMarkerGroup::AMySpawnMarkerGroup()
 {
     // 关闭 Tick，追求极致性能

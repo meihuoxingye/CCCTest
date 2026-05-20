@@ -15,6 +15,9 @@
 // 技能点子系统
 #include "SkillSystem/SkillPointSubsystem.h"
 
+// 使用了 GetWorld()，让编译器知道 UWorld* 指针
+#include "Engine/World.h"
+
 // Sets default values
 ATopCharacter::ATopCharacter()
 {

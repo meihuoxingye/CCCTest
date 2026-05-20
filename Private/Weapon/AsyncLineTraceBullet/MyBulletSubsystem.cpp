@@ -5,6 +5,9 @@
 #include "Engine/World.h"
 #include "Kismet/KismetSystemLibrary.h"
 
+// 绘制调试线和调试球
+#include "DrawDebugHelpers.h"
+
 void UMyBulletSubsystem::FireBullet(AActor* InOwner, const FVector& StartLoc, const FVector& Direction, float Speed, float LifeTime)
 {
     // 定义一个新的子弹数据结构体并设置参数
@@ -61,7 +64,7 @@ void UMyBulletSubsystem::Tick(float DeltaTime)
             FHitResult Hit;
             
             // 每次循环先清空上次的忽略列表
-            Params.ClearIgnoredActors();
+            Params.ClearIgnoredSourceObjects();
             if (Bullet.Owner.IsValid())
             {
                 // 把当前这颗子弹的主人加入忽略列表

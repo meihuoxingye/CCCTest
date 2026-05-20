@@ -59,8 +59,8 @@ void UMyMainHUDWidget::UpdateSquadList(const TArray<ATopCharacter*>& Members, AT
 			// 到这一步，无论 Target 是复用出来的还是新创建的，首先把它设置为 SelfHitTestInvisible（自身可见但不响应鼠标点击） 状态
 			Target->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 
-			// 更新当前绑定角色并触发蓝图层的视觉动画逻辑
-			Target->RefreshWidget(Members[i], Members[i] == ActiveChar);
+			// 【核心修改】：不再调用 RefreshWidget，而是同步 ViewModel 数据
+			Target->SyncViewModel(Members[i], Members[i] == ActiveChar);
 		}
 	}
 

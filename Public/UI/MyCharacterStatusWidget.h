@@ -16,16 +16,21 @@ class CCC_API UMyCharacterStatusWidget : public UUserWidget
 
 
 public:
-	// 在 RefreshWidget 缓存当前 UI 绑定的角色指针，以便能在蓝图中获取血量等属性
-	UPROPERTY(BlueprintReadOnly, Category = "Squad UI")
-	TObjectPtr<class ATopCharacter> BoundCharacter;
+	// 存储该 Widget 对应的数据源
+	// 注意这里我们叫 CharacterVM，方便在 UMG 蓝图里做 Property Path 绑定
+	UPROPERTY(BlueprintReadOnly, Transient, Category = "MVVM")
+	TObjectPtr<class UMyCharacterViewModel> CharacterVM;
 
-	// 主 UI 控件里调用，传入角色指针和是否为当前选择角色，更新当前绑定角色并触发蓝图层的视觉动画逻辑
-	UFUNCTION(BlueprintCallable, Category = "Squad UI")
-	void RefreshWidget(class ATopCharacter* InCharacter, bool bIsSelected);
+	// 替换原来的 RefreshWidget
+	void SyncViewModel(class ATopCharacter* InCharacter, bool bSelected);
 
 protected:
-	// 留给蓝图实现的事件：当选中状态更新时，触发 UMG 缩放动画或材质参数调整
-	UFUNCTION(BlueprintImplementableEvent, Category = "Squad UI")
-	void OnSelectionUpdated(bool bNewIsSelected);
+	// =========================================================================
+	// 【正宗写法】：NativeTick 必须在这里声明！因为 UMyCharacterStatusWidget 继承自 UUserWidget
+	// =========================================================================
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
+
+private:
+	// 缓存当前小卡片对应的角色 ID，供 Tick 每帧去子系统里查询
+	FName CachedCharacterID;
 };

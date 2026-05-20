@@ -6,6 +6,9 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "SkillPointSubsystem.generated.h"
 
+// 删掉 DYNAMIC，使用原生多播委托
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnSPChangedSignature, FName /*CharacterID*/, float /*NewSPPercent*/);
+
 /**
  * 
  */
@@ -53,6 +56,11 @@ public:
     // 技能点数据哈希表，Key 是角色 ID（FName），Value 是技能点数据结构体
     UPROPERTY(BlueprintReadWrite, Category = "Squad")
     TMap<FName, FCharacterSPData> SquadSPMap;
+
+    // 为处理不可预测的突发事件（如技能释放、装备升级），使用委托
+    // 不经过虚幻反射系统，只在 C++ 使用的原生多播委托，性能略好一些
+    // 原生委托不需要也不能加 UPROPERTY，它就是纯 C++ 变量
+    FOnSPChangedSignature OnSPChanged;
 
 
     // --- 核心只读函数，全部标记为 const，实现 Const Correctness ---

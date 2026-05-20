@@ -7,6 +7,9 @@
 // 移动组件
 #include "GameFramework/CharacterMovementComponent.h"
 
+// 使用骨骼网格体的独有函数
+#include "Components/SkeletalMeshComponent.h"
+
 
 UMyMovementControlComponent::UMyMovementControlComponent()
 {

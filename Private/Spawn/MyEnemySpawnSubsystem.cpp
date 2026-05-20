@@ -7,6 +7,15 @@
 
 #include "TimerManager.h"
 
+// 识别 UWorld 指针
+#include "Engine/World.h"
+
+// 访问场景组件，能获取其位置和旋转
+#include "Components/SceneComponent.h"
+
+// 使用 APawn 的特有功能
+#include "GameFramework/Pawn.h"
+
 void UMyEnemySpawnSubsystem::RegisterSpawnPoint(USceneComponent* Point)
 {
     if (Point) SpawnPoints.AddUnique(Point);

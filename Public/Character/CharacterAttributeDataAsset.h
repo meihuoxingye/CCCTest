@@ -4,6 +4,8 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+// 【必须添加】：C++23 强制要求显式包含
+#include "Engine/Texture2D.h" 
 #include "CharacterAttributeDataAsset.generated.h"
 
 // 自定义枚举类，确定是友方、敌人还是中立
@@ -41,6 +43,11 @@ public:
 	// 角色类型，枚举类
 	UPROPERTY(EditAnywhere, Category = "Logic")
 	ECharacterType CharacterType = ECharacterType::Friendly;
+
+	// 角色的专属头像（软引用方式）
+	// meta 语法解析：只有当 CharacterType 变量的值等于 ECharacterType::Friendly 时，该属性才允许编辑；若不等于，则直接在细节面板隐藏！
+	UPROPERTY(EditAnywhere, Category = "Visuals", meta = (EditCondition = "CharacterType == ECharacterType::Friendly", EditConditionHides))
+	TSoftObjectPtr<UTexture2D> CharacterAvatar;
 
 	// 角色 ID
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Logic")

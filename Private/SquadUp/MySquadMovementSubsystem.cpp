@@ -7,6 +7,9 @@
 #include "Character/CharacterAttributeDataAsset.h"
 #include "Kismet/GameplayStatics.h"
 
+// 识别 UWorld 指针
+#include "Engine/World.h"
+
 // 优化 3：标记为 const
 FVector UMySquadMovementSubsystem::GetTacticalLocation(ABaseCharacter* Character) const
 {

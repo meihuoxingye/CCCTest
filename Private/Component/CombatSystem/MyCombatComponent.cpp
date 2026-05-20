@@ -19,6 +19,14 @@
 // AI 控制器类
 #include "AI/Controller/MyAIController.h"
 
+// 能识别 UWorld 指针
+#include "Engine/World.h"
+// 使用骨骼网格体的独有函数
+#include "Components/SkeletalMeshComponent.h"
+// 使用静态网格体的独有函数
+#include "Components/StaticMeshComponent.h"
+
+
 // Sets default values for this component's properties
 UMyCombatComponent::UMyCombatComponent()
 {

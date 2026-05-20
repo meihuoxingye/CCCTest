@@ -4,6 +4,9 @@
 #include "Weapon/MyWeaponBase.h"
 #include "Component/CombatSystem/MyWeaponDataAsset.h"
 
+// 使用静态网格体的独有函数
+#include "Components/StaticMeshComponent.h"
+
 // Sets default values
 AMyWeaponBase::AMyWeaponBase()
 {

@@ -3,6 +3,9 @@
 
 #include "SkillSystem/SkillPointSubsystem.h"
 
+// 识别 UWorld 指针
+#include "Engine/World.h"
+
 void USkillPointSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     // 调用父类初始化
@@ -79,6 +82,11 @@ bool USkillPointSubsystem::ConsumeCharacterSP(FName CharacterID, float Amount)
         DataPtr->SavedSP = CurrentSP - Amount;
         // 记录本次操作的时间戳，作为新的同步基准点
         DataPtr->LastSyncGameTime = GetWorld()->GetTimeSeconds();
+
+        // 【新增广播】：通知 UI，技能点被扣了！触发 UI 瞬间下落！
+        // ==========================================
+        OnSPChanged.Broadcast(CharacterID, GetCharacterSPPercent(CharacterID));
+
         return true;
     }
 
@@ -187,6 +195,10 @@ void USkillPointSubsystem::UpdateCharacterConfig(FName CharacterID, float NewMax
     // 接下来流逝的时间差，将完全安全地按照新的速度执行，绝不污染过去的历史。
     DataPtr->MaxSP = NewMaxSP;
     DataPtr->RegenRate = NewRegenRate;
+
+    // 【新增广播】：通知 UI，技能点被扣了！触发 UI 瞬间下落！
+    // ==========================================
+    OnSPChanged.Broadcast(CharacterID, GetCharacterSPPercent(CharacterID));
 }
 
 void USkillPointSubsystem::RemoveCharacterFromSquad(FName CharacterID)
