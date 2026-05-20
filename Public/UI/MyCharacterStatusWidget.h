@@ -14,23 +14,32 @@ class CCC_API UMyCharacterStatusWidget : public UUserWidget
 {
 	GENERATED_BODY()
 
-
 public:
-	// 存储该 Widget 对应的数据源
-	// 注意这里我们叫 CharacterVM，方便在 UMG 蓝图里做 Property Path 绑定
-	UPROPERTY(BlueprintReadOnly, Transient, Category = "MVVM")
-	TObjectPtr<class UMyCharacterViewModel> CharacterVM;
-
-	// 替换原来的 RefreshWidget
+	/** 由外部初始化调用，同步角色引用与数据 */
+	UFUNCTION(BlueprintCallable, Category = "CharacterUI")
 	void SyncViewModel(class ATopCharacter* InCharacter, bool bSelected);
 
 protected:
-	// =========================================================================
-	// 【正宗写法】：NativeTick 必须在这里声明！因为 UMyCharacterStatusWidget 继承自 UUserWidget
-	// =========================================================================
-	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
+	virtual void NativeDestruct() override;
+
+	/** 响应子系统 SP 数据变更的回调 */
+	void OnSPDataChanged(FName CharacterID, float NewSPPercent);
+
+	/** 内部逻辑：从子系统拉取最新数据并注入 ViewModel */
+	void RefreshSPDataFromSubsystem();
 
 private:
-	// 缓存当前小卡片对应的角色 ID，供 Tick 每帧去子系统里查询
+	/** 缓存当前绑定的角色 ID */
+	UPROPERTY()
 	FName CachedCharacterID;
+
+	/** 强引用 ViewModel，确保其生命周期随 Widget */
+	UPROPERTY()
+	TObjectPtr<class UMyCharacterViewModel> CharacterVM;
+
+	/**
+	 * 精准卸载句柄 (2026 规范)
+	 * 用于在对象销毁时从全局子系统中精准解绑，防止 RemoveAll 误伤其他逻辑
+	 */
+	FDelegateHandle SPChangedHandle;
 };
