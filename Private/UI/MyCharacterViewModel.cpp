@@ -63,15 +63,3 @@ bool UMyCharacterViewModel::IsSelected() const
 {
 	return bIsSelected;
 }
-
-FSlateBrush UMyCharacterViewModel::Conv_SoftTextureToBrush(TSoftObjectPtr<UTexture2D> InSoftTexture)
-{
-	FSlateBrush Brush;
-	if (!InSoftTexture.IsNull())
-	{
-		// 注意：LoadSynchronous 在主线程调用可能产生微小停顿
-		// 但这是实现从软引用到 Brush 直接转换的最可靠路径
-		Brush.SetResourceObject(InSoftTexture.LoadSynchronous());
-	}
-	return Brush;
-}

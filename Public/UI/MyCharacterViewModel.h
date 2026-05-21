@@ -92,8 +92,4 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "MVVM")
 	bool IsSelected() const;
-
-	// FIX 3: 专门用于绑定面板的转换函数
-	UFUNCTION(BlueprintPure, Category = "MVVM|Conversion")
-	static struct FSlateBrush Conv_SoftTextureToBrush(TSoftObjectPtr<UTexture2D> InSoftTexture);
 };

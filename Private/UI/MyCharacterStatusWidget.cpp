@@ -8,6 +8,10 @@
 #include "View/MVVMView.h" 
 // 只要代码里有 GetWorld() 就必带此文件
 #include "Engine/World.h" 
+// UI 里的 Image 控件
+#include "Components/Image.h"
+// 用于在运行时动态修改材质参数
+#include "Materials/MaterialInstanceDynamic.h"
 
 
 void UMyCharacterStatusWidget::SyncViewModel(ATopCharacter* InCharacter, bool bSelected)
@@ -55,6 +59,12 @@ void UMyCharacterStatusWidget::SyncViewModel(ATopCharacter* InCharacter, bool bS
 			}
 		}
 	}
+
+	// 初始化材质实例
+	if (SPProgressBarImage && !SP_MID)
+	{
+		SP_MID = SPProgressBarImage->GetDynamicMaterial();
+	}
 }
 
 void UMyCharacterStatusWidget::OnSPDataChanged(FName CharacterID, float NewSPPercent)
@@ -84,6 +94,17 @@ void UMyCharacterStatusWidget::RefreshSPDataFromSubsystem()
 				DataPtr->LastSyncGameTime
 			);
 		}
+	}
+}
+
+void UMyCharacterStatusWidget::UpdateSPMaterialParameters(const FSPMaterialData& InData)
+{
+	if (SP_MID)
+	{
+		// 消除 (Eliminate) 冗余计算，直接将断点数据同步给 GPU
+		SP_MID->SetScalarParameterValue(FName("SavedSPPercent"), InData.SavedSPPercent);
+		SP_MID->SetScalarParameterValue(FName("RegenRatePercent"), InData.RegenRatePercent);
+		SP_MID->SetScalarParameterValue(FName("LastSyncTime"), InData.LastSyncTime);
 	}
 }
 
