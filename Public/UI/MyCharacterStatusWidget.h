@@ -11,7 +11,7 @@
 #include "MyCharacterStatusWidget.generated.h"
 
 /**
- * 
+ * 角色状态 UI (MPC 终极优化版：0 Tick)
  */
 UCLASS()
 class CCC_API UMyCharacterStatusWidget : public UUserWidget
@@ -19,52 +19,39 @@ class CCC_API UMyCharacterStatusWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
-	/** 由外部初始化调用，同步角色引用与数据 */
+	/** 由外部初始化调用，同步角色引用与基础静态数据 */
 	UFUNCTION(BlueprintCallable, Category = "CharacterUI")
 	void SyncViewModel(class ATopCharacter* InCharacter, bool bSelected);
-
-	/**
-	 * 关键：这是 MVVM 绑定的目标函数。
-	 * 必须标记 MVVMAllowed 才能在面板中被选中。
-	 * 修正点 1：参数改为 const 引用。在 MVVM 5.4+ 中，这是最标准的 Input 形式
-	 * 修正点 2：确保 FSPMaterialData 的头文件已在上方 include
-	 */
-	UFUNCTION(BlueprintCallable, Category = "MVVM", meta = (MVVMAllowed))
-	void UpdateSPMaterialParameters(const struct FSPMaterialData& InData);
 
 protected:
 	virtual void NativeDestruct() override;
 
-	/** 响应子系统 SP 数据变更的回调 */
+	/** 响应子系统 SP 数据变更的回调 (事件驱动) */
 	void OnSPDataChanged(FName CharacterID, float NewSPPercent);
 
-	/** 内部逻辑：从子系统拉取最新数据并注入 ViewModel */
+	/** 内部逻辑：从子系统拉取最新快照并直接喂给 GPU 材质 */
 	void RefreshSPDataFromSubsystem();
 
 private:
-	/** 缓存当前绑定的角色 ID */
+	/** 缓存当前绑定的角色 ID，用于快速验证回调身份 */
 	UPROPERTY()
 	FName CachedCharacterID;
 
-	/** 强引用 ViewModel，确保其生命周期随 Widget */
+	/** 强引用 ViewModel，处理血量、头像等低频离散数据 */
 	UPROPERTY()
 	TObjectPtr<class UMyCharacterViewModel> CharacterVM;
 
 	/**
-	 * 精准卸载句柄 (2026 规范)
-	 * 用于在对象销毁时从全局子系统中精准解绑，防止 RemoveAll 误伤其他逻辑
+	 * 精准卸载句柄
+	 * 用于在对象销毁时从全局子系统中精准解绑
 	 */
 	FDelegateHandle SPChangedHandle;
 
-
-	/** 材质动态实例，用于消除 (Eliminate) 每帧的参数寻址开销 */
+	/** 材质动态实例，用于向 GPU 传递底层快照参数 */
 	UPROPERTY()
 	TObjectPtr<class UMaterialInstanceDynamic> SP_MID;
 
-	/**
-	 * 绑定 UI 里的 Image 控件
-	 * 请确保 UMG 蓝图里有一个同名的 Image 控件，名称叫 SPProgressBarImage
-	 */
+	/** 绑定 UI 里的 Image 控件 */
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<class UImage> SPProgressBarImage;
 };

@@ -22,6 +22,8 @@ class CCC_API ATopPlayerController : public APlayerController
 public:
 	ATopPlayerController();
 
+	virtual void Tick(float DeltaTime) override;
+
 	// ===================== 【UI 属性与控制方法】 =====================
 	UPROPERTY(EditDefaultsOnly, Category = "UI")
 	TSubclassOf<class UMyMainHUDWidget> MainHUDClass;
@@ -58,6 +60,11 @@ protected:
 	// 当控制器不再控制时将指针清空
 	virtual void OnUnPossess() override;
 	/** 缓存找到的自定义输入移动组件，避免每帧都寻找 */
+
+
+	// 在蓝图中配置创建的材质参数集合资产（MPC）
+	UPROPERTY(EditDefaultsOnly, Category = "Optimization")
+	TObjectPtr<class UMaterialParameterCollection> GlobalUIMPC;
 
 private:
 	UPROPERTY(EditAnywhere, Category = "Input")

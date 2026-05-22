@@ -1,6 +1,5 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-
 #include "Character/TopPlayerController.h"
 
 // 增强输入
@@ -23,9 +22,30 @@
 #include "UI/MyMainHUDWidget.h"
 #include "Game/MyGameModeBase.h"
 
+// 必须包含这两个个来设置材质参数集合资产（MPC）
+#include "Materials/MaterialParameterCollection.h" 
+#include "Kismet/KismetMaterialLibrary.h"
+
+
 ATopPlayerController::ATopPlayerController()
 {
 	bReplicates = false;
+}
+
+void ATopPlayerController::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	// 注意这里：一定要写 GlobalUIMPC.Get() ！！！
+	if (GlobalUIMPC.Get() && GetWorld())
+	{
+		UKismetMaterialLibrary::SetScalarParameterValue(
+			GetWorld(),
+			GlobalUIMPC.Get(),  // 这里你写对了
+			FName("GlobalGameTime"),
+			GetWorld()->GetTimeSeconds()
+		);
+	}
 }
 
 void ATopPlayerController::UpdateHUD()

@@ -18,19 +18,15 @@ void UMyCharacterStatusWidget::SyncViewModel(ATopCharacter* InCharacter, bool bS
 {
 	if (!InCharacter) return;
 
-	// 1. 初始化 ViewModel (懒加载模式)
+	// 1. 初始化 ViewModel (低频业务管线)
 	if (!CharacterVM)
 	{
 		CharacterVM = NewObject<UMyCharacterViewModel>(this);
-
-		// 在 C++ 中动态向 MVVM 扩展注入 ViewModel
 		if (UMVVMView* ViewExtension = GetExtension<UMVVMView>())
 		{
-			// 这里的 FName 必须与 UMG 编辑器中 ViewModel 的名称完全一致
 			ViewExtension->SetViewModel(FName("MyCharacterViewModel"), CharacterVM);
 		}
 	}
-
 	CharacterVM->SetIsSelected(bSelected);
 
 	// 2. 基础属性初始化
@@ -39,38 +35,39 @@ void UMyCharacterStatusWidget::SyncViewModel(ATopCharacter* InCharacter, bool bS
 		CachedCharacterID = Config->CharacterID;
 		CharacterVM->SetMaxHealth(Config->MaxHealth);
 		CharacterVM->SetCharacterAvatar(Config->CharacterAvatar);
-
-		// 3. 子系统委托处理
-		if (UWorld* World = GetWorld())
-		{
-			if (USkillPointSubsystem* SP_Sub = World->GetSubsystem<USkillPointSubsystem>())
-			{
-				// 卸载旧句柄，防止 SyncViewModel 被多次调用导致的重复绑定
-				if (SPChangedHandle.IsValid())
-				{
-					SP_Sub->OnSPChanged.Remove(SPChangedHandle);
-				}
-
-				// 精准绑定
-				SPChangedHandle = SP_Sub->OnSPChanged.AddUObject(this, &UMyCharacterStatusWidget::OnSPDataChanged);
-
-				// 立即同步初始状态
-				RefreshSPDataFromSubsystem();
-			}
-		}
 	}
 
-	// 初始化材质实例
+	// 3. 【时序关键】：在建立委托绑定前，先拿到材质实例
 	if (SPProgressBarImage && !SP_MID)
 	{
 		SP_MID = SPProgressBarImage->GetDynamicMaterial();
+	}
+
+	// 4. 重建底层系统委托监听 (抛弃 Tick，回归事件驱动)
+	if (UWorld* World = GetWorld())
+	{
+		if (USkillPointSubsystem* SP_Sub = World->GetSubsystem<USkillPointSubsystem>())
+		{
+			// 防御性编程：解绑可能存在的旧句柄
+			if (SPChangedHandle.IsValid())
+			{
+				SP_Sub->OnSPChanged.Remove(SPChangedHandle);
+			}
+
+			// 精准绑定
+			SPChangedHandle = SP_Sub->OnSPChanged.AddUObject(this, &UMyCharacterStatusWidget::OnSPDataChanged);
+
+			// UI 刚生成时，立刻主动去底层索要一次初始快照！
+			RefreshSPDataFromSubsystem();
+		}
 	}
 }
 
 void UMyCharacterStatusWidget::OnSPDataChanged(FName CharacterID, float NewSPPercent)
 {
-	// 过滤机制：仅当广播 ID 属于本角色时才刷新，极大降低非活动 UI 的计算开销
-	if (CharacterVM && CharacterID == CachedCharacterID)
+	// 过滤广播噪音：哪怕场上有 50 个敌人同时回血、放技能，
+	// 此控件只对属于自己 CachedCharacterID 的事件做出响应！
+	if (CharacterID == CachedCharacterID)
 	{
 		RefreshSPDataFromSubsystem();
 	}
@@ -78,39 +75,33 @@ void UMyCharacterStatusWidget::OnSPDataChanged(FName CharacterID, float NewSPPer
 
 void UMyCharacterStatusWidget::RefreshSPDataFromSubsystem()
 {
-	UWorld* World = GetWorld();
-	if (!World || !CharacterVM) return;
+	// 安全检查
+	if (!SP_MID || CachedCharacterID.IsNone()) return;
 
-	if (USkillPointSubsystem* SP_Sub = World->GetSubsystem<USkillPointSubsystem>())
+	if (UWorld* World = GetWorld())
 	{
-		if (const FCharacterSPData* DataPtr = SP_Sub->SquadSPMap.Find(CachedCharacterID))
+		if (USkillPointSubsystem* SP_Sub = World->GetSubsystem<USkillPointSubsystem>())
 		{
-			const float SafeMax = FMath::Max(DataPtr->MaxSP, 1.f);
+			// 我们不要 CPU 算好的实时百分比！
+			// 我们只要底层最原始的“快照三要素”！
+			if (const FCharacterSPData* DataPtr = SP_Sub->SquadSPMap.Find(CachedCharacterID))
+			{
+				// 防除以 0 安全锁
+				const float SafeMax = FMath::Max(DataPtr->MaxSP, 1.f);
 
-			// 触发 ViewModel 更新。内部 operator== 会拦截未变动的数据，避免 Invalidation Box 频繁重绘
-			CharacterVM->UpdateSPMaterialData(
-				DataPtr->SavedSP / SafeMax,
-				DataPtr->RegenRate / SafeMax,
-				DataPtr->LastSyncGameTime
-			);
+				// 【直接推给 GPU】：中间不经过任何繁琐的 MVVM 结构体打包！
+				// GPU 拿到这三个参数后，结合 PlayerController 塞进 MPC 的 GlobalGameTime，自己算进度条！
+				SP_MID->SetScalarParameterValue(FName("SavedSPPercent"), DataPtr->SavedSP / SafeMax);
+				SP_MID->SetScalarParameterValue(FName("RegenRatePercent"), DataPtr->RegenRate / SafeMax);
+				SP_MID->SetScalarParameterValue(FName("LastSyncTime"), DataPtr->LastSyncGameTime);
+			}
 		}
-	}
-}
-
-void UMyCharacterStatusWidget::UpdateSPMaterialParameters(const FSPMaterialData& InData)
-{
-	if (SP_MID)
-	{
-		// 消除 (Eliminate) 冗余计算，直接将断点数据同步给 GPU
-		SP_MID->SetScalarParameterValue(FName("SavedSPPercent"), InData.SavedSPPercent);
-		SP_MID->SetScalarParameterValue(FName("RegenRatePercent"), InData.RegenRatePercent);
-		SP_MID->SetScalarParameterValue(FName("LastSyncTime"), InData.LastSyncTime);
 	}
 }
 
 void UMyCharacterStatusWidget::NativeDestruct()
 {
-	// 2026 核心安全实践：在 Widget 销毁时精准解绑委托
+	// 2026 内存安全：UI 销毁时，精准切断从子系统接过来的网线
 	if (SPChangedHandle.IsValid())
 	{
 		if (UWorld* World = GetWorld())

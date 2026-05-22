@@ -3,26 +3,6 @@
 
 #include "UI/MyCharacterViewModel.h"
 #include "Engine/Texture2D.h" // 解决 UTexture2D 识别问题
-#include "Styling/SlateBrush.h" // 必须包含，否则 FSlateBrush 无法按值返回
-
-void UMyCharacterViewModel::UpdateSPMaterialData(float InSavedSP, float InRegenRate, float InLastSyncTime)
-{
-	FSPMaterialData NewData;
-	NewData.SavedSPPercent = InSavedSP;
-	NewData.RegenRatePercent = InRegenRate;
-	NewData.LastSyncTime = InLastSyncTime;
-	SetSPMaterialData(NewData);
-}
-
-void UMyCharacterViewModel::SetSPMaterialData(FSPMaterialData InValue)
-{
-	UE_MVVM_SET_PROPERTY_VALUE(SPMaterialData, InValue);
-}
-
-FSPMaterialData UMyCharacterViewModel::GetSPMaterialData() const
-{
-	return SPMaterialData;
-}
 
 void UMyCharacterViewModel::SetHealth(float InValue)
 {

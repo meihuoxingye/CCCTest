@@ -18,36 +18,17 @@
 // Blueprintable 能在新建蓝图时作为父类被继承
 // BlueprintType 能在蓝图变量面板里把类型设为此类，使 UMG 资产能识别此类
 // 为什么其他 C++ 类不用，因为是继承，父类有在 UCLASS() 里声明了 Blueprintable 或 BlueprintType
-USTRUCT(BlueprintType)
-struct FSPMaterialData
-{
-	GENERATED_BODY()
-
-	UPROPERTY(BlueprintReadWrite, Category = "Stats")
-	float SavedSPPercent = 0.f;
-
-	UPROPERTY(BlueprintReadWrite, Category = "Stats")
-	float RegenRatePercent = 0.f;
-
-	UPROPERTY(BlueprintReadWrite, Category = "Stats")
-	float LastSyncTime = 0.f;
-
-	bool operator==(const FSPMaterialData& Other) const = default;
-};
-
+/**
+ * 角色状态低频业务视图模型
+ * 专门处理诸如头像切换、血量上限变更、选中高亮等发生频率极低（触发式）的状态数据
+ */
 UCLASS(BlueprintType)
 class CCC_API UMyCharacterViewModel : public UMVVMViewModelBase
 {
 	GENERATED_BODY()
 
 public:
-	/** 批量更新接口 */
-	void UpdateSPMaterialData(float InSavedSP, float InRegenRate, float InLastSyncTime);
-
 	// --- 属性定义 (5.7 核心规范：类型字符串必须与函数签名完全一致) ---
-
-	UPROPERTY(BlueprintReadOnly, FieldNotify, Setter = SetSPMaterialData, Getter = GetSPMaterialData, Category = "MVVM")
-	FSPMaterialData SPMaterialData;
 
 	UPROPERTY(BlueprintReadOnly, FieldNotify, Setter = SetHealth, Getter = GetHealth, Category = "MVVM")
 	float Health = 100.f;
@@ -62,12 +43,6 @@ public:
 	bool bIsSelected = false;
 
 	// --- 访问器函数 (必须标记为 UFUNCTION，且签名严丝合缝) ---
-
-	UFUNCTION(BlueprintCallable, Category = "MVVM")
-	void SetSPMaterialData(FSPMaterialData InValue);
-
-	UFUNCTION(BlueprintPure, Category = "MVVM")
-	FSPMaterialData GetSPMaterialData() const;
 
 	UFUNCTION(BlueprintCallable, Category = "MVVM")
 	void SetHealth(float InValue);
