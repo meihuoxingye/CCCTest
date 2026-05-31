@@ -67,7 +67,7 @@ public:
 
     // 惰性求值，获取实时 SP
     UFUNCTION(BlueprintPure, Category = "Squad")
-    float GetCharacterSP(FName CharacterID) const;
+    float GetCalculatedCharacterSP(FName CharacterID) const;
 
     // 获取当前SP百分比（0.0~1.0，专门给UI进度条直接绑定用）
     UFUNCTION(BlueprintPure, Category = "Squad")

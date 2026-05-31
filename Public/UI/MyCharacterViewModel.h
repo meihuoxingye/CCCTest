@@ -12,16 +12,17 @@
 #include "MyCharacterViewModel.generated.h"
 
 /**
- * 
+ * 角色状态低频业务视图模型
+ * 专门处理和储存诸如头像切换、血量上限变更、选中高亮等发生频率极低（触发式）的状态数据
+
+ * 现代数据驱动 UI（MVVM）不再使用传指针这种强耦合 + Tick 的方式
+ * 而用监听网络把把系统变成了“电台广播（ViewModel）”和“收音机（UI 蓝图）”的关系
  */
+
 
 // Blueprintable 能在新建蓝图时作为父类被继承
 // BlueprintType 能在蓝图变量面板里把类型设为此类，使 UMG 资产能识别此类
 // 为什么其他 C++ 类不用，因为是继承，父类有在 UCLASS() 里声明了 Blueprintable 或 BlueprintType
-/**
- * 角色状态低频业务视图模型
- * 专门处理诸如头像切换、血量上限变更、选中高亮等发生频率极低（触发式）的状态数据
- */
 UCLASS(BlueprintType)
 class CCC_API UMyCharacterViewModel : public UMVVMViewModelBase
 {
@@ -30,41 +31,61 @@ class CCC_API UMyCharacterViewModel : public UMVVMViewModelBase
 public:
 	// --- 属性定义 (5.7 核心规范：类型字符串必须与函数签名完全一致) ---
 
+	// 实际存储当前生命值的底层数据字段
+	// BlueprintReadOnly: 在蓝图节点中只读
+	// FieldNotify: 核心宏，标记此变量被纳入 MVVM 监听网络
+	// Setter/Getter: 绑定具体的读写函数。警告虚幻引擎的反射系统（尤其是蓝图），想读写必须通过 Setter/Getter
+	// 只要这个变量的数值通过 Setter 函数发生变化，引擎底层就会发出一个事件通知，调用 Getter 和原生 UI 函数修改 UI 显示
 	UPROPERTY(BlueprintReadOnly, FieldNotify, Setter = SetHealth, Getter = GetHealth, Category = "MVVM")
 	float Health = 100.f;
 
 	UPROPERTY(BlueprintReadOnly, FieldNotify, Setter = SetMaxHealth, Getter = GetMaxHealth, Category = "MVVM")
 	float MaxHealth = 100.f;
 
+	// 同上，将头像软引用标记为 MVVM 字段。UI 绑定后，配合你写的转换器函数进行加载与渲染
+	// 实际存储头像图片硬盘路径的软引用指针
+	// 软引用的本质，不是图片本身，而是写着图片硬盘地址的字符串路径
 	UPROPERTY(BlueprintReadOnly, FieldNotify, Setter = SetCharacterAvatar, Getter = GetCharacterAvatar, Category = "MVVM")
 	TSoftObjectPtr<UTexture2D> CharacterAvatar;
 
+	// 同上，标记选中状态为可广播的 MVVM 字段。可用于控制 UI 上“高亮框”的显示与隐藏
+	// 实际存储是否被选中的布尔标识，默认未选中
 	UPROPERTY(BlueprintReadOnly, FieldNotify, Setter = SetIsSelected, Getter = IsSelected, Category = "MVVM")
 	bool bIsSelected = false;
 
+
 	// --- 访问器函数 (必须标记为 UFUNCTION，且签名严丝合缝) ---
 
+	// 生命值写入函数
 	UFUNCTION(BlueprintCallable, Category = "MVVM")
 	void SetHealth(float InValue);
 
+	// 生命值读取函数
 	UFUNCTION(BlueprintPure, Category = "MVVM")
 	float GetHealth() const;
 
+	// 最大生命值写入函数
 	UFUNCTION(BlueprintCallable, Category = "MVVM")
 	void SetMaxHealth(float InValue);
 
+	// 最大生命值读取函数
 	UFUNCTION(BlueprintPure, Category = "MVVM")
 	float GetMaxHealth() const;
 
+	// MyCharacterStatusWidget 调用，传入角色配置里的图像路径赋给 FieldNotify变量 CharacterAvatar
+	// 值改变后触发事件通知，虚幻底层自动调用函数修改 UI 显示
 	UFUNCTION(BlueprintCallable, Category = "MVVM")
 	void SetCharacterAvatar(TSoftObjectPtr<UTexture2D> InValue);
 
+	// 头像读取函数
 	UFUNCTION(BlueprintPure, Category = "MVVM")
 	TSoftObjectPtr<UTexture2D> GetCharacterAvatar() const;
 
+	// 选中状态写入函数
 	UFUNCTION(BlueprintCallable, Category = "MVVM")
 	void SetIsSelected(bool bInSelected);
 
+	// 选中状态读取函数
 	UFUNCTION(BlueprintPure, Category = "MVVM")
 	bool IsSelected() const;
 };

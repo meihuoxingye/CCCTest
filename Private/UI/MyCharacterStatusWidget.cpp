@@ -16,81 +16,111 @@
 
 void UMyCharacterStatusWidget::SyncViewModel(ATopCharacter* InCharacter, bool bSelected)
 {
+	// 防御性判空：没有角色实体就直接掐断
 	if (!InCharacter) return;
 
-	// 1. 初始化 ViewModel (低频业务管线)
+	// ==========================================
+	// 1. 初始化 ViewModel (低频业务管线对接)
+	// ==========================================
 	if (!CharacterVM)
 	{
+		// 在当前 UI 的内存名下，创建一个全新的 ViewModel 数据盒子
 		CharacterVM = NewObject<UMyCharacterViewModel>(this);
+
+		// 底层黑科技：获取虚幻自动为这个 UI 挂载的 MVVM 视图总管
 		if (UMVVMView* ViewExtension = GetExtension<UMVVMView>())
 		{
+			// C++ 强行搭桥：把我们刚建好的数据盒子，塞进 UI 蓝图的 "MyCharacterViewModel" 插槽里
+			// 等同于在 UMG 编辑器里手动配置 ViewModel
 			ViewExtension->SetViewModel(FName("MyCharacterViewModel"), CharacterVM);
 		}
 	}
+	// 利用 Setter 触发一次选中状态广播
 	CharacterVM->SetIsSelected(bSelected);
 
-	// 2. 基础属性初始化
+
+	// ==========================================
+	// 2. 基础属性初始化 (注入死数据)
+	// ==========================================
 	if (const UCharacterAttributeDataAsset* Config = InCharacter->GetAttributeConfig())
 	{
+		// 记下自己的身份证，后面播放广播时，靠它确定广播的是不是自己的事
 		CachedCharacterID = Config->CharacterID;
+		// 触发 MVVM 广播，更新血量上限和头像
 		CharacterVM->SetMaxHealth(Config->MaxHealth);
 		CharacterVM->SetCharacterAvatar(Config->CharacterAvatar);
 	}
 
-	// 3. 【时序关键】：在建立委托绑定前，先拿到材质实例
+
+	// ==========================================
+	// 3. 【时序关键】：在拉取第一口数据前，必须先拿到材质实例
+	// ==========================================
+	// !SP_MID（防重复创建）是极其关键的性能锁，实例化一个动态材质（MID）开销不算小，所以这个动作只能做一次
 	if (SPProgressBarImage && !SP_MID)
 	{
+		// 把 Image 控件上挂着的普通的无法在运行时更改的材质，实例化为可以在运行时随时用代码调参的动态材质
 		SP_MID = SPProgressBarImage->GetDynamicMaterial();
 	}
 
-	// 4. 重建底层系统委托监听 (抛弃 Tick，回归事件驱动)
+
+	// ==========================================
+	// 4. 重建底层系统委托监听 (高频 SP 管线，绝对 0 Tick)
+	// ==========================================
 	if (UWorld* World = GetWorld())
 	{
+		// 获取技能点子系统，事件驱动无 Tick，不用缓存
 		if (USkillPointSubsystem* SP_Sub = World->GetSubsystem<USkillPointSubsystem>())
 		{
-			// 防御性编程：解绑可能存在的旧句柄
+			// 防御性编程：如果之前绑过（比如 UI 被复用），先强行拔掉老网线，防止听见两次广播
 			if (SPChangedHandle.IsValid())
 			{
 				SP_Sub->OnSPChanged.Remove(SPChangedHandle);
 			}
 
-			// 精准绑定
+			// 精准绑定：把收音机调到子系统的 OnSPChanged 频道，听到广播就去执行 OnSPDataChanged
+			// AddUObject 不仅执行了“绑定”这个动作，还生成了对应的专属的句柄 ID 编号，因此可以区分同一个 UI 的不同监听记录
 			SPChangedHandle = SP_Sub->OnSPChanged.AddUObject(this, &UMyCharacterStatusWidget::OnSPDataChanged);
 
-			// UI 刚生成时，立刻主动去底层索要一次初始快照！
+			// UI 刚生成时，立刻主动去底层索要一次初始快照，防止材质参数为空
+			// 注意，SP 条的变化具体逻辑由材质内部的材质节点构成，而不是 C++ 代码
 			RefreshSPDataFromSubsystem();
 		}
 	}
 }
 
+
 void UMyCharacterStatusWidget::OnSPDataChanged(FName CharacterID, float NewSPPercent)
 {
-	// 过滤广播噪音：哪怕场上有 50 个敌人同时回血、放技能，
-	// 此控件只对属于自己 CachedCharacterID 的事件做出响应！
+	// 过滤广播噪音：
+	// 场上如果有 5 个角色，任何人扣 SP 都会触发全局广播。
+	// 这里通过身份证 (CachedCharacterID) 拦截，不是自己的事绝对不管，实现 0 多余开销！
 	if (CharacterID == CachedCharacterID)
 	{
 		RefreshSPDataFromSubsystem();
 	}
 }
 
+
 void UMyCharacterStatusWidget::RefreshSPDataFromSubsystem()
 {
-	// 安全检查
+	// 绝对安全锁：没材质或者连我是谁都不知道，坚决不干活
 	if (!SP_MID || CachedCharacterID.IsNone()) return;
 
 	if (UWorld* World = GetWorld())
 	{
+		// 获取技能点子系统，事件驱动无 Tick，不用缓存
 		if (USkillPointSubsystem* SP_Sub = World->GetSubsystem<USkillPointSubsystem>())
 		{
-			// 我们不要 CPU 算好的实时百分比！
-			// 我们只要底层最原始的“快照三要素”！
+			// 获取技能点数据结构体
+			// 【架构精髓】：不要 CPU 算好的实时百分比！要的是底层的原始快照！
 			if (const FCharacterSPData* DataPtr = SP_Sub->SquadSPMap.Find(CachedCharacterID))
 			{
-				// 防除以 0 安全锁
+				// 防御除以 0：万一配置表填了 0，强行托底为 1，防止渲染管线报 NaN(非数字) 导致黑屏
 				const float SafeMax = FMath::Max(DataPtr->MaxSP, 1.f);
 
-				// 【直接推给 GPU】：中间不经过任何繁琐的 MVVM 结构体打包！
-				// GPU 拿到这三个参数后，结合 PlayerController 塞进 MPC 的 GlobalGameTime，自己算进度条！
+				// 【直接推给 GPU】：
+				// 绕过繁琐的 MVVM，把 3 个核心死数据（底子、恢复率、时间戳）通过 MID 动态材质参数直插显存
+				// GPU 拿到后，会自己在材质里结合 MPC 的全局时间和材质节点去疯狂推算进度条，彻底解放 CPU
 				SP_MID->SetScalarParameterValue(FName("SavedSPPercent"), DataPtr->SavedSP / SafeMax);
 				SP_MID->SetScalarParameterValue(FName("RegenRatePercent"), DataPtr->RegenRate / SafeMax);
 				SP_MID->SetScalarParameterValue(FName("LastSyncTime"), DataPtr->LastSyncGameTime);
@@ -99,20 +129,26 @@ void UMyCharacterStatusWidget::RefreshSPDataFromSubsystem()
 	}
 }
 
+
 void UMyCharacterStatusWidget::NativeDestruct()
 {
-	// 2026 内存安全：UI 销毁时，精准切断从子系统接过来的网线
+	// 2026 现代 C++ 内存安全：
+	// UI 被销毁关掉时，它必须负责把之前在子系统那里插上的收音机网线给拔掉。
+	// 否则子系统以后一发广播，就会顺着网线找到一具 UI 的尸体（野指针），游戏瞬间崩溃。
 	if (SPChangedHandle.IsValid())
 	{
 		if (UWorld* World = GetWorld())
 		{
 			if (USkillPointSubsystem* SP_Sub = World->GetSubsystem<USkillPointSubsystem>())
 			{
+				// 拿着当年绑定时给的句柄（拔线器），精准解除监听
 				SP_Sub->OnSPChanged.Remove(SPChangedHandle);
 			}
 		}
+		// 把拔线器清空重置
 		SPChangedHandle.Reset();
 	}
 
+	// 必须调父类方法，走完引擎原生 UI 的销毁流程
 	Super::NativeDestruct();
 }

@@ -18,7 +18,7 @@ void USkillPointSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 }
 
 
-float USkillPointSubsystem::GetCharacterSP(FName CharacterID) const
+float USkillPointSubsystem::GetCalculatedCharacterSP(FName CharacterID) const
 {
     // 【性能优化】：使用 Find 返回指针。只算 1 次哈希值，完爆 Contains + [] 的 2 次开销
     const FCharacterSPData* DataPtr = SquadSPMap.Find(CharacterID);
@@ -54,7 +54,7 @@ float USkillPointSubsystem::GetCharacterSPPercent(FName CharacterID) const
     if (!DataPtr || DataPtr->MaxSP <= 0.0f) return 0.0f;
 
     // 获取实时 SP，除以最大值得到百分比
-    float CurrentSP = GetCharacterSP(CharacterID);
+    float CurrentSP = GetCalculatedCharacterSP(CharacterID);
     return CurrentSP / DataPtr->MaxSP;
 }
 
@@ -62,7 +62,7 @@ float USkillPointSubsystem::GetCharacterSPPercent(FName CharacterID) const
 // 向下取整当前 SP，给 UI 文本显示用
 int32 USkillPointSubsystem::GetCurrentSPAsInt(FName CharacterID) const
 {
-    return FMath::FloorToInt(GetCharacterSP(CharacterID));
+    return FMath::FloorToInt(GetCalculatedCharacterSP(CharacterID));
 }
 
 
@@ -73,7 +73,7 @@ bool USkillPointSubsystem::ConsumeCharacterSP(FName CharacterID, float Amount)
     if (!DataPtr) return false;
 
     // GetCharacterSP 是 const 的，在这里安全调用获取实时 SP
-    float CurrentSP = GetCharacterSP(CharacterID);
+    float CurrentSP = GetCalculatedCharacterSP(CharacterID);
 
     // 如果当前 SP 足够扣除，直接从快照底座扣掉，并且对齐时间轴到现在
     if (CurrentSP >= Amount)
@@ -83,7 +83,7 @@ bool USkillPointSubsystem::ConsumeCharacterSP(FName CharacterID, float Amount)
         // 记录本次操作的时间戳，作为新的同步基准点
         DataPtr->LastSyncGameTime = GetWorld()->GetTimeSeconds();
 
-        // 【新增广播】：通知 UI，技能点被扣了！触发 UI 瞬间下落！
+        // 【新增广播】：通知 UI，技能点被扣了，必须立刻呼叫 UI 蓝图重新拉取最新的快照进行重绘
         // ==========================================
         OnSPChanged.Broadcast(CharacterID, GetCharacterSPPercent(CharacterID));
 
@@ -104,7 +104,7 @@ void USkillPointSubsystem::SetCharacterRegenFrozen(FName CharacterID, bool bFree
     if (bFreeze)
     {
         // 瞬间把现在算出来的实时值，定死保存在 SavedSP 快照点数里
-        DataPtr->SavedSP = GetCharacterSP(CharacterID);
+        DataPtr->SavedSP = GetCalculatedCharacterSP(CharacterID);
         // 设置状态为冻结
         DataPtr->bIsRegenFrozen = true;
     }
@@ -185,7 +185,7 @@ void USkillPointSubsystem::UpdateCharacterConfig(FName CharacterID, float NewMax
 
     // 【关键时间对齐修正】
     // 在外界执行属性改变的一瞬间，我们必须先调用只读函数计算出“当前此刻”的精确点数
-    float CurrentSP = GetCharacterSP(CharacterID);
+    float CurrentSP = GetCalculatedCharacterSP(CharacterID);
 
     // 强制将过去的数额“固化结算”放进底座，并将时间戳同步对齐到这一刻！
     DataPtr->SavedSP = CurrentSP;
@@ -196,7 +196,7 @@ void USkillPointSubsystem::UpdateCharacterConfig(FName CharacterID, float NewMax
     DataPtr->MaxSP = NewMaxSP;
     DataPtr->RegenRate = NewRegenRate;
 
-    // 【新增广播】：通知 UI，技能点被扣了！触发 UI 瞬间下落！
+    // 【新增广播】：通知 UI，技能点上限改变，必须立刻呼叫 UI 蓝图重新拉取最新的快照进行重绘
     // ==========================================
     OnSPChanged.Broadcast(CharacterID, GetCharacterSPPercent(CharacterID));
 }

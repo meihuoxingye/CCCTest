@@ -36,12 +36,12 @@ void ATopPlayerController::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	// 注意这里：一定要写 GlobalUIMPC.Get() ！！！
+	// 一定要写 GlobalUIMPC.Get()，原生指针和原生指针一起判定
 	if (GlobalUIMPC.Get() && GetWorld())
 	{
 		UKismetMaterialLibrary::SetScalarParameterValue(
 			GetWorld(),
-			GlobalUIMPC.Get(),  // 这里你写对了
+			GlobalUIMPC.Get(),  // 原生指针
 			FName("GlobalGameTime"),
 			GetWorld()->GetTimeSeconds()
 		);
@@ -65,6 +65,8 @@ void ATopPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
 
+	#pragma region 输入与鼠标
+
 	// 激活增强输入本地子系统
 	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
 	{
@@ -86,12 +88,16 @@ void ATopPlayerController::BeginPlay()
 
 	// 应用键盘鼠标输入配置
 	SetInputMode(InputModeData);
+	
+	#pragma endregion
+
 
 	// HUD 控件的初始化与首帧构建
 	if (MainHUDClass)
 	{
 		// 创造主 UI 组件，拥有者为当前玩家控制器
 		MainHUDInstance = CreateWidget<UMyMainHUDWidget>(this, MainHUDClass);
+
 		if (MainHUDInstance)
 		{
 			// 将主 UI 组件添加到视口
@@ -128,6 +134,8 @@ void ATopPlayerController::OnPossess(APawn* InPawn)
 
 	if (!InPawn) return;
 
+	#pragma region 缓存
+
 	// 只找自定义输入移动组件这一次，然后缓存
 	CachedMyMovementControlComp = InPawn->FindComponentByClass<UMyMovementControlComponent>();
 	if (!CachedMyMovementControlComp) return;
@@ -138,6 +146,9 @@ void ATopPlayerController::OnPossess(APawn* InPawn)
 
 	// 缓存自定义战斗组件
 	CachedMyCombatComp = CachedMyCharacter->GetCombatComponent();
+
+	#pragma endregion
+
 
 	// 当玩家控制权交接时，立即重刷 UI
 	UpdateHUD();
