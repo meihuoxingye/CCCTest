@@ -27,6 +27,14 @@
 #include "Kismet/KismetMaterialLibrary.h"
 
 
+#include "SwitchSubsystem/CharacterSwitchSubsystem.h"
+// 解决 FSlateApplication 报红
+#include "Framework/Application/SlateApplication.h" 
+
+// 解决 FWidgetPath 报红
+#include "Layout/WidgetPath.h"
+
+
 ATopPlayerController::ATopPlayerController()
 {
 	bReplicates = false;
@@ -36,8 +44,11 @@ void ATopPlayerController::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	UWorld* World = GetWorld();
+	if (!World) return;
+
 	// 一定要写 GlobalUIMPC.Get()，原生指针和原生指针一起判定
-	if (GlobalUIMPC.Get() && GetWorld())
+	if (GlobalUIMPC.Get())
 	{
 		UKismetMaterialLibrary::SetScalarParameterValue(
 			GetWorld(),
@@ -45,6 +56,23 @@ void ATopPlayerController::Tick(float DeltaTime)
 			FName("GlobalGameTime"),
 			GetWorld()->GetTimeSeconds()
 		);
+	}
+
+
+	// ===================== 【切人模式：平滑子弹时间】 =====================
+	float CurrentDilation = UGameplayStatics::GetGlobalTimeDilation(World);
+
+	if (!FMath::IsNearlyEqual(CurrentDilation, TargetTimeDilation, 0.005f))
+	{
+		float UnscaledDelta = DeltaTime / FMath::Max(0.001f, CurrentDilation);
+		float NewDilation = FMath::FInterpTo(CurrentDilation, TargetTimeDilation, UnscaledDelta, 15.f);
+
+		if (FMath::Abs(NewDilation - TargetTimeDilation) < 0.01f)
+		{
+			NewDilation = TargetTimeDilation;
+		}
+
+		UGameplayStatics::SetGlobalTimeDilation(World, NewDilation);
 	}
 }
 
@@ -59,6 +87,32 @@ void ATopPlayerController::UpdateHUD()
 		// 传递名单，并将当前玩家控制器所附身的 Pawn 转化为 ATopCharacter 作为当前活跃单位传入
 		MainHUDInstance->UpdateSquadList(GM->FriendlyRoster, Cast<ATopCharacter>(GetPawn()));
 	}
+}
+
+void ATopPlayerController::SwitchToSpecificCharacter(ATopCharacter* TargetCharacter)
+{
+	// 如果当前不在切人模式（未按 Tab 键），直接无视 UI 发来的换人请求
+	if (!bIsSwitchModeActive) return;
+
+	// 防御验证：目标为空，或者点的正是自己
+	if (!TargetCharacter || TargetCharacter == CachedMyCharacter)
+	{
+		SetSwitchMode(false);
+
+		// 【新增】：哪怕没换人，也要强制夺回焦点，防止 Tab 键被 UI 吞掉
+		FSlateApplication::Get().SetAllUserFocusToGameViewport();
+		return;
+	}
+
+	// 移交控制权
+	Possess(TargetCharacter);
+
+	// 换人成功后，自动退出切人模式
+	SetSwitchMode(false);
+
+	// 【新增核心修复】：强制将操作焦点从 UI 剥夺，还给 3D 游戏视口！
+	// 这句代码会彻底打断 UI 对 Tab 键的劫持，让下一次按 Tab 键百分百触发你的子弹时间！
+	FSlateApplication::Get().SetAllUserFocusToGameViewport();
 }
 
 void ATopPlayerController::BeginPlay()
@@ -106,6 +160,12 @@ void ATopPlayerController::BeginPlay()
 			UpdateHUD();
 		}
 	}
+
+	// 监听换人总线
+	if (UCharacterSwitchSubsystem* SwitchSub = GetWorld()->GetSubsystem<UCharacterSwitchSubsystem>())
+	{
+		SwitchSub->OnSwitchRequest.AddUObject(this, &ATopPlayerController::SwitchToSpecificCharacter);
+	}
 }
 
 void ATopPlayerController::SetupInputComponent()
@@ -124,6 +184,7 @@ void ATopPlayerController::SetupInputComponent()
 		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Started, this, &ATopPlayerController::Attack);
 		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Completed, this, &ATopPlayerController::AttackEnd);
 		EnhancedInputComponent->BindAction(BulletTimeAction, ETriggerEvent::Completed, this, &ATopPlayerController::BulletTime);
+		EnhancedInputComponent->BindAction(SwitchModeAction, ETriggerEvent::Started, this, &ATopPlayerController::ToggleSwitchMode);
 	}
 
 }
@@ -149,6 +210,11 @@ void ATopPlayerController::OnPossess(APawn* InPawn)
 
 	#pragma endregion
 
+
+	if (UCharacterSwitchSubsystem* SwitchSub = GetWorld()->GetSubsystem<UCharacterSwitchSubsystem>())
+	{
+		SwitchSub->OnActiveCharacterChanged.Broadcast(CachedMyCharacter);
+	}
 
 	// 当玩家控制权交接时，立即重刷 UI
 	UpdateHUD();
@@ -194,6 +260,41 @@ void ATopPlayerController::StopJump()
 
 void ATopPlayerController::Attack()
 {
+	// ===================== 【终极双重防走火】 =====================
+	bool bIsOverUI = false;
+
+	if (UCharacterSwitchSubsystem* SwitchSub = GetWorld()->GetSubsystem<UCharacterSwitchSubsystem>())
+	{
+		bIsOverUI = SwitchSub->bIsPointerOverUI;
+	}
+
+	if (!bIsOverUI && FSlateApplication::IsInitialized())
+	{
+		FWidgetPath WidgetPath = FSlateApplication::Get().LocateWindowUnderMouse(
+			FSlateApplication::Get().GetCursorPos(),
+			FSlateApplication::Get().GetInteractiveTopLevelWindows()
+		);
+
+		if (WidgetPath.IsValid() && WidgetPath.Widgets.Num() > 0)
+		{
+			FString LeafWidgetName = WidgetPath.Widgets.Last().Widget->GetTypeAsString();
+			if (LeafWidgetName != TEXT("SViewport"))
+			{
+				bIsOverUI = true;
+			}
+		}
+	}
+
+	if (bIsOverUI) return;
+	// ==============================================================
+
+	// 如果正处于切人模式，点击地面代表退出该模式，直接返回不开火
+	if (bIsSwitchModeActive)
+	{
+		SetSwitchMode(false);
+		return;
+	}
+
 	if (CachedMyCombatComp)
 	{
 		// 告诉战斗组件：开始射击
@@ -230,4 +331,19 @@ void ATopPlayerController::BulletTime()
 		// 时空速度恢复 1.0
 		UGameplayStatics::SetGlobalTimeDilation(World, 1.0f);
 	}
+}
+
+void ATopPlayerController::ToggleSwitchMode()
+{
+	SetSwitchMode(!bIsSwitchModeActive);
+}
+
+void ATopPlayerController::SetSwitchMode(bool bEnable)
+{
+	if (bIsSwitchModeActive == bEnable) return;
+
+	bIsSwitchModeActive = bEnable;
+
+	// 修改目标流速：开启切人模式时极慢动作，关闭时恢复正常
+	TargetTimeDilation = bIsSwitchModeActive ? 0.05f : 1.0f;
 }

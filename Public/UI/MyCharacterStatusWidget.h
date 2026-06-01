@@ -27,6 +27,8 @@ public:
 	void SyncViewModel(class ATopCharacter* InCharacter, bool bSelected);
 
 protected:
+	virtual void NativeOnInitialized() override;
+
 	// UI 死亡前的遗言函数：专门用来安全解绑全局委托，防止 UI 销毁后子系统还在给它发广播导致野指针崩溃
 	virtual void NativeDestruct() override;
 
@@ -37,6 +39,11 @@ protected:
 	// 核心搬运工：从子系统把最新快照拉出来，绕过 CPU 计算，直接喂给 GPU 材质实例
 	// 处理屏幕上几万个像素的简单计算，天生擅长大规模并行计算的 GPU 最适合，所以用材质来当 UI
 	void RefreshSPDataFromSubsystem();
+
+
+	// 重写鼠标进入/离开事件，更新子系统的防穿透状态
+	virtual void NativeOnMouseEnter(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	virtual void NativeOnMouseLeave(const FPointerEvent& InMouseEvent) override;
 
 private:
 	// 缓存绑定的角色 ID：这是过滤“广播噪音”的身份证。场上几十个人发广播，只听自己发的
@@ -55,9 +62,25 @@ private:
 	UPROPERTY()
 	TObjectPtr<class UMaterialInstanceDynamic> SP_MID;
 
-
 	 // 核心绑定宏 meta = (BindWidget)：
 	 // 强制要求 UI 蓝图中必须有一个名字一模一样叫 "SPProgressBarImage" 的 Image 控件，否则直接编译报错（蓝图与 C++ 的强捆绑）
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<class UImage> SPProgressBarImage;
+
+
+	FDelegateHandle ActiveCharChangedHandle;
+
+	// 强绑定蓝图中的头像隐形按钮
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<class UButton> AvatarButton;
+
+	// 缓存当前 UI 卡片对应的具体角色实体
+	// 【修正】：删除了 UPROPERTY() 宏，TWeakObjectPtr 必须独立使用
+	TWeakObjectPtr<class ATopCharacter> CachedCharacterRef;
+
+	UFUNCTION()
+	void OnAvatarClicked();
+
+	// 接收到主控角色变更后的处理函数
+	void HandleActiveCharacterChanged(ATopCharacter* NewActiveChar);
 };

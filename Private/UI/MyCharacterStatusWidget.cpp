@@ -13,11 +13,21 @@
 // 用于在运行时动态修改材质参数
 #include "Materials/MaterialInstanceDynamic.h"
 
+#include "Components/Button.h"
+#include "SwitchSubsystem/CharacterSwitchSubsystem.h"
+
+// 引入引擎头文件以使用 GEngine 屏幕打印
+#include "Engine/Engine.h"
+
 
 void UMyCharacterStatusWidget::SyncViewModel(ATopCharacter* InCharacter, bool bSelected)
 {
 	// 防御性判空：没有角色实体就直接掐断
 	if (!InCharacter) return;
+
+	// 【新增这一行】：缓存传进来的角色指针！
+	// 只有存下来了，后面点击头像（OnAvatarClicked）时才能拿它去给控制器发换人广播
+	CachedCharacterRef = InCharacter;
 
 	// ==========================================
 	// 1. 初始化 ViewModel (低频业务管线对接)
@@ -88,6 +98,32 @@ void UMyCharacterStatusWidget::SyncViewModel(ATopCharacter* InCharacter, bool bS
 	}
 }
 
+void UMyCharacterStatusWidget::NativeOnInitialized()
+{
+	Super::NativeOnInitialized();
+
+	if (AvatarButton)
+	{
+		AvatarButton->OnClicked.AddDynamic(this, &UMyCharacterStatusWidget::OnAvatarClicked);
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		if (UCharacterSwitchSubsystem* SwitchSub = World->GetSubsystem<UCharacterSwitchSubsystem>())
+		{
+			ActiveCharChangedHandle = SwitchSub->OnActiveCharacterChanged.AddLambda(
+				[WeakThis = TWeakObjectPtr<UMyCharacterStatusWidget>(this)](ATopCharacter* NewActiveChar)
+				{
+					if (UMyCharacterStatusWidget* StrongThis = WeakThis.Get())
+					{
+						StrongThis->HandleActiveCharacterChanged(NewActiveChar);
+					}
+				}
+			);
+		}
+	}
+}
+
 
 void UMyCharacterStatusWidget::OnSPDataChanged(FName CharacterID, float NewSPPercent)
 {
@@ -129,6 +165,83 @@ void UMyCharacterStatusWidget::RefreshSPDataFromSubsystem()
 	}
 }
 
+void UMyCharacterStatusWidget::NativeOnMouseEnter(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	Super::NativeOnMouseEnter(InGeometry, InMouseEvent);
+	if (UCharacterSwitchSubsystem* SwitchSub = GetWorld()->GetSubsystem<UCharacterSwitchSubsystem>())
+	{
+		SwitchSub->bIsPointerOverUI = true;
+	}
+}
+
+void UMyCharacterStatusWidget::NativeOnMouseLeave(const FPointerEvent& InMouseEvent)
+{
+	Super::NativeOnMouseLeave(InMouseEvent);
+	if (UCharacterSwitchSubsystem* SwitchSub = GetWorld()->GetSubsystem<UCharacterSwitchSubsystem>())
+	{
+		SwitchSub->bIsPointerOverUI = false;
+	}
+}
+
+void UMyCharacterStatusWidget::OnAvatarClicked()
+{
+	/*
+	if (!CachedCharacterRef.IsValid()) return;
+
+	if (UWorld* World = GetWorld())
+	{
+		if (UCharacterSwitchSubsystem* SwitchSub = World->GetSubsystem<UCharacterSwitchSubsystem>())
+		{
+			SwitchSub->OnSwitchRequest.Broadcast(CachedCharacterRef.Get());
+		}
+	}
+	*/
+
+	// 【测试点 1】：只要你成功点到了这个按钮，屏幕左上角就会弹出绿色文字
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Green, TEXT("【Debug】成功点到了 UI 按钮！"));
+	}
+
+	// 确保角色还活着，引用有效
+	if (!CachedCharacterRef.IsValid())
+	{
+		// 【测试点 2】：如果点到了按钮，但角色指针是空的，弹出红色警告
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("【Error】换人失败：绑定的角色指针为空！"));
+		}
+		return;
+	}
+
+	// 【测试点 3】：按钮和指针都正常，准备发送换人广播，弹出青色文字并显示要换谁
+	if (GEngine)
+	{
+		if (ATopCharacter* TargetChar = CachedCharacterRef.Get())
+		{
+			FString Msg = FString::Printf(TEXT("【Debug】发送换人请求，目标：%s"), *(TargetChar->GetName()));
+			GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Cyan, Msg);
+		}
+	}
+
+	// 发送换人请求到总线
+	if (UWorld* World = GetWorld())
+	{
+		if (UCharacterSwitchSubsystem* SwitchSub = World->GetSubsystem<UCharacterSwitchSubsystem>())
+		{
+			SwitchSub->OnSwitchRequest.Broadcast(CachedCharacterRef.Get());
+		}
+	}
+}
+
+void UMyCharacterStatusWidget::HandleActiveCharacterChanged(ATopCharacter* NewActiveChar)
+{
+	if (CharacterVM && CachedCharacterRef.IsValid())
+	{
+		CharacterVM->SetIsSelected(CachedCharacterRef.Get() == NewActiveChar);
+	}
+}
+
 
 void UMyCharacterStatusWidget::NativeDestruct()
 {
@@ -147,6 +260,18 @@ void UMyCharacterStatusWidget::NativeDestruct()
 		}
 		// 把拔线器清空重置
 		SPChangedHandle.Reset();
+	}
+
+	if (ActiveCharChangedHandle.IsValid())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			if (UCharacterSwitchSubsystem* SwitchSub = World->GetSubsystem<UCharacterSwitchSubsystem>())
+			{
+				SwitchSub->OnActiveCharacterChanged.Remove(ActiveCharChangedHandle);
+			}
+		}
+		ActiveCharChangedHandle.Reset();
 	}
 
 	// 必须调父类方法，走完引擎原生 UI 的销毁流程

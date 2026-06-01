@@ -35,6 +35,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "UI")
 	void UpdateHUD();
 
+
+	void SwitchToSpecificCharacter(class ATopCharacter* TargetCharacter);
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -77,6 +80,8 @@ private:
 	TObjectPtr<class UInputAction> AttackAction;
 	UPROPERTY(EditAnywhere, Category = "Input")
 	TObjectPtr<class UInputAction> BulletTimeAction;
+	UPROPERTY(EditAnywhere, Category = "Input")
+	TObjectPtr<UInputAction> SwitchModeAction;
 
 
 	/** Input Callback Functions*/
@@ -87,4 +92,12 @@ private:
 	void AttackEnd();
 	void BulletTime();
 	bool bIsBulletTime = false;
+	// 当前是否处于切人子弹时间状态
+	bool bIsSwitchModeActive = false;
+
+	// 用于软着陆插值的目标时间流速
+	float TargetTimeDilation = 1.0f;
+
+	void ToggleSwitchMode();
+	void SetSwitchMode(bool bEnable);
 };
