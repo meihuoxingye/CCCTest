@@ -1,9 +1,10 @@
+// Fill out your copyright notice in the Description page of Project Settings.
+
 #include "UI/MyCharacterStatusWidget.h"
 #include "UI/MyCharacterViewModel.h"
 #include "Character/TopCharacter.h"
 #include "Character/CharacterAttributeDataAsset.h"
 #include "SkillSystem/SkillPointSubsystem.h"
-
 // 引入真正存在的官方扩展组件头文件
 #include "View/MVVMView.h" 
 // 只要代码里有 GetWorld() 就必带此文件
@@ -12,13 +13,13 @@
 #include "Components/Image.h"
 // 用于在运行时动态修改材质参数
 #include "Materials/MaterialInstanceDynamic.h"
-
 #include "Components/Button.h"
 #include "SwitchSubsystem/CharacterSwitchSubsystem.h"
 
-// 引入引擎头文件以使用 GEngine 屏幕打印
-#include "Engine/Engine.h"
 
+// ==============================================================================
+// 核心生命周期与初始化 (Core Lifecycle & Initialization)
+// ==============================================================================
 
 void UMyCharacterStatusWidget::SyncViewModel(ATopCharacter* InCharacter, bool bSelected)
 {
@@ -28,6 +29,7 @@ void UMyCharacterStatusWidget::SyncViewModel(ATopCharacter* InCharacter, bool bS
 	// 【新增这一行】：缓存传进来的角色指针！
 	// 只有存下来了，后面点击头像（OnAvatarClicked）时才能拿它去给控制器发换人广播
 	CachedCharacterRef = InCharacter;
+
 
 	// ==========================================
 	// 1. 初始化 ViewModel (低频业务管线对接)
@@ -100,17 +102,35 @@ void UMyCharacterStatusWidget::SyncViewModel(ATopCharacter* InCharacter, bool bS
 
 void UMyCharacterStatusWidget::NativeOnInitialized()
 {
+	// 1. 虚幻底层初始化：构建基础的 Slate 控件树
 	Super::NativeOnInitialized();
 
+	// ===================== 【绑定上行请求 (触发源)】 =====================
 	if (AvatarButton)
 	{
+		// AddDynamic 是供蓝图/UMG使用的动态多播委托绑定
+		// 当玩家在按钮上点击时，触发 OnAvatarClicked 去向总线【盲发换人请求】
 		AvatarButton->OnClicked.AddDynamic(this, &UMyCharacterStatusWidget::OnAvatarClicked);
 	}
 
+	// ===================== 【绑定下行监听 (内存安全版)】 =====================
 	if (UWorld* World = GetWorld())
 	{
 		if (UCharacterSwitchSubsystem* SwitchSub = World->GetSubsystem<UCharacterSwitchSubsystem>())
 		{
+			// 【架构闭环】：这里就是 UI 戴上耳机，默默监听“频道二（既定事实）”的地方。
+			// 
+			// 【致命内存危机与防御】：
+			// 为什么不直接写 AddUObject(this, ...)？
+			// 因为 Subsystem（子系统）是与世界同寿的全局单例，而 UI 卡片是随时可能被销毁的临时工。
+			// 如果直接绑 this，UI 销毁时若忘记解绑，子系统就会捏着一个“死去的 UI 的野指针”，下次广播必定引发游戏崩溃！
+			// 
+			// 【现代 C++ 的优雅解法：弱引用捕获的 Lambda】：
+			// 1. WeakThis：在 Lambda 外部，将自己(this)包装成虚幻专用的弱指针(TWeakObjectPtr)。
+			// 2. 捕获：将这个弱指针传进 Lambda 内部。
+			// 3. 强转 (StrongThis)：当子系统发广播唤醒这个 Lambda 时，先尝试把弱指针变回强指针。
+			// 4. 判空：如果 StrongThis 有效，说明 UI 还活着，安全执行 HandleActiveCharacterChanged 修改高亮。
+			//    如果 StrongThis 为空，说明 UI 已经被销毁了，if 进不去，什么都不会发生，完美化解野指针崩溃！
 			ActiveCharChangedHandle = SwitchSub->OnActiveCharacterChanged.AddLambda(
 				[WeakThis = TWeakObjectPtr<UMyCharacterStatusWidget>(this)](ATopCharacter* NewActiveChar)
 				{
@@ -124,6 +144,57 @@ void UMyCharacterStatusWidget::NativeOnInitialized()
 	}
 }
 
+void UMyCharacterStatusWidget::NativeDestruct()
+{
+	// ===================== 【生命周期与内存安全终局 (Lifecycle & Memory Safety)】 =====================
+	// 架构核心拷问：既然绑定时用了 WeakPtr (弱指针) 防崩溃，为什么还要手动解绑？
+	// 答：防崩溃不等于防泄漏！
+	// 子系统 (Subsystem) 的寿命与游戏世界一样长，而 UI 卡片会随着界面的开关被频繁创建和销毁。
+	// 如果 UI 临死前不主动注销，子系统的总线频道里就会堆积成百上千个“死掉的弱指针空壳”。
+	// 每次发广播，底层都要遍历这些垃圾并执行判空，最终导致严重的内存泄漏和性能损耗（Delegate 数组膨胀）。
+	// 因此，UI 在销毁前，必须严格履行契约：主动拔掉插在全局枢纽上的监听网线！
+
+	// 【1. 清除 SP (技能点) 频道的订阅记录】
+	if (SPChangedHandle.IsValid())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			if (USkillPointSubsystem* SP_Sub = World->GetSubsystem<USkillPointSubsystem>())
+			{
+				// 拿着当年绑定时引擎颁发给你的“监听凭证 (Delegate Handle)”，精准解绑自己
+				SP_Sub->OnSPChanged.Remove(SPChangedHandle);
+			}
+		}
+		// 内存洁癖：解绑后彻底清空句柄状态，防止由于多重析构导致的重复 Remove 操作
+		SPChangedHandle.Reset();
+	}
+
+
+	// 【2. 清除 换人宣告 (CQRS 下行事实频道) 的订阅记录】
+	if (ActiveCharChangedHandle.IsValid())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			if (UCharacterSwitchSubsystem* SwitchSub = World->GetSubsystem<UCharacterSwitchSubsystem>())
+			{
+				// 彻底从换人广播的订阅名单中除名
+				SwitchSub->OnActiveCharacterChanged.Remove(ActiveCharChangedHandle);
+			}
+		}
+		// 清空句柄状态
+		ActiveCharChangedHandle.Reset();
+	}
+
+	// ===================== 【执行底层原生销毁】 =====================
+	// C++ 析构铁律：子类必须先清理完自己额外的业务数据，最后再把控制权交还给父类，
+	// 让 Super 走完 UUserWidget 底层 Slate 树状结构的内存回收与清理流程。
+	Super::NativeDestruct();
+}
+
+
+// ==============================================================================
+// 高频 SP 材质渲染管线 (High-Frequency SP Material Pipeline)
+// ==============================================================================
 
 void UMyCharacterStatusWidget::OnSPDataChanged(FName CharacterID, float NewSPPercent)
 {
@@ -135,7 +206,6 @@ void UMyCharacterStatusWidget::OnSPDataChanged(FName CharacterID, float NewSPPer
 		RefreshSPDataFromSubsystem();
 	}
 }
-
 
 void UMyCharacterStatusWidget::RefreshSPDataFromSubsystem()
 {
@@ -165,18 +235,32 @@ void UMyCharacterStatusWidget::RefreshSPDataFromSubsystem()
 	}
 }
 
+
+// ==============================================================================
+// 角色切换总线与用户交互 (Character Switch Bus & User Interaction)
+// ==============================================================================
+
+// 重写鼠标进入本 UI 内支持射线检测部分的事件，更新换人子系统的 UI 悬停状态
 void UMyCharacterStatusWidget::NativeOnMouseEnter(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
+	// 1. 执行 UUserWidget 父类基础逻辑
 	Super::NativeOnMouseEnter(InGeometry, InMouseEvent);
+
+	// 2. 【全局状态同步】：
+	// 当鼠标划入这张角色卡片时，主动向中央子系统报告“指针现在在 UI 上”
+	// 这种做法将局部的 UI 悬停状态，上升成为了全局可访问的上下文数据
 	if (UCharacterSwitchSubsystem* SwitchSub = GetWorld()->GetSubsystem<UCharacterSwitchSubsystem>())
 	{
 		SwitchSub->bIsPointerOverUI = true;
 	}
 }
 
+// 重写鼠标离开本 UI 内支持射线检测部分的事件，更新换人子系统的 UI 悬停状态
 void UMyCharacterStatusWidget::NativeOnMouseLeave(const FPointerEvent& InMouseEvent)
 {
 	Super::NativeOnMouseLeave(InMouseEvent);
+
+	// UI 悬停状态设为 false
 	if (UCharacterSwitchSubsystem* SwitchSub = GetWorld()->GetSubsystem<UCharacterSwitchSubsystem>())
 	{
 		SwitchSub->bIsPointerOverUI = false;
@@ -185,50 +269,18 @@ void UMyCharacterStatusWidget::NativeOnMouseLeave(const FPointerEvent& InMouseEv
 
 void UMyCharacterStatusWidget::OnAvatarClicked()
 {
-	/*
+	// 1. 【内存级防御】：CachedCharacterRef 必然是一个 TWeakObjectPtr (弱指针)
+	// 在发广播前，先查验这个绑定的肉体是否还在游戏世界里活着（万一刚刚被炸毁了呢）
+	// 只有确保肉体有效，才允许发起切换请求，杜绝向总线抛出脏数据（野指针）
 	if (!CachedCharacterRef.IsValid()) return;
 
 	if (UWorld* World = GetWorld())
 	{
 		if (UCharacterSwitchSubsystem* SwitchSub = World->GetSubsystem<UCharacterSwitchSubsystem>())
 		{
-			SwitchSub->OnSwitchRequest.Broadcast(CachedCharacterRef.Get());
-		}
-	}
-	*/
-
-	// 【测试点 1】：只要你成功点到了这个按钮，屏幕左上角就会弹出绿色文字
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Green, TEXT("【Debug】成功点到了 UI 按钮！"));
-	}
-
-	// 确保角色还活着，引用有效
-	if (!CachedCharacterRef.IsValid())
-	{
-		// 【测试点 2】：如果点到了按钮，但角色指针是空的，弹出红色警告
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("【Error】换人失败：绑定的角色指针为空！"));
-		}
-		return;
-	}
-
-	// 【测试点 3】：按钮和指针都正常，准备发送换人广播，弹出青色文字并显示要换谁
-	if (GEngine)
-	{
-		if (ATopCharacter* TargetChar = CachedCharacterRef.Get())
-		{
-			FString Msg = FString::Printf(TEXT("【Debug】发送换人请求，目标：%s"), *(TargetChar->GetName()));
-			GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Cyan, Msg);
-		}
-	}
-
-	// 发送换人请求到总线
-	if (UWorld* World = GetWorld())
-	{
-		if (UCharacterSwitchSubsystem* SwitchSub = World->GetSubsystem<UCharacterSwitchSubsystem>())
-		{
+			// 2. 【频道一：发射意图】：
+			// 这就是我们说的“盲发广播”。UI 根本不知道控制器在哪，它只是把“自己绑定的角色指针（Payload）”
+			// 拍在子系统的公共黑板上，然后大喊一声：“有人请求把灵魂转移给这个人！”
 			SwitchSub->OnSwitchRequest.Broadcast(CachedCharacterRef.Get());
 		}
 	}
@@ -236,44 +288,18 @@ void UMyCharacterStatusWidget::OnAvatarClicked()
 
 void UMyCharacterStatusWidget::HandleActiveCharacterChanged(ATopCharacter* NewActiveChar)
 {
+	// 1. 【频道二：接收结果】：
+	// 这个函数一定是被绑在 OnActiveCharacterChanged 频道上的！
+	// 当控制器完成了灵魂交接并全网通报后，UI 瞬间收到了这个最新上位的“新王(NewActiveChar)”。
 	if (CharacterVM && CachedCharacterRef.IsValid())
 	{
+		// 2. 【MVVM 数据绑定引擎的核心】：
+		// 核心逻辑判断：控制器通报的那个“新角色”，是不是【我】这张卡片绑定的角色？
+		// 结果是一个 bool 值 (true/false)，直接塞给 ViewModel (视图模型)。
+		// 
+		// 【解耦精髓】：这行代码绝对不会直接去写 “SetImageColor(Red)” 或 “PlayHighlightAnimation()”。
+		// 它只负责改写底层数据。随后，UMyCharacterViewModel 内部的数据变更广播，会自动驱动 UI 材质参数或动画，
+		// 实现了逻辑层与表现层的绝对分离！
 		CharacterVM->SetIsSelected(CachedCharacterRef.Get() == NewActiveChar);
 	}
-}
-
-
-void UMyCharacterStatusWidget::NativeDestruct()
-{
-	// 2026 现代 C++ 内存安全：
-	// UI 被销毁关掉时，它必须负责把之前在子系统那里插上的收音机网线给拔掉。
-	// 否则子系统以后一发广播，就会顺着网线找到一具 UI 的尸体（野指针），游戏瞬间崩溃。
-	if (SPChangedHandle.IsValid())
-	{
-		if (UWorld* World = GetWorld())
-		{
-			if (USkillPointSubsystem* SP_Sub = World->GetSubsystem<USkillPointSubsystem>())
-			{
-				// 拿着当年绑定时给的句柄（拔线器），精准解除监听
-				SP_Sub->OnSPChanged.Remove(SPChangedHandle);
-			}
-		}
-		// 把拔线器清空重置
-		SPChangedHandle.Reset();
-	}
-
-	if (ActiveCharChangedHandle.IsValid())
-	{
-		if (UWorld* World = GetWorld())
-		{
-			if (UCharacterSwitchSubsystem* SwitchSub = World->GetSubsystem<UCharacterSwitchSubsystem>())
-			{
-				SwitchSub->OnActiveCharacterChanged.Remove(ActiveCharChangedHandle);
-			}
-		}
-		ActiveCharChangedHandle.Reset();
-	}
-
-	// 必须调父类方法，走完引擎原生 UI 的销毁流程
-	Super::NativeDestruct();
 }

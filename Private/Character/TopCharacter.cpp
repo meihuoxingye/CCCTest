@@ -1,36 +1,53 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-
 #include "Character/TopCharacter.h"
 // 自定义移动控制组件
 #include "Component/MovementControl/MyMovementControlComponent.h"
-
 // 引入对应的 GameMode 和控制器以触发 UI 刷新机制
 #include "Game/MyGameModeBase.h"
 #include "Character/TopPlayerController.h"
-
 // 角色属性数据资产配置
 #include "Character/CharacterAttributeDataAsset.h"
-
 // 技能点子系统
 #include "SkillSystem/SkillPointSubsystem.h"
-
 // 使用了 GetWorld()，让编译器知道 UWorld* 指针
 #include "Engine/World.h"
+// 【新增模块】
+#include "EnhancedInputComponent.h"
+#include "Component/CombatSystem/MyCombatComponent.h"
+#include "Tools/MyUITools.h" 
+// 【新增】：官方角色移动组件（为了修改 bRunPhysicsWithNoController）
+#include "GameFramework/CharacterMovementComponent.h"
+
 
 // Sets default values
 ATopCharacter::ATopCharacter()
 {
- 	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
+	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
 
 	MMCComponent = CreateDefaultSubobject<UMyMovementControlComponent>(TEXT("MyMovementControlComponent"));
+}
+
+
+// ==============================================================================
+// 核心生命周期 (Core Lifecycle)
+// ==============================================================================
+
+// Called every frame
+void ATopCharacter::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
 }
 
 // Called when the game starts or when spawned
 void ATopCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// 【新增核心修复】：允许没有控制器附身的躯壳继续受物理引擎控制（保持重力下落和惯性）
+	// 这行代码会打破虚幻“无魂则静”的默认优化，彻底修复半空切人定格的 Bug！
+	GetCharacterMovement()->bRunPhysicsWithNoController = true;
 
 	// 1. 使用局部的 const 原始指针来接取配置资产（推荐的最佳实践）
 	// 这样可以确保在当前的 BeginPlay 逻辑里，没有任何人能意外修改 Config 内部的数值
@@ -48,8 +65,8 @@ void ATopCharacter::BeginPlay()
 			Config->RegenRate
 		);
 	}
-	
-	
+
+
 	// 类型为友好的角色出生自动注册与UI刷新调用
 	if (Config && Config->CharacterType == ECharacterType::Friendly)
 	{
@@ -94,17 +111,72 @@ void ATopCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
-// Called every frame
-void ATopCharacter::Tick(float DeltaTime)
-{
-	Super::Tick(DeltaTime);
 
-}
+// ==============================================================================
+// 玩家输入与行为绑定 (Player Input & Actions)
+// ==============================================================================
 
 // Called to bind functionality to input
 void ATopCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 
+	UEnhancedInputComponent* EnhancedInputComponent = CastChecked<UEnhancedInputComponent>(PlayerInputComponent);
+
+	// 绑定回调
+	if (EnhancedInputComponent)
+	{
+		EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &ATopCharacter::Move);
+		// 跳跃直接绑定基类 ACharacter 原生的 Jump 函数，极其精简
+		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
+		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
+		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Started, this, &ATopCharacter::Attack);
+		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Completed, this, &ATopCharacter::AttackEnd);
+	}
 }
 
+void ATopCharacter::Move(const FInputActionValue& InputActionValue)
+{
+	// 移动输入动作是一个 Axis2D 类型，要获取 X 和 Y 轴数据
+	// InputActionValue.Get,将键盘传入的数据转换为二维向量
+	// 键盘 X 表示 A/D，键盘 Y 表示 W/S，其中 D、W 为正值
+	const FVector2D InputAxisVector = InputActionValue.Get<FVector2D>();
+
+	if (MMCComponent)
+	{
+		// 让组件去处理具体的移动逻辑
+		MMCComponent->HandleMoveInput(InputAxisVector);
+	}
+}
+
+void ATopCharacter::Attack()
+{
+	// 调用全局防走火工具，鼠标在 UI 上则不执行攻击逻辑
+	if (UMyUITools::IsMouseOverUI(this)) return;
+
+	// 如果正处于切人模式，无论是否切换成功，都会取消切人模式并返回，且不执行攻击逻辑
+	if (ATopPlayerController* PC = Cast<ATopPlayerController>(GetController()))
+	{
+		// 查询切人状态
+		if (PC->IsSwitchModeActive())
+		{
+			PC->SetSwitchMode(false);
+			return;
+		}
+	}
+
+	if (MCComponent)
+	{
+		// 告诉战斗组件：开始射击
+		MCComponent->StartWeaponFire();
+	}
+}
+
+void ATopCharacter::AttackEnd()
+{
+	if (MCComponent)
+	{
+		// 告诉战斗组件：停止射击
+		MCComponent->StopWeaponFire();
+	}
+}

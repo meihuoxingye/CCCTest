@@ -4,100 +4,83 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
-
-// 定义了 FInputActionValue 结构体
-// 专门用来装载按键、鼠标位移或手柄摇杆产生的具体数值
 #include "InputActionValue.h"
-
 #include "TopPlayerController.generated.h"
 
-/**
- * 
- */
 UCLASS()
 class CCC_API ATopPlayerController : public APlayerController
 {
 	GENERATED_BODY()
-	
+
 public:
 	ATopPlayerController();
 
-	virtual void Tick(float DeltaTime) override;
+	// ==============================================================================
+	// 核心生命周期与组件 (Core Lifecycle & Components)
+	// ==============================================================================
+protected:
+	virtual void BeginPlay() override;
 
-	// ===================== 【UI 属性与控制方法】 =====================
-	UPROPERTY(EditDefaultsOnly, Category = "UI")
-	TSubclassOf<class UMyMainHUDWidget> MainHUDClass;
+	// 【核心挂件】：时空枢纽组件，全权负责平滑子弹时间与渲染同步
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<class UTimeDilationHubComponent> TimeDilationHub;
 
-	UPROPERTY()
-	TObjectPtr<class UMyMainHUDWidget> MainHUDInstance;
 
+	// ==============================================================================
+	// UI 统筹系统 (UI Management System)
+	// ==============================================================================
+public:
 	// 主动调用以刷新当前界面布局
 	UFUNCTION(BlueprintCallable, Category = "UI")
 	void UpdateHUD();
 
+protected:
+	// 暴露给蓝图，用于在编辑器中指定主 HUD 面板的具体蓝图类
+	UPROPERTY(EditDefaultsOnly, Category = "UI")
+	TSubclassOf<class UMyMainHUDWidget> MainHUDClass;
 
+	// 缓存创建出来的主 HUD 实例，用于后续在 C++ 中随时呼叫 UI 刷新
+	UPROPERTY()
+	TObjectPtr<class UMyMainHUDWidget> MainHUDInstance;
+
+
+	// ==============================================================================
+	// 战术指令与总线转发 (Tactical Commands & Bus Forwarding)
+	// ==============================================================================
+public:
+	// 换人系统总线的最终执行者：接收 UI 传来的“目标角色”并执行灵魂交接
 	void SwitchToSpecificCharacter(class ATopCharacter* TargetCharacter);
 
-protected:
-	virtual void BeginPlay() override;
+	// 只读查询现在是否处于切人模式（子弹时间）状态
+	bool IsSwitchModeActive() const;
+	// 设置是否进入切人模式
+	void SetSwitchMode(bool bEnable);
 
+
+	// ==============================================================================
+	// 灵魂附身与输入绑定 (Possession & Input Setup)
+	// ==============================================================================
+protected:
 	// 键位绑定回调函数
 	virtual void SetupInputComponent() override;
 
-
-	/** 缓存找到的指针，避免每帧都寻找 */
-	// 缓存组件指针，避免每一帧调用 FindComponentByClass
-	UPROPERTY()
-	TObjectPtr<class UMyMovementControlComponent> CachedMyMovementControlComp;
-
-	// 缓存组件指针
-	UPROPERTY()
-	TObjectPtr<class UMyCombatComponent> CachedMyCombatComp;
-
-	// 缓存角色指针
+	// 缓存角色指针，避免每帧都寻找
 	UPROPERTY()
 	TObjectPtr<class ATopCharacter> CachedMyCharacter;
 
-	// 当控制器开始控制一个 Pawn 时触发，缓存找到的自定义输入移动组件与角色，只找一次
+	// 当控制器开始控制一个 Pawn 时触发，缓存找到的角色，只找一次
 	virtual void OnPossess(APawn* InPawn) override;
 	// 当控制器不再控制时将指针清空
 	virtual void OnUnPossess() override;
-	/** 缓存找到的自定义输入移动组件，避免每帧都寻找 */
-
-
-	// 在蓝图中配置创建的材质参数集合资产（MPC）
-	UPROPERTY(EditDefaultsOnly, Category = "Optimization")
-	TObjectPtr<class UMaterialParameterCollection> GlobalUIMPC;
 
 private:
+	// 增强输入资产配置，蓝图中配置
 	UPROPERTY(EditAnywhere, Category = "Input")
 	TObjectPtr<class UInputMappingContext> TopContext;
-	UPROPERTY(EditAnywhere, Category = "Input")
-	TObjectPtr<class UInputAction> MoveAction;
-	UPROPERTY(EditAnywhere, Category = "Input")
-	TObjectPtr<class UInputAction> JumpAction;
-	UPROPERTY(EditAnywhere, Category = "Input")
-	TObjectPtr<class UInputAction> AttackAction;
+
 	UPROPERTY(EditAnywhere, Category = "Input")
 	TObjectPtr<class UInputAction> BulletTimeAction;
 	UPROPERTY(EditAnywhere, Category = "Input")
 	TObjectPtr<UInputAction> SwitchModeAction;
 
-
-	/** Input Callback Functions*/
-	void Move(const FInputActionValue& InputActionValue);
-	void Jump();
-	void StopJump();
-	void Attack();
-	void AttackEnd();
-	void BulletTime();
-	bool bIsBulletTime = false;
-	// 当前是否处于切人子弹时间状态
-	bool bIsSwitchModeActive = false;
-
-	// 用于软着陆插值的目标时间流速
-	float TargetTimeDilation = 1.0f;
-
-	void ToggleSwitchMode();
-	void SetSwitchMode(bool bEnable);
 };
