@@ -7,15 +7,48 @@
 #include "MyCombatComponent.generated.h"
 
 
-UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
+UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class CCC_API UMyCombatComponent : public UActorComponent
 {
 	GENERATED_BODY()
 
-public:	
+
+	// ==============================================================================
+	// 核心生命周期 (Core Lifecycle)
+	// ==============================================================================
+public:
 	// Sets default values for this component's properties
 	UMyCombatComponent();
 
+protected:
+	// Called when the game starts
+	virtual void BeginPlay() override;
+
+public:
+	// Called every frame
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+
+	// ==============================================================================
+	// 武器生成与装配 (Weapon Spawn & Assembly)
+	// ==============================================================================
+public:
+	// 为拥有该组件的角色生成默认武器
+	// 由基础角色调用
+	void SpawnDefaultWeapon();
+	// 将生成的默认武器吸附到角色的骨骼插槽上
+	void AttachWeaponToSocket(class AMyWeaponBase* SpawnedWeapon);
+
+private:
+	// 将 NewWeapon 切换为当前使用武器，并获取武器的网格与数据资产配置的接口，然后缓存它们
+	// 设置为布尔值，缓存失败返回 false，用于在其他函数里进行条件判断
+	bool SwitchToActiveWeapon(class AMyWeaponBase* NewWeapon);
+
+
+	// ==============================================================================
+	// 战斗指令与状态 (Combat Commands & State)
+	// ==============================================================================
+public:
 	// 外部调用，执行开火逻辑
 	void ExecuteAttack();
 	// 外部调用，将组件注册进射击子系统的开火冷却名单数组中
@@ -23,34 +56,26 @@ public:
 	// 外部调用，将组件从射击子系统的开火冷却名单数组中移除
 	void StopWeaponFire();
 
-	// 为拥有该组件的角色生成默认武器
-	// 由基础角色调用
-	void SpawnDefaultWeapon();
-	// 将生成的默认武器吸附到角色的骨骼插槽上
-	void AttachWeaponToSocket(class AMyWeaponBase* SpawnedWeapon);
 
-protected:
-	// Called when the game starts
-	virtual void BeginPlay() override;
-
-	// 缓存组件拥有者的玩家或 AI 控制器
-	// 组件的 BeginPlay 执行时，角色可能还没有被控制器控制，所以不直接在 BeginPlay 里缓存
-	void CachedController();
-
-public:	
-	// Called every frame
-	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
+	// ==============================================================================
+	// 底层开火系统实现 (Low-Level Firing Implementation)
+	// ==============================================================================
 private:
 	// 执行 射线检测
 	void PerformHitscan();
 	// 召唤抛射物实体
 	void SpawnProjectile();
-	// 将 NewWeapon 切换为当前使用武器，并获取武器的网格与数据资产配置的接口，然后缓存它们
-	// 设置为布尔值，缓存失败返回 false，用于在其他函数里进行条件判断
-	bool SwitchToActiveWeapon(class AMyWeaponBase* NewWeapon);
 
 
+	// ==============================================================================
+	// 辅助与缓存工具 (Utilities & Caching)
+	// ==============================================================================
+protected:
+	// 缓存组件拥有者的玩家或 AI 控制器
+	// 组件的 BeginPlay 执行时，角色可能还没有被控制器控制，所以不直接在 BeginPlay 里缓存
+	void CachedController();
+
+private:
 	// 缓存组件拥有者的指针
 	UPROPERTY()
 	TObjectPtr<class ABaseCharacter> CachedOwner;
@@ -68,7 +93,6 @@ private:
 	// 指针+const，保护的是指针指向的数据，不影响设置指针指向哪
 	UPROPERTY()
 	TObjectPtr<const class UMyWeaponDataAsset> CachedConfig;
-
 
 	// 缓存当前使用的武器的网格
 	// 静态网格也能使用插槽，且性能更好

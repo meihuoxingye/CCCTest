@@ -37,6 +37,11 @@
 // 原生读取路标
 #include "NavigationPath.h"
 
+
+// ==============================================================================
+// 核心生命周期与附身 (Core Lifecycle & Possession)
+// ==============================================================================
+
 AMyAIController::AMyAIController()
 {
 	// 创建感知组件
@@ -63,7 +68,7 @@ void AMyAIController::OnPossess(APawn* InPawn)
 {
 	Super::OnPossess(InPawn);
 
-	#pragma region 缓存报错区
+#pragma region 缓存报错区
 	// 先尝试获取 Pawn，获取失败则退出并报错！
 	if (!InPawn)
 	{
@@ -98,9 +103,9 @@ void AMyAIController::OnPossess(APawn* InPawn)
 		UE_LOG(LogTemp, Error, TEXT("获取 Pawn[%s] 装换为的角色的移动组件失败"), *InPawn->GetName());
 		return;
 	}
-	#pragma endregion
+#pragma endregion
 
-	#pragma region 缓存区
+#pragma region 缓存区
 	// AI 控制器不一定只控制角色
 	CachedMyPawn = InPawn;
 
@@ -112,7 +117,7 @@ void AMyAIController::OnPossess(APawn* InPawn)
 	CachedMyCombatComp = CachedMyCharacter->GetCombatComponent();
 
 	CachedMovementComp = CachedMyCharacter->GetCharacterMovement();
-	#pragma endregion
+#pragma endregion
 
 	// 将移动组件的移动模式改为 NavWalking，使角色不会离开导航网格
 	CachedMovementComp->SetMovementMode(MOVE_NavWalking);
@@ -156,7 +161,7 @@ void AMyAIController::Tick(float DeltaTime)
 		LastGoal = GoalLocation;
 	}
 
-	
+
 	// 2. 【你的避障逻辑】：只负责处理“活”的队友
 	FVector DesiredDir = (NextWaypoint - CachedMyCharacter->GetActorLocation()).GetSafeNormal();
 	float MaxSpeed = CachedMyCharacter->GetCharacterMovement()->MaxWalkSpeed;
@@ -168,7 +173,7 @@ void AMyAIController::Tick(float DeltaTime)
 		MaxSpeed,
 		SquadSub->GetCandidates()
 	);
-	
+
 
 	// 3. 执行位移
 	CachedMyCharacter->AddMovementInput(ComputedVel.GetSafeNormal(), 1.0f);
@@ -197,6 +202,10 @@ void AMyAIController::OnUnPossess()
 	CachedMyCombatComp = nullptr;
 }
 
+
+// ==============================================================================
+// 感知系统与回调 (Perception System & Callbacks)
+// ==============================================================================
 
 void AMyAIController::OnTargetDetected(AActor* Actor, FAIStimulus Stimulus)
 {
@@ -241,7 +250,7 @@ void AMyAIController::OnTargetDetected(AActor* Actor, FAIStimulus Stimulus)
 				// 如果是有效目标
 				bIsValidTarget = true;
 				// 只要确认应该感知到这个进入视线的目标，就退出循环
-				break; 
+				break;
 			}
 		}
 

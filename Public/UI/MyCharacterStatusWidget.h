@@ -81,8 +81,8 @@ private:
 
 
 	// ==============================================================================
-	// 角色切换总线与用户交互 (Character Switch Bus & User Interaction)
-	// ==============================================================================
+		// 角色切换总线与用户交互 (Character Switch Bus & User Interaction)
+		// ==============================================================================
 protected:
 	// 重写鼠标进入本 UI 内支持射线检测部分的事件，更新子系统的防穿透状态
 	virtual void NativeOnMouseEnter(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
@@ -100,12 +100,16 @@ private:
 	UFUNCTION()
 	void OnAvatarClicked();
 
-	// 接收到主控角色变更后的处理函数
-	// 无需加 UFUNCTION()，因在 cpp 中未直接绑定此函数指针，而是通过 Lambda 进行调用。
-	// 原生 C++ 委托，完全绕过了沉重的反射系统，执行效率极高
-	void HandleActiveCharacterChanged(ATopCharacter* NewActiveChar);
+	/* 
+		=== 目前进度仅跑通了 SP 闭环与换人请求上报。暂未实现换人后的 UI 表现，暂时屏蔽以下下行监听管线 ===
+		// 接收到主控角色变更后的处理函数
+		// 无需加 UFUNCTION()，因在 cpp 中未直接绑定此函数指针，而是通过 Lambda 进行调用。
+		// 原生 C++ 委托，完全绕过了沉重的反射系统，执行效率极高
+		void HandleActiveCharacterChanged(ATopCharacter* NewActiveChar);
 
-	// 全局总线颁发的监听收据。UI 销毁时(NativeDestruct)必须用它解绑，防野指针崩溃。
-	FDelegateHandle ActiveCharChangedHandle;
+		// 全局总线颁发的监听收据。UI 销毁时(NativeDestruct)必须用它解绑，防野指针崩溃。
+		FDelegateHandle ActiveCharChangedHandle;
+	================================================================================================== 
+	*/
 
 };

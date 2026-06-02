@@ -1,6 +1,5 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-
 #include "Component/CombatSystem/MyCombatComponent.h"
 // 基础角色类
 #include "Character/BaseCharacter.h"
@@ -27,6 +26,10 @@
 #include "Components/StaticMeshComponent.h"
 
 
+// ==============================================================================
+// 核心生命周期 (Core Lifecycle)
+// ==============================================================================
+
 // Sets default values for this component's properties
 UMyCombatComponent::UMyCombatComponent()
 {
@@ -37,77 +40,27 @@ UMyCombatComponent::UMyCombatComponent()
 	// ...
 }
 
-void UMyCombatComponent::ExecuteAttack()
+// Called when the game starts
+void UMyCombatComponent::BeginPlay()
 {
-	// 当前没有使用的武器、未设置武器数据资产配置或拥有组件者不是 Charater
-	if (!CachedActiveWeapon || !CachedOwner || !CachedConfig) return;
+	Super::BeginPlay();
 
-	// 根据数据资产配置决定执行线迹追踪还是生成抛射物
-	if (CachedConfig->FireType == EWeaponFireType::Hitscan)
-	{
-		PerformHitscan();
-	}
-	else
-	{
-		SpawnProjectile();
-	}
+	// 缓存组件拥有者
+	CachedOwner = Cast<ABaseCharacter>(GetOwner());
 }
 
-bool UMyCombatComponent::SwitchToActiveWeapon(AMyWeaponBase* NewWeapon)
+// Called every frame
+void UMyCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
-	if (!NewWeapon) return false;
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	// 先尝试获取网格，如果没有网格，直接拒绝装配，并报错！
-	if (!NewWeapon->GetWeaponMuzzleComponent())
-	{
-		UE_LOG(LogTemp, Error, TEXT("武器 [%s] 忘记配置静态网格！拒绝装配！"), *NewWeapon->GetName());
-		return false;
-	}
-
-	// 先尝试获取配置，如果忘了配数据，直接拒绝装配，并报错！
-	if (!NewWeapon->GetWeaponConfig())
-	{
-		UE_LOG(LogTemp, Error, TEXT("武器 [%s] 忘记配置 WeaponConfig 数据资产！拒绝装配！"), *NewWeapon->GetName());
-		return false;
-	}
-
-	// 缓存当前使用武器
-	CachedActiveWeapon = NewWeapon;
-
-	// 缓存当前武器网格
-	CachedWeaponMesh = CachedActiveWeapon->GetWeaponMuzzleComponent();
-
-	// 缓存武器携带的数据资产配置
-	CachedConfig = CachedActiveWeapon->GetWeaponConfig();
-
-	// 缓存枪口插槽名
-	CachedMuzzleSocket = CachedConfig->MuzzleSocketName;
-
-	// 缓存子弹子系统
-	CachedBulletSubsystem = GetWorld()->GetSubsystem<UMyBulletSubsystem>();
-
-	return true;
+	// ...
 }
 
-void UMyCombatComponent::StartWeaponFire()
-{
-	if (!CachedActiveWeapon || !CachedConfig) return;
 
-	// 获取开火子系统，把我自己注册进“射击大名单”
-	if (UFiringSubsystem* CombatSubsystem = GetWorld()->GetSubsystem<UFiringSubsystem>())
-	{
-		CombatSubsystem->RegisterShooter(this, CachedConfig->RefireTime);
-	}
-}
-
-void UMyCombatComponent::StopWeaponFire()
-{
-	// 告诉开火子系统，把我从大名单里划掉
-	if (UFiringSubsystem* CombatSubsystem = GetWorld()->GetSubsystem<UFiringSubsystem>())
-	{
-		CombatSubsystem->UnregisterShooter(this);
-	}
-}
+// ==============================================================================
+// 武器生成与装配 (Weapon Spawn & Assembly)
+// ==============================================================================
 
 void UMyCombatComponent::SpawnDefaultWeapon()
 {
@@ -156,50 +109,87 @@ void UMyCombatComponent::AttachWeaponToSocket(AMyWeaponBase* SpawnedWeapon)
 	);
 }
 
-// Called when the game starts
-void UMyCombatComponent::BeginPlay()
+bool UMyCombatComponent::SwitchToActiveWeapon(AMyWeaponBase* NewWeapon)
 {
-	Super::BeginPlay();
+	if (!NewWeapon) return false;
 
-	// 缓存组件拥有者
-	CachedOwner = Cast<ABaseCharacter>(GetOwner());
-
-}
-
-void UMyCombatComponent::CachedController()
-{
-	bControllerChecked = true;
-
-	// 缓存组件拥有者的控制器
-	CachedOwnerController = CachedOwner->GetController();
-
-	// 尝试将组件拥有者的控制器转为玩家控制器
-	CachedPlayerController = Cast<APlayerController>(CachedOwnerController);
-	// 尝试将组件拥有者的控制器转为 AI 控制器
-	CachedAIController = Cast<AAIController>(CachedOwnerController);
-
-	if (CachedPlayerController)
+	// 先尝试获取网格，如果没有网格，直接拒绝装配，并报错！
+	if (!NewWeapon->GetWeaponMuzzleComponent())
 	{
-		// 如果是真人玩家，顺便把它的相机管理器也锁死缓存下来
-		CachedCameraManager = CachedPlayerController->PlayerCameraManager;
-
-		CachedAIController = nullptr;
+		UE_LOG(LogTemp, Error, TEXT("武器 [%s] 忘记配置静态网格！拒绝装配！"), *NewWeapon->GetName());
+		return false;
 	}
-	else if (CachedAIController)
+
+	// 先尝试获取配置，如果忘了配数据，直接拒绝装配，并报错！
+	if (!NewWeapon->GetWeaponConfig())
 	{
-		CachedPlayerController = nullptr;
-		CachedCameraManager = nullptr;
+		UE_LOG(LogTemp, Error, TEXT("武器 [%s] 忘记配置 WeaponConfig 数据资产！拒绝装配！"), *NewWeapon->GetName());
+		return false;
+	}
+
+	// 缓存当前使用武器
+	CachedActiveWeapon = NewWeapon;
+
+	// 缓存当前武器网格
+	CachedWeaponMesh = CachedActiveWeapon->GetWeaponMuzzleComponent();
+
+	// 缓存武器携带的数据资产配置
+	CachedConfig = CachedActiveWeapon->GetWeaponConfig();
+
+	// 缓存枪口插槽名
+	CachedMuzzleSocket = CachedConfig->MuzzleSocketName;
+
+	// 缓存子弹子系统
+	CachedBulletSubsystem = GetWorld()->GetSubsystem<UMyBulletSubsystem>();
+
+	return true;
+}
+
+
+// ==============================================================================
+// 战斗指令与状态 (Combat Commands & State)
+// ==============================================================================
+
+void UMyCombatComponent::StartWeaponFire()
+{
+	if (!CachedActiveWeapon || !CachedConfig) return;
+
+	// 获取开火子系统，把我自己注册进“射击大名单”
+	if (UFiringSubsystem* CombatSubsystem = GetWorld()->GetSubsystem<UFiringSubsystem>())
+	{
+		CombatSubsystem->RegisterShooter(this, CachedConfig->RefireTime);
+	}
+}
+
+void UMyCombatComponent::StopWeaponFire()
+{
+	// 告诉开火子系统，把我从大名单里划掉
+	if (UFiringSubsystem* CombatSubsystem = GetWorld()->GetSubsystem<UFiringSubsystem>())
+	{
+		CombatSubsystem->UnregisterShooter(this);
+	}
+}
+
+void UMyCombatComponent::ExecuteAttack()
+{
+	// 当前没有使用的武器、未设置武器数据资产配置或拥有组件者不是 Charater
+	if (!CachedActiveWeapon || !CachedOwner || !CachedConfig) return;
+
+	// 根据数据资产配置决定执行线迹追踪还是生成抛射物
+	if (CachedConfig->FireType == EWeaponFireType::Hitscan)
+	{
+		PerformHitscan();
+	}
+	else
+	{
+		SpawnProjectile();
 	}
 }
 
 
-// Called every frame
-void UMyCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-	// ...
-}
+// ==============================================================================
+// 底层开火系统实现 (Low-Level Firing Implementation)
+// ==============================================================================
 
 void UMyCombatComponent::PerformHitscan()
 {
@@ -208,7 +198,7 @@ void UMyCombatComponent::PerformHitscan()
 	{
 		CachedController();
 	}
-	
+
 	// 检查是否忘记设置插槽名
 	if (CachedMuzzleSocket.IsNone())
 	{
@@ -305,7 +295,6 @@ void UMyCombatComponent::PerformHitscan()
 	}
 }
 
-
 // 待修改
 void UMyCombatComponent::SpawnProjectile()
 {
@@ -321,4 +310,35 @@ void UMyCombatComponent::SpawnProjectile()
 
 	// 生成那个“带着原生抛射物组件”的子弹，生成后逻辑交给子弹自己
 	GetWorld()->SpawnActor<AMyBaseProjectile>(CachedConfig->ProjectileClass, Loc, Rot, Params);
+}
+
+
+// ==============================================================================
+// 辅助与缓存工具 (Utilities & Caching)
+// ==============================================================================
+
+void UMyCombatComponent::CachedController()
+{
+	bControllerChecked = true;
+
+	// 缓存组件拥有者的控制器
+	CachedOwnerController = CachedOwner->GetController();
+
+	// 尝试将组件拥有者的控制器转为玩家控制器
+	CachedPlayerController = Cast<APlayerController>(CachedOwnerController);
+	// 尝试将组件拥有者的控制器转为 AI 控制器
+	CachedAIController = Cast<AAIController>(CachedOwnerController);
+
+	if (CachedPlayerController)
+	{
+		// 如果是真人玩家，顺便把它的相机管理器也锁死缓存下来
+		CachedCameraManager = CachedPlayerController->PlayerCameraManager;
+
+		CachedAIController = nullptr;
+	}
+	else if (CachedAIController)
+	{
+		CachedPlayerController = nullptr;
+		CachedCameraManager = nullptr;
+	}
 }

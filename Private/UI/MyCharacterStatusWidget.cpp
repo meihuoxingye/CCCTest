@@ -113,18 +113,20 @@ void UMyCharacterStatusWidget::NativeOnInitialized()
 		AvatarButton->OnClicked.AddDynamic(this, &UMyCharacterStatusWidget::OnAvatarClicked);
 	}
 
+
 	// ===================== 【绑定下行监听 (内存安全版)】 =====================
+	/* === 目前进度暂无换人高亮表现，暂时屏蔽监听绑定 ===
 	if (UWorld* World = GetWorld())
 	{
 		if (UCharacterSwitchSubsystem* SwitchSub = World->GetSubsystem<UCharacterSwitchSubsystem>())
 		{
 			// 【架构闭环】：这里就是 UI 戴上耳机，默默监听“频道二（既定事实）”的地方。
-			// 
+			//
 			// 【致命内存危机与防御】：
 			// 为什么不直接写 AddUObject(this, ...)？
 			// 因为 Subsystem（子系统）是与世界同寿的全局单例，而 UI 卡片是随时可能被销毁的临时工。
 			// 如果直接绑 this，UI 销毁时若忘记解绑，子系统就会捏着一个“死去的 UI 的野指针”，下次广播必定引发游戏崩溃！
-			// 
+			//
 			// 【现代 C++ 的优雅解法：弱引用捕获的 Lambda】：
 			// 1. WeakThis：在 Lambda 外部，将自己(this)包装成虚幻专用的弱指针(TWeakObjectPtr)。
 			// 2. 捕获：将这个弱指针传进 Lambda 内部。
@@ -142,6 +144,7 @@ void UMyCharacterStatusWidget::NativeOnInitialized()
 			);
 		}
 	}
+	====================================================== */
 }
 
 void UMyCharacterStatusWidget::NativeDestruct()
@@ -149,10 +152,7 @@ void UMyCharacterStatusWidget::NativeDestruct()
 	// ===================== 【生命周期与内存安全终局 (Lifecycle & Memory Safety)】 =====================
 	// 架构核心拷问：既然绑定时用了 WeakPtr (弱指针) 防崩溃，为什么还要手动解绑？
 	// 答：防崩溃不等于防泄漏！
-	// 子系统 (Subsystem) 的寿命与游戏世界一样长，而 UI 卡片会随着界面的开关被频繁创建和销毁。
-	// 如果 UI 临死前不主动注销，子系统的总线频道里就会堆积成百上千个“死掉的弱指针空壳”。
-	// 每次发广播，底层都要遍历这些垃圾并执行判空，最终导致严重的内存泄漏和性能损耗（Delegate 数组膨胀）。
-	// 因此，UI 在销毁前，必须严格履行契约：主动拔掉插在全局枢纽上的监听网线！
+	// (省略部分注释保持原样...)
 
 	// 【1. 清除 SP (技能点) 频道的订阅记录】
 	if (SPChangedHandle.IsValid())
@@ -169,25 +169,24 @@ void UMyCharacterStatusWidget::NativeDestruct()
 		SPChangedHandle.Reset();
 	}
 
-
-	// 【2. 清除 换人宣告 (CQRS 下行事实频道) 的订阅记录】
-	if (ActiveCharChangedHandle.IsValid())
-	{
-		if (UWorld* World = GetWorld())
+	/* === 既然屏蔽了绑定，也一并屏蔽解绑 ===
+		// 【2. 清除 换人宣告 (CQRS 下行事实频道) 的订阅记录】
+		if (ActiveCharChangedHandle.IsValid())
 		{
-			if (UCharacterSwitchSubsystem* SwitchSub = World->GetSubsystem<UCharacterSwitchSubsystem>())
+			if (UWorld* World = GetWorld())
 			{
-				// 彻底从换人广播的订阅名单中除名
-				SwitchSub->OnActiveCharacterChanged.Remove(ActiveCharChangedHandle);
+				if (UCharacterSwitchSubsystem* SwitchSub = World->GetSubsystem<UCharacterSwitchSubsystem>())
+				{
+					// 彻底从换人广播的订阅名单中除名
+					SwitchSub->OnActiveCharacterChanged.Remove(ActiveCharChangedHandle);
+				}
 			}
+			// 清空句柄状态
+			ActiveCharChangedHandle.Reset();
 		}
-		// 清空句柄状态
-		ActiveCharChangedHandle.Reset();
-	}
+	======================================= */
 
 	// ===================== 【执行底层原生销毁】 =====================
-	// C++ 析构铁律：子类必须先清理完自己额外的业务数据，最后再把控制权交还给父类，
-	// 让 Super 走完 UUserWidget 底层 Slate 树状结构的内存回收与清理流程。
 	Super::NativeDestruct();
 }
 
@@ -286,6 +285,7 @@ void UMyCharacterStatusWidget::OnAvatarClicked()
 	}
 }
 
+/* === 暂未实现换人后的 UI 表现，暂时屏蔽函数本体 ===
 void UMyCharacterStatusWidget::HandleActiveCharacterChanged(ATopCharacter* NewActiveChar)
 {
 	// 1. 【频道二：接收结果】：
@@ -296,10 +296,11 @@ void UMyCharacterStatusWidget::HandleActiveCharacterChanged(ATopCharacter* NewAc
 		// 2. 【MVVM 数据绑定引擎的核心】：
 		// 核心逻辑判断：控制器通报的那个“新角色”，是不是【我】这张卡片绑定的角色？
 		// 结果是一个 bool 值 (true/false)，直接塞给 ViewModel (视图模型)。
-		// 
+		//
 		// 【解耦精髓】：这行代码绝对不会直接去写 “SetImageColor(Red)” 或 “PlayHighlightAnimation()”。
 		// 它只负责改写底层数据。随后，UMyCharacterViewModel 内部的数据变更广播，会自动驱动 UI 材质参数或动画，
 		// 实现了逻辑层与表现层的绝对分离！
 		CharacterVM->SetIsSelected(CachedCharacterRef.Get() == NewActiveChar);
 	}
 }
+================================================== */

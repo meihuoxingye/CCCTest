@@ -6,6 +6,11 @@
 // 识别 UWorld 指针
 #include "Engine/World.h"
 
+
+// ==============================================================================
+// 核心生命周期与初始化 (Core Lifecycle & Initialization)
+// ==============================================================================
+
 void USkillPointSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     // 调用父类初始化
@@ -17,6 +22,10 @@ void USkillPointSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     SquadSPMap.Add(TEXT("Hero_Warrior"), WarriorData);
 }
 
+
+// ==============================================================================
+// 核心状态查询 (Core State Query)
+// ==============================================================================
 
 float USkillPointSubsystem::GetCalculatedCharacterSP(FName CharacterID) const
 {
@@ -41,7 +50,7 @@ float USkillPointSubsystem::GetCalculatedCharacterSP(FName CharacterID) const
     // 惰性求值，不依赖 Tick，而是根据时间差动态推算
     // 公式：当前实时 SP = 快照老底 + (过去的时间差 * 恢复速度)
     float CalculatedSP = DataPtr->SavedSP + (static_cast<float>(TimePassed) * DataPtr->RegenRate);
-    
+
     // 用 Clamp 把最终结果卡死在 0 到 MaxSP 之间，防止涨爆了
     return FMath::Clamp(CalculatedSP, 0.0f, DataPtr->MaxSP);
 }
@@ -65,6 +74,10 @@ int32 USkillPointSubsystem::GetCurrentSPAsInt(FName CharacterID) const
     return FMath::FloorToInt(GetCalculatedCharacterSP(CharacterID));
 }
 
+
+// ==============================================================================
+// 技能点消费与管控 (SP Consumption & Control)
+// ==============================================================================
 
 bool USkillPointSubsystem::ConsumeCharacterSP(FName CharacterID, float Amount)
 {
@@ -130,6 +143,11 @@ void USkillPointSubsystem::SetAllCharactersRegenFrozen(bool bFreeze)
     }
 }
 
+
+// ==============================================================================
+// 存档与时间轴同步 (Save System & Timeline Sync)
+// ==============================================================================
+
 // 为存档做准备，强制把所有角色的技能点数据同步到当前时间点，并冻结技能点恢复功能
 void USkillPointSubsystem::PrepareForSave()
 {
@@ -159,6 +177,11 @@ void USkillPointSubsystem::PostLoadSync()
         }
     }
 }
+
+
+// ==============================================================================
+// 小队成员数据管理 (Squad Member Data Management)
+// ==============================================================================
 
 void USkillPointSubsystem::AddNewCharacterToSquad(FName CharacterID, float MaxSP, float InitialSP, float RegenRate)
 {

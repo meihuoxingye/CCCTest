@@ -7,16 +7,19 @@
 #include "MyAIController.generated.h"
 
 /**
- * 
- */
+ * */
 UCLASS()
 class CCC_API AMyAIController : public AAIController
 {
 	GENERATED_BODY()
-	
+
 public:
 	AMyAIController();
 
+
+	// ==============================================================================
+	// 核心生命周期与附身 (Core Lifecycle & Possession)
+	// ==============================================================================
 protected:
 	virtual void Tick(float DeltaTime) override;
 	// 当 AI 控制器开始操控时执行
@@ -25,6 +28,10 @@ protected:
 	virtual void OnUnPossess() override;
 
 
+	// ==============================================================================
+	// 感知系统与回调 (Perception System & Callbacks)
+	// ==============================================================================
+protected:
 	// 回调函数，当检测到目标时执行
 	// 动态多播委托必须依赖反射系统
 	UFUNCTION()
@@ -37,6 +44,15 @@ protected:
 	// 感知配置
 	UPROPERTY()
 	TObjectPtr<class UAISenseConfig_Sight> SightConfig;
+
+private:
+	// 同步自定义感知属性
+	void SyncPerceptionProperties();
+
+
+	// ==============================================================================
+	// 缓存与内部状态 (Caching & Internal State)
+	// ==============================================================================
 private:
 	// 缓存被 AI 控制的 Pawn 指针
 	UPROPERTY()
@@ -57,10 +73,6 @@ private:
 	// 缓存被 AI 控制的 Pawn 的移动组件指针
 	UPROPERTY()
 	TObjectPtr<class UCharacterMovementComponent> CachedMovementComp;
-
-	// 同步自定义感知属性
-	void SyncPerceptionProperties();
-	
 
 	FVector LastGoal = FVector::ZeroVector;
 	FVector NextWaypoint = FVector::ZeroVector;

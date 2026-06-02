@@ -12,10 +12,32 @@
 // --- 必须加上这一行，它是日志频道的本体 ---
 DEFINE_LOG_CATEGORY(LogSquadSystem);
 
-void UMySquadSubsystem::RegisterCandidate(ABaseCharacter* Character) 
-{ 
+
+// ==============================================================================
+// 核心生命周期 (Core Lifecycle)
+// ==============================================================================
+
+void UMySquadSubsystem::Tick(float DeltaTime)
+{
+    // 针对 60+ 人规模，组队逻辑改为每 0.5 秒执行一次，防止每一帧执行导致掉帧
+    GroupingTimer += DeltaTime;
+
+    if (GroupingTimer >= 0.5f)
+    {
+        UpdateGroupingLogic();
+        GroupingTimer = 0.f;
+    }
+}
+
+
+// ==============================================================================
+// 成员注册与管理 (Member Registration & Management)
+// ==============================================================================
+
+void UMySquadSubsystem::RegisterCandidate(ABaseCharacter* Character)
+{
     // AddUnique 在加入之前会先“扫视”一遍数组，如果不存在，把它加进去；如果已经存在，什么都不做
-    if (Character) Candidates.AddUnique(Character); 
+    if (Character) Candidates.AddUnique(Character);
 }
 
 void UMySquadSubsystem::UnregisterCharacter(ABaseCharacter* Character)
@@ -39,17 +61,10 @@ void UMySquadSubsystem::RemoveFromGroup(ABaseCharacter* Character)
     }
 }
 
-void UMySquadSubsystem::Tick(float DeltaTime)
-{
-    // 针对 60+ 人规模，组队逻辑改为每 0.5 秒执行一次，防止每一帧执行导致掉帧
-    GroupingTimer += DeltaTime;
 
-    if (GroupingTimer >= 0.5f)
-    {
-        UpdateGroupingLogic();
-        GroupingTimer = 0.f;
-    }
-}
+// ==============================================================================
+// 核心组队总线管线 (Core Grouping Pipeline)
+// ==============================================================================
 
 void UMySquadSubsystem::UpdateGroupingLogic()
 {
@@ -73,25 +88,10 @@ void UMySquadSubsystem::UpdateGroupingLogic()
     SearchAndFormSquads(GridMap);
 }
 
-void UMySquadSubsystem::PrintSquadStatus() const
-{
-    // 实时打印小队状态到 Output Log
-    // 打印一个分割线，方便在日志里区分不同时间点的数据
-    UE_LOG(LogSquadSystem, Log, TEXT("--------- 实时战术面板 (%d 个小组) ---------"), ActiveGroups.Num());
-    UE_LOG(LogSquadSystem, Log, TEXT("--------- 待组队池 (%d 个人) ---------"), Candidates.Num());
 
-    for (int32 i = 0; i < ActiveGroups.Num(); ++i)
-    {
-        FString MemberList;
-        for (auto& M : ActiveGroups[i].Members)
-        {
-            if (M.IsValid()) MemberList += FString::Printf(TEXT("[%s] "), *M->GetName());
-        }
-
-        // 输出到日志：小组索引、成员数、具体的成员名字
-        UE_LOG(LogSquadSystem, Log, TEXT("小组 %d | 成员数: %d | 成员列表: %s"), i, ActiveGroups[i].Members.Num(), *MemberList);
-    }
-}
+// ==============================================================================
+// 空间网格与匹配算法 (Spatial Grid & Matching Algorithm)
+// ==============================================================================
 
 void UMySquadSubsystem::PrepareCandidates()
 {
@@ -286,5 +286,30 @@ void UMySquadSubsystem::SearchAndFormSquads(const TMap<FIntPoint, TArray<ABaseCh
 
         // Lose 是从 Candidates 里 Pop 出来的，确定不在池子里，直接 Add 即可，省去 AddUnique 查重开销
         if (C) Candidates.Add(C);
+    }
+}
+
+
+// ==============================================================================
+// 日志与调试 (Logging & Debugging)
+// ==============================================================================
+
+void UMySquadSubsystem::PrintSquadStatus() const
+{
+    // 实时打印小队状态到 Output Log
+    // 打印一个分割线，方便在日志里区分不同时间点的数据
+    UE_LOG(LogSquadSystem, Log, TEXT("--------- 实时战术面板 (%d 个小组) ---------"), ActiveGroups.Num());
+    UE_LOG(LogSquadSystem, Log, TEXT("--------- 待组队池 (%d 个人) ---------"), Candidates.Num());
+
+    for (int32 i = 0; i < ActiveGroups.Num(); ++i)
+    {
+        FString MemberList;
+        for (auto& M : ActiveGroups[i].Members)
+        {
+            if (M.IsValid()) MemberList += FString::Printf(TEXT("[%s] "), *M->GetName());
+        }
+
+        // 输出到日志：小组索引、成员数、具体的成员名字
+        UE_LOG(LogSquadSystem, Log, TEXT("小组 %d | 成员数: %d | 成员列表: %s"), i, ActiveGroups[i].Members.Num(), *MemberList);
     }
 }
