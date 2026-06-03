@@ -33,13 +33,15 @@ public:
 	*/
 
 
-	// 【频道一：上行提议 (Command)】流向：UI -> 玩家控制器
+	// 【频道一：上行提议 (Command)】
+	// 流向：UI_StatusWidget OnAvatarClicked()广播站 -> 玩家控制器 SwitchToSpecificCharacter(ATopCharacter* TargetCharacter)委托绑定函数
 	// 职责：传递玩家的“换人愿望”。
 	// 机制：UI 点击后仅向此频道发送请求，发完后按兵不动（绝不提前修改高亮）
 	// 仲裁：玩家控制器接听此频道，校验目标角色状态。若不可换则静默抛弃，若可换则执行 Possess
 	FOnSwitchCharacterRequestSignature OnSwitchRequest;
 
-	// 【频道二：下行事实 (Event/Fact)】流向：玩家控制器 -> 全宇宙 (含 UI / 摄像机等)
+	// 【频道二：下行事实 (Event/Fact)】
+	// 流向：玩家控制器 OnPossess()广播站 -> UI_StatusWidget HandleActiveCharacterChanged(ATopCharacter* NewActiveChar)委托绑定函数
 	// 职责：宣判引擎底层的“既定事实”
 	// 机制：控制器在完成真正的灵魂交接后，向此频道广播“新王登基”
 	// 执行：只有听到这个频道的广播，UI 才被允许更新高亮，摄像机才开始转移焦点

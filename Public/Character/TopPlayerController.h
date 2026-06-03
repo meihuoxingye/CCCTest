@@ -54,6 +54,8 @@ public:
 	// 只读查询现在是否处于切人模式（子弹时间）状态
 	bool IsSwitchModeActive() const;
 	// 设置是否进入切人模式
+	// 角色攻击回调函数已调用，必返回退出切人模式的指令
+	// 
 	void SetSwitchMode(bool bEnable);
 
 
@@ -78,8 +80,10 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Input")
 	TObjectPtr<class UInputMappingContext> TopContext;
 
+	// 绑定给中键的输入动作，绑定的回调函数在时间膨胀组件中
 	UPROPERTY(EditAnywhere, Category = "Input")
 	TObjectPtr<class UInputAction> BulletTimeAction;
+	// 绑定给 Tab 键的输入动作，绑定的回调函数在时间膨胀组件中
 	UPROPERTY(EditAnywhere, Category = "Input")
 	TObjectPtr<UInputAction> SwitchModeAction;
 

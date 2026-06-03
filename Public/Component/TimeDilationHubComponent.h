@@ -35,6 +35,7 @@ public:
 
 	// 若是否处于“切人子弹时间”状态与传入状态不一致，则切换状态
 	// 换人成功或左键点地面取消时，传入 false 则可强行把状态设为 false 恢复正常时间
+	// Tab 键与中键的回调函数中调用
 	void SetSwitchMode(bool bEnable);
 
 	// 绑定给 Tab 键的输入动作，反转 bIsSwitchModeActive 状态

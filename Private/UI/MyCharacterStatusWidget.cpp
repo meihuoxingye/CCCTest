@@ -108,6 +108,10 @@ void UMyCharacterStatusWidget::NativeOnInitialized()
 	// ===================== 【绑定上行请求 (触发源)】 =====================
 	if (AvatarButton)
 	{
+		// 【纯 C++ 解决焦点劫持】：抢夺按钮的抢占焦点特权！
+		// 确保玩家在疯狂点击头像切人时，引擎焦点始终留在 3D 世界，WASD 和空格跳跃绝不失效！
+		AvatarButton->IsFocusable = false;
+
 		// AddDynamic 是供蓝图/UMG使用的动态多播委托绑定
 		// 当玩家在按钮上点击时，触发 OnAvatarClicked 去向总线【盲发换人请求】
 		AvatarButton->OnClicked.AddDynamic(this, &UMyCharacterStatusWidget::OnAvatarClicked);
@@ -115,25 +119,25 @@ void UMyCharacterStatusWidget::NativeOnInitialized()
 
 
 	// ===================== 【绑定下行监听 (内存安全版)】 =====================
-	/* === 目前进度暂无换人高亮表现，暂时屏蔽监听绑定 ===
 	if (UWorld* World = GetWorld())
 	{
 		if (UCharacterSwitchSubsystem* SwitchSub = World->GetSubsystem<UCharacterSwitchSubsystem>())
 		{
-			// 【架构闭环】：这里就是 UI 戴上耳机，默默监听“频道二（既定事实）”的地方。
+			// 【架构闭环】：这里就是 UI 戴上耳机，接收由玩家控制器物理附身后下发的变更通报，默默监听“频道二（既定事实）”的地方
 			//
 			// 【致命内存危机与防御】：
 			// 为什么不直接写 AddUObject(this, ...)？
-			// 因为 Subsystem（子系统）是与世界同寿的全局单例，而 UI 卡片是随时可能被销毁的临时工。
-			// 如果直接绑 this，UI 销毁时若忘记解绑，子系统就会捏着一个“死去的 UI 的野指针”，下次广播必定引发游戏崩溃！
+			// 因为 Subsystem（子系统）是与世界同寿的全局单例，而 UI 卡片是随时可能被销毁的临时工
+			// 如果直接绑 this，UI 销毁时若忘记解绑，子系统就会捏着一个“死去的 UI 的野指针”，下次广播必定引发游戏崩溃
 			//
 			// 【现代 C++ 的优雅解法：弱引用捕获的 Lambda】：
-			// 1. WeakThis：在 Lambda 外部，将自己(this)包装成虚幻专用的弱指针(TWeakObjectPtr)。
-			// 2. 捕获：将这个弱指针传进 Lambda 内部。
-			// 3. 强转 (StrongThis)：当子系统发广播唤醒这个 Lambda 时，先尝试把弱指针变回强指针。
-			// 4. 判空：如果 StrongThis 有效，说明 UI 还活着，安全执行 HandleActiveCharacterChanged 修改高亮。
-			//    如果 StrongThis 为空，说明 UI 已经被销毁了，if 进不去，什么都不会发生，完美化解野指针崩溃！
-			ActiveCharChangedHandle = SwitchSub->OnActiveCharacterChanged.AddLambda(
+			// 1. WeakThis：在 Lambda 外部，将自己(this)包装成虚幻专用的弱指针(TWeakObjectPtr)
+			// 2. 捕获：将这个弱指针传进 Lambda 内部
+			// 3. 强转 (StrongThis)：当子系统发广播唤醒这个 Lambda 时，先尝试把弱指针变回强指针
+			// 4. 判空：如果 StrongThis 有效，说明 UI 还活着，安全执行 HandleActiveCharacterChanged 修改高亮
+			//    如果 StrongThis 为空，说明 UI 已经被销毁了，if 进不去，什么都不会发生，完美化解野指针崩溃
+			ActiveCharChangedHandle = SwitchSub->OnActiveCharacterChanged.AddLambda
+			(
 				[WeakThis = TWeakObjectPtr<UMyCharacterStatusWidget>(this)](ATopCharacter* NewActiveChar)
 				{
 					if (UMyCharacterStatusWidget* StrongThis = WeakThis.Get())
@@ -144,7 +148,6 @@ void UMyCharacterStatusWidget::NativeOnInitialized()
 			);
 		}
 	}
-	====================================================== */
 }
 
 void UMyCharacterStatusWidget::NativeDestruct()
@@ -169,7 +172,6 @@ void UMyCharacterStatusWidget::NativeDestruct()
 		SPChangedHandle.Reset();
 	}
 
-	/* === 既然屏蔽了绑定，也一并屏蔽解绑 ===
 		// 【2. 清除 换人宣告 (CQRS 下行事实频道) 的订阅记录】
 		if (ActiveCharChangedHandle.IsValid())
 		{
@@ -184,7 +186,6 @@ void UMyCharacterStatusWidget::NativeDestruct()
 			// 清空句柄状态
 			ActiveCharChangedHandle.Reset();
 		}
-	======================================= */
 
 	// ===================== 【执行底层原生销毁】 =====================
 	Super::NativeDestruct();
@@ -285,22 +286,20 @@ void UMyCharacterStatusWidget::OnAvatarClicked()
 	}
 }
 
-/* === 暂未实现换人后的 UI 表现，暂时屏蔽函数本体 ===
 void UMyCharacterStatusWidget::HandleActiveCharacterChanged(ATopCharacter* NewActiveChar)
 {
 	// 1. 【频道二：接收结果】：
-	// 这个函数一定是被绑在 OnActiveCharacterChanged 频道上的！
-	// 当控制器完成了灵魂交接并全网通报后，UI 瞬间收到了这个最新上位的“新王(NewActiveChar)”。
+	// 这个函数一定是被绑在 OnActiveCharacterChanged 频道上的
+	// 当控制器完成了灵魂交接并全网通报后，UI 瞬间收到了这个最新上位的“新王(NewActiveChar)”
 	if (CharacterVM && CachedCharacterRef.IsValid())
 	{
 		// 2. 【MVVM 数据绑定引擎的核心】：
-		// 核心逻辑判断：控制器通报的那个“新角色”，是不是【我】这张卡片绑定的角色？
-		// 结果是一个 bool 值 (true/false)，直接塞给 ViewModel (视图模型)。
+		// 核心逻辑判断：控制器通报的那个“新角色”，是不是【我】这张卡片绑定的角色
+		// 结果是一个 bool 值 (true/false)，直接塞给 ViewModel (视图模型) 用于在视口绑定里设置
 		//
-		// 【解耦精髓】：这行代码绝对不会直接去写 “SetImageColor(Red)” 或 “PlayHighlightAnimation()”。
-		// 它只负责改写底层数据。随后，UMyCharacterViewModel 内部的数据变更广播，会自动驱动 UI 材质参数或动画，
-		// 实现了逻辑层与表现层的绝对分离！
+		// 【解耦精髓】：这行代码绝对不会直接去写 “SetImageColor(Red)” 或 “PlayHighlightAnimation()”
+		// 它只负责改写底层数据。随后，UMyCharacterViewModel 内部的数据变更广播，会自动驱动 UI 材质参数或动画
+		// 实现了逻辑层与表现层的绝对分离
 		CharacterVM->SetIsSelected(CachedCharacterRef.Get() == NewActiveChar);
 	}
 }
-================================================== */

@@ -54,38 +54,45 @@ public:
 	bool bIsSelected = false;
 
 
-	// --- 访问器函数 (必须标记为 UFUNCTION，且签名严丝合缝) ---
+	// ==============================================================================
+	// MVVM 框架绑定的属性访问器 (MVVM Field Accessors)
+	// ==============================================================================
+public:
 
-	// 生命值写入函数
+	// 写入当前生命值。
+	// （内部自带防重绘优化：只有新旧数值不同时，才会执行实际赋值并触发 UI 刷新广播）
 	UFUNCTION(BlueprintCallable, Category = "MVVM")
 	void SetHealth(float InValue);
 
-	// 生命值读取函数
+	// 读取当前生命值。
+	// （作为 MVVM 视图绑定管线拉取最新数据的标准出口）
 	UFUNCTION(BlueprintPure, Category = "MVVM")
 	float GetHealth() const;
 
-	// 最大生命值写入函数
+	// 写入最大生命值。
+	// （仅在数值发生实质改变时，更新数据并触发广播）
 	UFUNCTION(BlueprintCallable, Category = "MVVM")
 	void SetMaxHealth(float InValue);
 
-	// 最大生命值读取函数
+	// 读取最大生命值。
 	UFUNCTION(BlueprintPure, Category = "MVVM")
 	float GetMaxHealth() const;
 
-	// MyCharacterStatusWidget 调用，传入角色配置里的图像路径赋给 FieldNotify变量 CharacterAvatar
-	// 值改变后触发事件通知，虚幻底层自动调用函数修改 UI 显示
+	// 写入头像资产路径。
+	// （仅在路径发生实质改变时，更新数据并触发广播）
 	UFUNCTION(BlueprintCallable, Category = "MVVM")
 	void SetCharacterAvatar(TSoftObjectPtr<UTexture2D> InValue);
 
-	// 头像读取函数
+	// 读取头像资产路径。
 	UFUNCTION(BlueprintPure, Category = "MVVM")
 	TSoftObjectPtr<UTexture2D> GetCharacterAvatar() const;
 
-	// 选中状态写入函数
+	// 写入选中状态。
+	// （仅在状态发生翻转时，更新布尔值并触发广播）
 	UFUNCTION(BlueprintCallable, Category = "MVVM")
 	void SetIsSelected(bool bInSelected);
 
-	// 选中状态读取函数
+	// 读取选中状态。
 	UFUNCTION(BlueprintPure, Category = "MVVM")
 	bool IsSelected() const;
 };
