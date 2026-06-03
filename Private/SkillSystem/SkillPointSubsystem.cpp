@@ -10,6 +10,7 @@
 // ==============================================================================
 // 核心生命周期与初始化 (Core Lifecycle & Initialization)
 // ==============================================================================
+#pragma region
 
 void USkillPointSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -22,10 +23,13 @@ void USkillPointSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     SquadSPMap.Add(TEXT("Hero_Warrior"), WarriorData);
 }
 
+#pragma endregion
+
 
 // ==============================================================================
 // 核心状态查询 (Core State Query)
 // ==============================================================================
+#pragma region
 
 float USkillPointSubsystem::GetCalculatedCharacterSP(FName CharacterID) const
 {
@@ -74,10 +78,13 @@ int32 USkillPointSubsystem::GetCurrentSPAsInt(FName CharacterID) const
     return FMath::FloorToInt(GetCalculatedCharacterSP(CharacterID));
 }
 
+#pragma endregion
+
 
 // ==============================================================================
 // 技能点消费与管控 (SP Consumption & Control)
 // ==============================================================================
+#pragma region
 
 bool USkillPointSubsystem::ConsumeCharacterSP(FName CharacterID, float Amount)
 {
@@ -143,10 +150,13 @@ void USkillPointSubsystem::SetAllCharactersRegenFrozen(bool bFreeze)
     }
 }
 
+#pragma endregion
+
 
 // ==============================================================================
 // 存档与时间轴同步 (Save System & Timeline Sync)
 // ==============================================================================
+#pragma region
 
 // 为存档做准备，强制把所有角色的技能点数据同步到当前时间点，并冻结技能点恢复功能
 void USkillPointSubsystem::PrepareForSave()
@@ -178,10 +188,13 @@ void USkillPointSubsystem::PostLoadSync()
     }
 }
 
+#pragma endregion
+
 
 // ==============================================================================
 // 小队成员数据管理 (Squad Member Data Management)
 // ==============================================================================
+#pragma region
 
 void USkillPointSubsystem::AddNewCharacterToSquad(FName CharacterID, float MaxSP, float InitialSP, float RegenRate)
 {
@@ -229,3 +242,5 @@ void USkillPointSubsystem::RemoveCharacterFromSquad(FName CharacterID)
     // 哈希表原生的 Remove 极速擦除，内存干干净净
     SquadSPMap.Remove(CharacterID);
 }
+
+#pragma endregion

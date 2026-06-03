@@ -41,6 +41,7 @@
 // ==============================================================================
 // 核心生命周期与附身 (Core Lifecycle & Possession)
 // ==============================================================================
+#pragma region
 
 AMyAIController::AMyAIController()
 {
@@ -202,10 +203,13 @@ void AMyAIController::OnUnPossess()
 	CachedMyCombatComp = nullptr;
 }
 
+#pragma endregion
+
 
 // ==============================================================================
 // 感知系统与回调 (Perception System & Callbacks)
 // ==============================================================================
+#pragma region
 
 void AMyAIController::OnTargetDetected(AActor* Actor, FAIStimulus Stimulus)
 {
@@ -285,3 +289,5 @@ void AMyAIController::SyncPerceptionProperties()
 		PerceptionComp->SetSenseEnabled(UAISense_Sight::StaticClass(), true);
 	}
 }
+
+#pragma endregion

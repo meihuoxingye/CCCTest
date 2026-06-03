@@ -88,6 +88,11 @@ private:
 	UPROPERTY()
 	TArray<struct FSquadGroup> ActiveGroups;
 
+	// 从待组队池里捞出的人
+	// 设为成员变量，为了跨 Tick 内存复用
+	UPROPERTY()
+	TArray<class ABaseCharacter*> FoundBuffer;
+
 protected:
 	// 空间分块，将世界划分为多个栅格，栅格宽度（厘米）建议设为组队半径的 1.2~1.5 倍
 	// 过大会导致去检测远距离的目标，过小会多次查询哈希表降低性能

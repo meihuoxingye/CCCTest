@@ -29,6 +29,7 @@
 // ==============================================================================
 // 核心生命周期 (Core Lifecycle)
 // ==============================================================================
+#pragma region
 
 // Sets default values for this component's properties
 UMyCombatComponent::UMyCombatComponent()
@@ -57,13 +58,23 @@ void UMyCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 	// ...
 }
 
+#pragma endregion
+
 
 // ==============================================================================
 // 武器生成与装配 (Weapon Spawn & Assembly)
 // ==============================================================================
+#pragma region
 
 void UMyCombatComponent::SpawnDefaultWeapon()
 {
+	// 【新增代码】：极限防御，防止组件被挂载在错误的目标上导致崩溃
+	if (!CachedOwner)
+	{
+		UE_LOG(LogTemp, Error, TEXT("MyCombatComponent 只能挂载在 ABaseCharacter 及其子类上！"));
+		return;
+	}
+
 	// 配置生成参数
 	// 定义一个生成参数清单，它的大多数值都是空的，所以需要手动填上最重要的两项
 	FActorSpawnParameters SpawnParams;
@@ -145,10 +156,13 @@ bool UMyCombatComponent::SwitchToActiveWeapon(AMyWeaponBase* NewWeapon)
 	return true;
 }
 
+#pragma endregion
+
 
 // ==============================================================================
 // 战斗指令与状态 (Combat Commands & State)
 // ==============================================================================
+#pragma region
 
 void UMyCombatComponent::StartWeaponFire()
 {
@@ -186,15 +200,19 @@ void UMyCombatComponent::ExecuteAttack()
 	}
 }
 
+#pragma endregion
+
 
 // ==============================================================================
 // 底层开火系统实现 (Low-Level Firing Implementation)
 // ==============================================================================
+#pragma region
 
 void UMyCombatComponent::PerformHitscan()
 {
-	// 把缓存代码放在要用之前的地方,加个全局布尔控制只运行一次，这种方法称为懒加载
-	if (!bControllerChecked)
+	// 检测当前控制权是否发生了变更（完美兼容换人系统），若变更了就重新缓存
+	// 把缓存代码放在要用之前的地方,加个条件判断只运行一次，这种方法称为懒加载
+	if (CachedOwner && CachedOwner->GetController() != CachedOwnerController)
 	{
 		CachedController();
 	}
@@ -312,10 +330,13 @@ void UMyCombatComponent::SpawnProjectile()
 	GetWorld()->SpawnActor<AMyBaseProjectile>(CachedConfig->ProjectileClass, Loc, Rot, Params);
 }
 
+#pragma endregion
+
 
 // ==============================================================================
 // 辅助与缓存工具 (Utilities & Caching)
 // ==============================================================================
+#pragma region
 
 void UMyCombatComponent::CachedController()
 {
@@ -342,3 +363,5 @@ void UMyCombatComponent::CachedController()
 		CachedCameraManager = nullptr;
 	}
 }
+
+#pragma endregion

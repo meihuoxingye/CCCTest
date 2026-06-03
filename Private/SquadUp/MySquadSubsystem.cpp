@@ -16,6 +16,7 @@ DEFINE_LOG_CATEGORY(LogSquadSystem);
 // ==============================================================================
 // 核心生命周期 (Core Lifecycle)
 // ==============================================================================
+#pragma region
 
 void UMySquadSubsystem::Tick(float DeltaTime)
 {
@@ -29,10 +30,13 @@ void UMySquadSubsystem::Tick(float DeltaTime)
     }
 }
 
+#pragma endregion
+
 
 // ==============================================================================
 // 成员注册与管理 (Member Registration & Management)
 // ==============================================================================
+#pragma region
 
 void UMySquadSubsystem::RegisterCandidate(ABaseCharacter* Character)
 {
@@ -61,10 +65,13 @@ void UMySquadSubsystem::RemoveFromGroup(ABaseCharacter* Character)
     }
 }
 
+#pragma endregion
+
 
 // ==============================================================================
 // 核心组队总线管线 (Core Grouping Pipeline)
 // ==============================================================================
+#pragma region
 
 void UMySquadSubsystem::UpdateGroupingLogic()
 {
@@ -88,10 +95,13 @@ void UMySquadSubsystem::UpdateGroupingLogic()
     SearchAndFormSquads(GridMap);
 }
 
+#pragma endregion
+
 
 // ==============================================================================
 // 空间网格与匹配算法 (Spatial Grid & Matching Algorithm)
 // ==============================================================================
+#pragma region
 
 void UMySquadSubsystem::PrepareCandidates()
 {
@@ -143,14 +153,19 @@ void UMySquadSubsystem::BuildSpatialGrid(TMap<FIntPoint, TArray<ABaseCharacter*>
 
 void UMySquadSubsystem::SearchAndFormSquads(const TMap<FIntPoint, TArray<ABaseCharacter*>>& OutGridMap)
 {
-    // 从待组队池里捞出的人
-    // Found 池移出循环，复用内存
-    // 使用 staic，跨 Tick 复用内存
-    static TArray<ABaseCharacter*> Found;
+    // 提前预留五个位置，避免 FoundBuffer 在 Add 时频繁扩容导致性能下降
+    if (FoundBuffer.Max() < 5)
+    {
+        // 把 TArray 声明为 UMySquadSubsystem 的类成员变量时，能跨 Tick 内存复用：
+        // 利用 Reset() 保留容量： 把数组变成类成员变量后，它就一直存在于内存中。每一帧循环开始前，调用 FoundBuffer.Reset()；
+        // Reset() 的底层逻辑是只把数组的“当前元素数量 (Num)”设为 0，但绝不释放底层的“已分配内存容量 (Max)”；
+        // 等到下一帧再往数组里 Add 存入数据时，指针会直接覆盖原来的旧内存地址；
+        // 因为跳过了耗时的内存申请步骤，所以实现了无性能损耗的跨帧复用。
+        FoundBuffer.Reserve(5);
+    }
+
     // 本轮尝试建队（或入队）失败的角色
     TArray<ABaseCharacter*> Lose;
-    // 预留五个位置，避免 Found 在 Add 时频繁扩容导致性能下降
-    Found.Reserve(5);
 
     // 建立队长 - 小队快速索引表，即角色指针 -> 小组结构体指针的映射
     TMap<ABaseCharacter*, FSquadGroup*> CaptainMap;
@@ -170,8 +185,8 @@ void UMySquadSubsystem::SearchAndFormSquads(const TMap<FIntPoint, TArray<ABaseCh
         ABaseCharacter* A = Candidates.Pop().Get();
         if (!A) continue;
 
-        // 清空元素数量，但不释放内存，复用 Found 池的内存，避免每次都重新分配内存导致性能下降
-        Found.Reset();
+        // 【修改此处】：清空成员变量数组的元素数量，但不释放内存，实现跨 Tick 复用内存
+        FoundBuffer.Reset();
 
         // 小组最大组员数
         int32 TargetSize = 0;
@@ -187,7 +202,7 @@ void UMySquadSubsystem::SearchAndFormSquads(const TMap<FIntPoint, TArray<ABaseCh
             TargetSize = A->GetAttributeConfig()->GetRandomSquadSize();
         }
 
-        Found.Add(A);
+        FoundBuffer.Add(A);
 
         // 获取 A 的位置
         FVector ALoc = A->GetActorLocation();
@@ -220,35 +235,35 @@ void UMySquadSubsystem::SearchAndFormSquads(const TMap<FIntPoint, TArray<ABaseCh
             {
                 for (ABaseCharacter* B : *Cell)
                 {
-                    if (B == A || Found.Contains(B)) continue;
+                    if (B == A || FoundBuffer.Contains(B)) continue;
 
                     // 计算 A 和 B 的距离平方，避免开根号的性能消耗
                     if (FVector::DistSquared(ALoc, B->GetActorLocation()) < RadiusSq)
                     {
-                        Found.Add(B);
+                        FoundBuffer.Add(B);
 
                         // 优化点：队员一旦入组，立刻从待组队池中抽离
                         // RemoveSingleSwap 会把末尾元素挪过来填补空缺，时间复杂度 O(N) 但比重排数组快得多
                         Candidates.RemoveSingleSwap(TWeakObjectPtr<ABaseCharacter>(B));
 
                         // 本次找到的人数已达到目标指标，跳出内层循环
-                        if (Found.Num() >= TargetSize) break;
+                        if (FoundBuffer.Num() >= TargetSize) break;
                     }
                 }
             }
 
             // 招募名额已满,足以补齐小队，无需继续搜索剩下的栅格
-            if (Found.Num() >= TargetSize) break;
+            if (FoundBuffer.Num() >= TargetSize) break;
         }
 
-        if (Found.Num() >= 2)
+        if (FoundBuffer.Num() >= 2)
         {
             // 如果 A 已经是老队长，直接把新成员加到原来的小组里
             if (FSquadGroup** FoundGroupPtr = CaptainMap.Find(A))
             {
                 // 双重指针装换为原始指针，拿到原来小组的指针
                 FSquadGroup* ExistingGroup = *FoundGroupPtr;
-                for (ABaseCharacter* Newbie : Found)
+                for (ABaseCharacter* Newbie : FoundBuffer)
                 {
                     if (Newbie == A) continue;
 
@@ -260,7 +275,7 @@ void UMySquadSubsystem::SearchAndFormSquads(const TMap<FIntPoint, TArray<ABaseCh
             {
                 // 纯新人建新组
                 FSquadGroup NewGroup;
-                for (auto* M : Found) NewGroup.Members.Add(M);
+                for (auto* M : FoundBuffer) NewGroup.Members.Add(M);
                 NewGroup.Captain = A;
 
                 NewGroup.FixedMaxCapacity = TargetSize;
@@ -289,10 +304,13 @@ void UMySquadSubsystem::SearchAndFormSquads(const TMap<FIntPoint, TArray<ABaseCh
     }
 }
 
+#pragma endregion
+
 
 // ==============================================================================
 // 日志与调试 (Logging & Debugging)
 // ==============================================================================
+#pragma region
 
 void UMySquadSubsystem::PrintSquadStatus() const
 {
@@ -313,3 +331,5 @@ void UMySquadSubsystem::PrintSquadStatus() const
         UE_LOG(LogSquadSystem, Log, TEXT("小组 %d | 成员数: %d | 成员列表: %s"), i, ActiveGroups[i].Members.Num(), *MemberList);
     }
 }
+
+#pragma endregion

@@ -37,8 +37,8 @@ void UTimeDilationHubComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		);
 	}
 
-
 	// ===================== 【切人模式：平滑子弹时间】 =====================
+#pragma region
 	// 获取当前游戏世界的真实时间流速
 	// 比如正常流速是 1.0，如果进入子弹时间，它现在可能是 0.3
 	float CurrentDilation = UGameplayStatics::GetGlobalTimeDilation(World);
@@ -74,12 +74,14 @@ void UTimeDilationHubComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		// 把最终计算好的、完美平滑的新流速，塞回给虚幻引擎的世界中，立刻生效
 		UGameplayStatics::SetGlobalTimeDilation(World, NewDilation);
 	}
+#pragma endregion
 }
 
 
 // ==============================================================================
 // 战术指令与时间流速系统 (Tactical Time & Switch System)
 // ==============================================================================
+#pragma region
 
 // 【新增核心修复】：唯一的流速写入入口，严格遵循状态优先级
 void UTimeDilationHubComponent::UpdateTargetTimeDilation()
@@ -126,3 +128,5 @@ void UTimeDilationHubComponent::ToggleBulletTime()
 	// 呼叫仲裁器
 	UpdateTargetTimeDilation();
 }
+
+#pragma endregion

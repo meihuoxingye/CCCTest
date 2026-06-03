@@ -33,6 +33,7 @@ ATopCharacter::ATopCharacter()
 // ==============================================================================
 // 核心生命周期 (Core Lifecycle)
 // ==============================================================================
+#pragma region
 
 // Called every frame
 void ATopCharacter::Tick(float DeltaTime)
@@ -111,10 +112,13 @@ void ATopCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
+#pragma endregion
+
 
 // ==============================================================================
 // 玩家输入与行为绑定 (Player Input & Actions)
 // ==============================================================================
+#pragma region
 
 // Called to bind functionality to input
 void ATopCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -180,3 +184,5 @@ void ATopCharacter::AttackEnd()
 		MCComponent->StopWeaponFire();
 	}
 }
+
+#pragma endregion

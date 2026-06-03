@@ -61,7 +61,7 @@ public:
 	// 底层开火系统实现 (Low-Level Firing Implementation)
 	// ==============================================================================
 private:
-	// 执行 射线检测
+	// 执行射线检测
 	void PerformHitscan();
 	// 召唤抛射物实体
 	void SpawnProjectile();
@@ -71,7 +71,7 @@ private:
 	// 辅助与缓存工具 (Utilities & Caching)
 	// ==============================================================================
 protected:
-	// 缓存组件拥有者的玩家或 AI 控制器
+	// 缓存组件拥有者的玩家或 AI 控制器；
 	// 组件的 BeginPlay 执行时，角色可能还没有被控制器控制，所以不直接在 BeginPlay 里缓存
 	void CachedController();
 

@@ -29,13 +29,13 @@ ATopPlayerController::ATopPlayerController()
 // ==============================================================================
 // 核心生命周期与组件 (Core Lifecycle & Components)
 // ==============================================================================
+#pragma region
 
 void ATopPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
 
-	#pragma region 输入与鼠标
-
+#pragma region 输入与鼠标
 	// 激活增强输入本地子系统
 	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
 	{
@@ -57,9 +57,7 @@ void ATopPlayerController::BeginPlay()
 
 	// 应用键盘鼠标输入配置
 	SetInputMode(InputModeData);
-
-	#pragma endregion
-
+#pragma endregion
 
 	// HUD 控件的初始化与首帧构建
 	if (MainHUDClass)
@@ -86,10 +84,13 @@ void ATopPlayerController::BeginPlay()
 	}
 }
 
+#pragma endregion
+
 
 // ==============================================================================
 // 灵魂附身与输入绑定 (Possession & Input Setup)
 // ==============================================================================
+#pragma region
 
 void ATopPlayerController::SetupInputComponent()
 {
@@ -134,10 +135,13 @@ void ATopPlayerController::OnUnPossess()
 	CachedMyCharacter = nullptr;
 }
 
+#pragma endregion
+
 
 // ==============================================================================
 // UI 统筹系统 (UI Management System)
 // ==============================================================================
+#pragma region
 
 void ATopPlayerController::UpdateHUD()
 {
@@ -152,10 +156,13 @@ void ATopPlayerController::UpdateHUD()
 	}
 }
 
+#pragma endregion
+
 
 // ==============================================================================
 // 战术指令与总线转发 (Tactical Commands & Bus Forwarding)
 // ==============================================================================
+#pragma region
 
 bool ATopPlayerController::IsSwitchModeActive() const
 {
@@ -194,3 +201,5 @@ void ATopPlayerController::SwitchToSpecificCharacter(ATopCharacter* TargetCharac
 	// 同上
 	FSlateApplication::Get().SetAllUserFocusToGameViewport();
 }
+
+#pragma endregion

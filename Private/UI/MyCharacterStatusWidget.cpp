@@ -20,6 +20,7 @@
 // ==============================================================================
 // 核心生命周期与初始化 (Core Lifecycle & Initialization)
 // ==============================================================================
+#pragma region
 
 void UMyCharacterStatusWidget::SyncViewModel(ATopCharacter* InCharacter, bool bSelected)
 {
@@ -110,7 +111,8 @@ void UMyCharacterStatusWidget::NativeOnInitialized()
 	{
 		// 【纯 C++ 解决焦点劫持】：抢夺按钮的抢占焦点特权！
 		// 确保玩家在疯狂点击头像切人时，引擎焦点始终留在 3D 世界，WASD 和空格跳跃绝不失效！
-		AvatarButton->IsFocusable = false;
+		// AvatarButton->IsFocusable = false;
+		// 官方推荐，UI 蓝图静态控制，在按钮细节面板中取消勾选（Is Focusable）
 
 		// AddDynamic 是供蓝图/UMG使用的动态多播委托绑定
 		// 当玩家在按钮上点击时，触发 OnAvatarClicked 去向总线【盲发换人请求】
@@ -172,29 +174,32 @@ void UMyCharacterStatusWidget::NativeDestruct()
 		SPChangedHandle.Reset();
 	}
 
-		// 【2. 清除 换人宣告 (CQRS 下行事实频道) 的订阅记录】
-		if (ActiveCharChangedHandle.IsValid())
+	// 【2. 清除 换人宣告 (CQRS 下行事实频道) 的订阅记录】
+	if (ActiveCharChangedHandle.IsValid())
+	{
+		if (UWorld* World = GetWorld())
 		{
-			if (UWorld* World = GetWorld())
+			if (UCharacterSwitchSubsystem* SwitchSub = World->GetSubsystem<UCharacterSwitchSubsystem>())
 			{
-				if (UCharacterSwitchSubsystem* SwitchSub = World->GetSubsystem<UCharacterSwitchSubsystem>())
-				{
-					// 彻底从换人广播的订阅名单中除名
-					SwitchSub->OnActiveCharacterChanged.Remove(ActiveCharChangedHandle);
-				}
+				// 彻底从换人广播的订阅名单中除名
+				SwitchSub->OnActiveCharacterChanged.Remove(ActiveCharChangedHandle);
 			}
-			// 清空句柄状态
-			ActiveCharChangedHandle.Reset();
 		}
+		// 清空句柄状态
+		ActiveCharChangedHandle.Reset();
+	}
 
 	// ===================== 【执行底层原生销毁】 =====================
 	Super::NativeDestruct();
 }
 
+#pragma endregion
+
 
 // ==============================================================================
 // 高频 SP 材质渲染管线 (High-Frequency SP Material Pipeline)
 // ==============================================================================
+#pragma region
 
 void UMyCharacterStatusWidget::OnSPDataChanged(FName CharacterID, float NewSPPercent)
 {
@@ -235,10 +240,13 @@ void UMyCharacterStatusWidget::RefreshSPDataFromSubsystem()
 	}
 }
 
+#pragma endregion
+
 
 // ==============================================================================
 // 角色切换总线与用户交互 (Character Switch Bus & User Interaction)
 // ==============================================================================
+#pragma region
 
 // 重写鼠标进入本 UI 内支持射线检测部分的事件，更新换人子系统的 UI 悬停状态
 void UMyCharacterStatusWidget::NativeOnMouseEnter(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
@@ -303,3 +311,5 @@ void UMyCharacterStatusWidget::HandleActiveCharacterChanged(ATopCharacter* NewAc
 		CharacterVM->SetIsSelected(CachedCharacterRef.Get() == NewActiveChar);
 	}
 }
+
+#pragma endregion
