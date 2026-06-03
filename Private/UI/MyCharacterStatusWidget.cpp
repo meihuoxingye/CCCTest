@@ -189,6 +189,20 @@ void UMyCharacterStatusWidget::NativeDestruct()
 		ActiveCharChangedHandle.Reset();
 	}
 
+	// ==============================================================================
+	// 【新增 3：状态死锁防御机制】
+	// 如果这个卡片在鼠标悬停时被意外销毁（比如角色死亡导致 UI 刷新），
+	// 强制把全局的 UI 悬停锁解开！否则系统会永远以为鼠标还在 UI 上，导致玩家无法走位。
+	// ==============================================================================
+	if (UWorld* World = GetWorld())
+	{
+		if (UCharacterSwitchSubsystem* SwitchSub = World->GetSubsystem<UCharacterSwitchSubsystem>())
+		{
+			// 不管三七二十一，我都要死了，赶紧告诉系统我没霸占鼠标了
+			SwitchSub->bIsPointerOverUI = false;
+		}
+	}
+
 	// ===================== 【执行底层原生销毁】 =====================
 	Super::NativeDestruct();
 }

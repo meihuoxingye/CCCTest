@@ -7,7 +7,7 @@
 #include "MyMainHUDWidget.generated.h"
 
 /**
- * 
+ * 常驻的“护目镜”层
  */
 UCLASS()
 class CCC_API UMyMainHUDWidget : public UUserWidget

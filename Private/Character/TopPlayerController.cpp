@@ -1,5 +1,4 @@
 #include "Character/TopPlayerController.h"
-
 // 增强输入
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h" 
@@ -12,10 +11,10 @@
 #include "SwitchSubsystem/CharacterSwitchSubsystem.h"
 // 整个虚幻引擎 Slate UI 系统的“大总管”（全局单例）
 #include "Framework/Application/SlateApplication.h" 
-
 // 时空枢纽组件
 #include "Component/TimeDilationHubComponent.h"
-
+// 【新增】：严格按照 IWYU 路径引入战术面板基类
+#include "UI/ActivatableWidget/MyActivatableWidgetBase.h"
 
 ATopPlayerController::ATopPlayerController()
 {
@@ -25,12 +24,10 @@ ATopPlayerController::ATopPlayerController()
 	TimeDilationHub = CreateDefaultSubobject<UTimeDilationHubComponent>(TEXT("TimeDilationHubComponent"));
 }
 
-
 // ==============================================================================
 // 核心生命周期与组件 (Core Lifecycle & Components)
 // ==============================================================================
 #pragma region
-
 void ATopPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
@@ -83,15 +80,12 @@ void ATopPlayerController::BeginPlay()
 		SwitchSub->OnSwitchRequest.AddUObject(this, &ATopPlayerController::SwitchToSpecificCharacter);
 	}
 }
-
 #pragma endregion
-
 
 // ==============================================================================
 // 灵魂附身与输入绑定 (Possession & Input Setup)
 // ==============================================================================
 #pragma region
-
 void ATopPlayerController::SetupInputComponent()
 {
 	Super::SetupInputComponent();
@@ -103,7 +97,7 @@ void ATopPlayerController::SetupInputComponent()
 	// 绑定回调
 	if (EnhancedInputComponent)
 	{
-		EnhancedInputComponent->BindAction(BulletTimeAction, ETriggerEvent::Completed, TimeDilationHub.Get(), &UTimeDilationHubComponent::ToggleBulletTime);
+		EnhancedInputComponent->BindAction(BulletTimeAction, ETriggerEvent::Completed, this, &ATopPlayerController::ToggleTacticalWidget);
 		EnhancedInputComponent->BindAction(SwitchModeAction, ETriggerEvent::Started, TimeDilationHub.Get(), &UTimeDilationHubComponent::ToggleSwitchMode);
 	}
 }
@@ -135,14 +129,79 @@ void ATopPlayerController::OnUnPossess()
 	CachedMyCharacter = nullptr;
 }
 
-#pragma endregion
+void ATopPlayerController::ToggleTacticalWidget()
+{
+	// 1. 同步时空枢纽的子弹时间
+	if (TimeDilationHub) TimeDilationHub->ToggleBulletTime();
 
+	// 2. 懒加载可激活控件 
+	if (!TacticalWidgetInstance && TacticalWidgetClass)
+	{
+		TacticalWidgetInstance = CreateWidget<UMyActivatableWidgetBase>(this, TacticalWidgetClass);
+		if (TacticalWidgetInstance)
+		{
+			TacticalWidgetInstance->AddToViewport(100);
+			TacticalWidgetInstance->SetVisibility(ESlateVisibility::Collapsed);
+
+			// ==============================================================
+			// 【绑定监听器】：告诉 UI“只要你发出了 OnCloseRequested 广播，
+			// 我就自动调用本函数（此时处于开启状态，会走 else 分支）去关掉你。”
+			// ==============================================================
+			TacticalWidgetInstance->OnCloseRequested.AddUniqueDynamic(this, &ATopPlayerController::ToggleTacticalWidget);
+		}
+	}
+
+	if (!TacticalWidgetInstance) return;
+
+	auto* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer());
+
+	// 用高优先级 IMC 是否挂载，作为面板开关的“唯一真理”
+	bool bIsActivating = Subsystem ? !Subsystem->HasMappingContext(TacticalIMC) : true;
+
+	if (bIsActivating)
+	{
+		// 让 UI 触发自我管理，播放开场动画
+		TacticalWidgetInstance->OnWidgetActivated();
+
+		FInputModeUIOnly ModeData;
+		ModeData.SetWidgetToFocus(TacticalWidgetInstance->TakeWidget());
+		SetInputMode(ModeData);
+		bShowMouseCursor = true;
+
+		// 挂载拦截沙箱
+		if (Subsystem && TacticalIMC)
+		{
+			Subsystem->AddMappingContext(TacticalIMC, 10);
+		}
+	}
+	else
+	{
+		// 让 UI 触发自我管理，播放消失动画（此时 UI 不会瞬间隐藏）
+		TacticalWidgetInstance->OnWidgetDeactivated();
+
+		FInputModeGameAndUI GameModeData;
+		GameModeData.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		GameModeData.SetHideCursorDuringCapture(false);
+		SetInputMode(GameModeData);
+		bShowMouseCursor = true;
+
+		// 卸载拦截沙箱，玩家操作瞬间恢复！(即使 UI 动画还没播完，也能立马开始打怪)
+		if (Subsystem && TacticalIMC)
+		{
+			Subsystem->RemoveMappingContext(TacticalIMC);
+		}
+
+		// 【终极手感优化】：物理级粉碎残留的 UI 焦点路径，防止二次点击粘滞
+		FSlateApplication::Get().ClearUserFocus(0);
+		FSlateApplication::Get().SetAllUserFocusToGameViewport();
+	}
+}
+#pragma endregion
 
 // ==============================================================================
 // UI 统筹系统 (UI Management System)
 // ==============================================================================
 #pragma region
-
 void ATopPlayerController::UpdateHUD()
 {
 	// 如果 UI 面板还未就绪，或者不在游戏世界里，直接返回
@@ -155,15 +214,12 @@ void ATopPlayerController::UpdateHUD()
 		MainHUDInstance->UpdateSquadList(GM->FriendlyRoster, Cast<ATopCharacter>(GetPawn()));
 	}
 }
-
 #pragma endregion
-
 
 // ==============================================================================
 // 战术指令与总线转发 (Tactical Commands & Bus Forwarding)
 // ==============================================================================
 #pragma region
-
 bool ATopPlayerController::IsSwitchModeActive() const
 {
 	// 三元运算符防崩：如果时间枢纽组件存在，返回它的状态；如果组件竟然被意外销毁了，强制返回 false 托底
@@ -201,5 +257,4 @@ void ATopPlayerController::SwitchToSpecificCharacter(ATopCharacter* TargetCharac
 	// 同上
 	FSlateApplication::Get().SetAllUserFocusToGameViewport();
 }
-
 #pragma endregion
