@@ -84,13 +84,8 @@ private:
 
 
 	// ==============================================================================
-		// 角色切换总线与用户交互 (Character Switch Bus & User Interaction)
-		// ==============================================================================
-protected:
-	// 重写鼠标进入本 UI 内支持射线检测部分的事件，更新子系统的防穿透状态
-	virtual void NativeOnMouseEnter(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
-	// 重写鼠标离开本 UI 内支持射线检测部分的事件，更新子系统的防穿透状态
-	virtual void NativeOnMouseLeave(const FPointerEvent& InMouseEvent) override;
+	// 角色切换总线与用户交互 (Character Switch Bus & User Interaction)
+	// ==============================================================================
 
 private:
 	// 强绑定蓝图中的头像隐形按钮

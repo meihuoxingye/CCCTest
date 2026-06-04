@@ -142,11 +142,6 @@ void ATopPlayerController::ToggleTacticalWidget()
 		{
 			TacticalWidgetInstance->AddToViewport(100);
 			TacticalWidgetInstance->SetVisibility(ESlateVisibility::Collapsed);
-
-			// ==============================================================
-			// 【绑定监听器】：告诉 UI“只要你发出了 OnCloseRequested 广播，
-			// 我就自动调用本函数（此时处于开启状态，会走 else 分支）去关掉你。”
-			// ==============================================================
 			TacticalWidgetInstance->OnCloseRequested.AddUniqueDynamic(this, &ATopPlayerController::ToggleTacticalWidget);
 		}
 	}
@@ -160,7 +155,7 @@ void ATopPlayerController::ToggleTacticalWidget()
 
 	if (bIsActivating)
 	{
-		// 让 UI 触发自我管理，播放开场动画
+		// 触发 UI 智能出场（会自动清空残留动画并满帧播放）
 		TacticalWidgetInstance->OnWidgetActivated();
 
 		FInputModeUIOnly ModeData;
@@ -168,15 +163,21 @@ void ATopPlayerController::ToggleTacticalWidget()
 		SetInputMode(ModeData);
 		bShowMouseCursor = true;
 
-		// 挂载拦截沙箱
+		// 挂载高优先级拦截沙箱（物理级屏蔽角色指令）
 		if (Subsystem && TacticalIMC)
 		{
 			Subsystem->AddMappingContext(TacticalIMC, 10);
 		}
+
+		// ==============================================================================
+		// 【防幽灵按键滑步】：强制清空硬件残留信号！
+		// 解决长按 WASD 瞬间呼出菜单时，移动 IMC 收不到按键抬起信号导致的死锁滑行 Bug。
+		// ==============================================================================
+		FlushPressedKeys();
 	}
 	else
 	{
-		// 让 UI 触发自我管理，播放消失动画（此时 UI 不会瞬间隐藏）
+		// 触发 UI 智能退场（自动计算打断补偿或进行镜像倒播）
 		TacticalWidgetInstance->OnWidgetDeactivated();
 
 		FInputModeGameAndUI GameModeData;
@@ -185,13 +186,16 @@ void ATopPlayerController::ToggleTacticalWidget()
 		SetInputMode(GameModeData);
 		bShowMouseCursor = true;
 
-		// 卸载拦截沙箱，玩家操作瞬间恢复！(即使 UI 动画还没播完，也能立马开始打怪)
+		// 卸载拦截沙箱，玩家操作瞬间恢复！
 		if (Subsystem && TacticalIMC)
 		{
 			Subsystem->RemoveMappingContext(TacticalIMC);
 		}
 
-		// 【终极手感优化】：物理级粉碎残留的 UI 焦点路径，防止二次点击粘滞
+		// ==============================================================================
+		// 【焦点零延迟重置】：物理级粉碎 UI 焦点路径！
+		// 解决关闭菜单后，第一下点击鼠标可能没反应的体感粘滞 Bug。
+		// ==============================================================================
 		FSlateApplication::Get().ClearUserFocus(0);
 		FSlateApplication::Get().SetAllUserFocusToGameViewport();
 	}
