@@ -19,6 +19,8 @@
 // 【新增】：引入全局 UI 射线检测工具库
 #include "Tools/MyUITools.h"
 
+#include "UI/Subsystem/MyUIManagerSubsystem.h"
+
 ATopPlayerController::ATopPlayerController()
 {
 	bReplicates = false;
@@ -212,29 +214,27 @@ void ATopPlayerController::UpdateHUD()
 
 bool ATopPlayerController::TryConsumeClickForUI()
 {
-	// 1. 【物理隔离】：如果是直接点在了 UI 实体图案上，绝对拦截点击，吃掉事件
-	if (UMyUITools::IsMouseOverUI(this))
+	// 1. 彻底放权！把判定和关闭 UI 的工作全部交给专业的 UI 子系统！
+	if (ULocalPlayer* LP = GetLocalPlayer())
 	{
-		return true;
+		if (UMyUIManagerSubsystem* UIMgr = LP->GetSubsystem<UMyUIManagerSubsystem>())
+		{
+			// 如果 UI 子系统说：“我拦截了点击（因为关了弹窗，或者点在了图片上）”，直接 return true
+			if (UIMgr->TryConsumeClick())
+			{
+				return true;
+			}
+		}
 	}
 
-	bool bHandled = false;
-
-	// 2. 检查战术面板是否开着，开着就关掉，并拦截点击
-	if (TacticalWidgetInstance && TacticalWidgetInstance->GetVisibility() == ESlateVisibility::Visible)
-	{
-		ToggleTacticalWidget();
-		bHandled = true;
-	}
-
-	// 3. 检查切人模式是否开着，开着就关掉，并拦截点击
+	// 2. 控制器只处理属于游戏逻辑的状态，比如切人模式
 	if (IsSwitchModeActive())
 	{
 		SetSwitchMode(false);
-		bHandled = true;
+		return true;
 	}
 
-	return bHandled;
+	return false;
 }
 
 bool ATopPlayerController::IsSwitchModeActive() const

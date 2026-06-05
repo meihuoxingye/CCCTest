@@ -9,11 +9,18 @@
 // UI 路径树结构体。当鼠标点击屏幕时，它负责记录到底戳穿了多少层 UI
 #include "Layout/WidgetPath.h"
 
+// 修复 GEngine 未识别报错，引入虚幻核心引擎头文件
+#include "Engine/Engine.h"
 
+
+// ==============================================================================
+// UI 检测工具 (UI Detection Tools)
+// ==============================================================================
+#pragma region
 bool UMyUITools::IsMouseOverUI(const UObject* WorldContextObject)
 {
 	// 1. 【静态环境溯源】：
-	// 由于本类是全局静态工具库 (UMyUITools)，它脱离了具体的关卡，没有自己的状态，也无法直接调用 GetWorld()
+	// 由于本类是全局静态工具库 (UMyUITools), 它脱离了具体的关卡，没有自己的状态，也无法直接调用 GetWorld()
 	// 所以必须由调用方 (如 TopCharacter) 将自身作为上下文 (WorldContextObject) 传进来
 	// 充当“指路明灯”，帮助工具函数顺藤摸瓜找到当前游戏世界的 UWorld 内存地址
 	if (!WorldContextObject || !WorldContextObject->GetWorld()) return false;
@@ -40,11 +47,19 @@ bool UMyUITools::IsMouseOverUI(const UObject* WorldContextObject)
 			// 注意：在 UMG 蓝图里叫 Button、Image，但在 C++ 的 Slate 底层，它们的名字叫 SButton、SImage
 			FString LeafWidgetName = WidgetPath.Widgets.Last().Widget->GetTypeAsString();
 
+			// 【把这行照妖镜加回来】：
+			if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, FString::Printf(TEXT("鼠标点到了: %s"), *LeafWidgetName));
+
 			// 【绝对核心判断逻辑】：
 			// 虚幻引擎的 3D 游戏画面，本质上也是一个铺满全屏的底板 UI 控件！它的名字就叫 "SViewport"
-			// 如果射线最终打到的是 "SViewport"，说明此时鼠标悬空在纯粹的游戏世界（比如地面）上
-			// 如果打到的名字不是 "SViewport"（而是 SImage, STextBlock 等任何东西），说明肯定点在了真 UI 上
-			if (LeafWidgetName != TEXT("SViewport"))
+			// 此外，UMG 蓝图默认自带全屏透明画布 "SConstraintCanvas"，引擎底层还有 "SGameLayerManager"
+			// 以及包裹所有用户蓝图控件的底层透明外壳 "SObjectWidget"
+			// 如果射线最终打到的是这四个，说明此时鼠标悬空在纯粹的游戏世界（比如地面）上
+			// 如果打到的名字不是它们（而是 SImage, STextBlock 等任何东西），说明肯定点在了真 UI 上
+			if (LeafWidgetName != TEXT("SViewport") &&
+				LeafWidgetName != TEXT("SConstraintCanvas") &&
+				LeafWidgetName != TEXT("SGameLayerManager") &&
+				LeafWidgetName != TEXT("SObjectWidget"))
 			{
 				bIsOverUI = true;
 			}
@@ -53,3 +68,4 @@ bool UMyUITools::IsMouseOverUI(const UObject* WorldContextObject)
 
 	return bIsOverUI;
 }
+#pragma endregion
