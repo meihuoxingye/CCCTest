@@ -5,6 +5,10 @@
 #include "Input/Reply.h"
 #include "Input/Events.h"
 
+// 【新增】：为了获取 LocalPlayer 和 UI 子系统
+#include "Engine/LocalPlayer.h"
+#include "UI/Subsystem/MyUIManagerSubsystem.h"
+
 // ==============================================================================
 // 生命周期与同步 (Lifecycle & Synchronization)
 // ==============================================================================
@@ -13,7 +17,6 @@ void UMyActivatableWidgetBase::NativeOnInitialized()
 {
 	Super::NativeOnInitialized();
 
-	// 强行抹除编辑器残留，绝对防止第一次呼出时引发瞬移
 	TransitionProgress = 0.0f;
 	CurrentState = EUIState::Idle;
 }
@@ -22,7 +25,6 @@ void UMyActivatableWidgetBase::SynchronizeProperties()
 {
 	Super::SynchronizeProperties();
 
-	// 编辑器实时预览：根据当前选择的状态，分流测试对应的表现钩子
 	if (CurrentState == EUIState::Opening || CurrentState == EUIState::Idle)
 	{
 		float EasedProgress = FMath::InterpEaseInOut(0.0f, 1.0f, TransitionProgress, OpeningExp);
@@ -41,7 +43,6 @@ void UMyActivatableWidgetBase::NativeTick(const FGeometry& MyGeometry, float InD
 
 	if (CurrentState == EUIState::Idle) return;
 
-	// 彻底移除 Dilation，直接使用原生 InDeltaTime，杜绝任何倍速跳帧现象
 	float CurrentDuration = (CurrentState == EUIState::Opening) ? OpeningDuration : ClosingDuration;
 	float Step = InDeltaTime / FMath::Max(0.01f, CurrentDuration);
 
@@ -54,13 +55,11 @@ void UMyActivatableWidgetBase::NativeTick(const FGeometry& MyGeometry, float InD
 		TransitionProgress = FMath::Max(TransitionProgress - Step, 0.0f);
 	}
 
-	// 进度分流演算与调用
 	if (CurrentState == EUIState::Opening)
 	{
 		float EasedProgress = FMath::InterpEaseInOut(0.0f, 1.0f, TransitionProgress, OpeningExp);
 		UpdateOpeningEffect(TransitionProgress, EasedProgress);
 
-		// 状态机收尾
 		if (TransitionProgress >= 1.0f) CurrentState = EUIState::Idle;
 	}
 	else if (CurrentState == EUIState::Closing)
@@ -68,13 +67,37 @@ void UMyActivatableWidgetBase::NativeTick(const FGeometry& MyGeometry, float InD
 		float EasedProgress = FMath::InterpEaseInOut(0.0f, 1.0f, TransitionProgress, ClosingExp);
 		UpdateClosingEffect(TransitionProgress, EasedProgress);
 
-		// 状态机收尾
+		// 状态机收尾：当进度彻底归零（退场动画播完）
 		if (TransitionProgress <= 0.0f)
 		{
 			CurrentState = EUIState::Idle;
 			SetVisibility(ESlateVisibility::Collapsed);
+
+			// 【核心修复】：直到 UI 彻底看不见了，才将其出栈！
+			// 这彻底封死了“退场动画期间开火走火”的幽灵点击 Bug。
+			if (ULocalPlayer* LP = GetOwningLocalPlayer())
+			{
+				if (UMyUIManagerSubsystem* UIMgr = LP->GetSubsystem<UMyUIManagerSubsystem>())
+				{
+					UIMgr->PopUI(this);
+				}
+			}
 		}
 	}
+}
+
+void UMyActivatableWidgetBase::NativeDestruct()
+{
+	// 最后的保险：无论 UI 是怎么没的（切场景、被强杀等），都要从子系统中消除
+	if (ULocalPlayer* LP = GetOwningLocalPlayer())
+	{
+		if (UMyUIManagerSubsystem* UIMgr = LP->GetSubsystem<UMyUIManagerSubsystem>())
+		{
+			UIMgr->PopUI(this);
+		}
+	}
+
+	Super::NativeDestruct();
 }
 #pragma endregion
 
@@ -84,17 +107,6 @@ void UMyActivatableWidgetBase::NativeTick(const FGeometry& MyGeometry, float InD
 #pragma region
 FReply UMyActivatableWidgetBase::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
-	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
-	{
-		// 允许在“完全可见” 或 “正在出场” 的半空中发送关闭信号，实现丝滑打断
-		if (CurrentState == EUIState::Idle || CurrentState == EUIState::Opening)
-		{
-			OnCloseRequested.Broadcast();
-		}
-
-		return FReply::Handled();
-	}
-
 	if (InMouseEvent.GetEffectingButton() == EKeys::MiddleMouseButton ||
 		InMouseEvent.GetEffectingButton() == EKeys::RightMouseButton)
 	{
@@ -120,10 +132,8 @@ FReply UMyActivatableWidgetBase::NativeOnKeyDown(const FGeometry& InGeometry, co
 #pragma region
 void UMyActivatableWidgetBase::OnWidgetActivated_Implementation()
 {
-	// 防误触：已经在飞入中，坚决拦截
 	if (CurrentState == EUIState::Opening) return;
 
-	// 丝滑打断算法：完全关着才重置起点。中途呼出时必须保留当前进度直接掉头。
 	if (GetVisibility() == ESlateVisibility::Collapsed || TransitionProgress <= 0.0f)
 	{
 		TransitionProgress = 0.0f;
@@ -132,19 +142,25 @@ void UMyActivatableWidgetBase::OnWidgetActivated_Implementation()
 	SetVisibility(ESlateVisibility::Visible);
 	CurrentState = EUIState::Opening;
 
-	// 第一帧抗闪现防护
+	// 【全自动入栈】
+	if (ULocalPlayer* LP = GetOwningLocalPlayer())
+	{
+		if (UMyUIManagerSubsystem* UIMgr = LP->GetSubsystem<UMyUIManagerSubsystem>())
+		{
+			UIMgr->PushUI(this);
+		}
+	}
+
 	float EasedProgress = FMath::InterpEaseInOut(0.0f, 1.0f, TransitionProgress, OpeningExp);
 	UpdateOpeningEffect(TransitionProgress, EasedProgress);
 }
 
 void UMyActivatableWidgetBase::OnWidgetDeactivated_Implementation()
 {
-	// 防误触：已经在收起或不可见，坚决拦截
 	if (CurrentState == EUIState::Closing || GetVisibility() == ESlateVisibility::Collapsed) return;
 
 	CurrentState = EUIState::Closing;
 
-	// 丝滑打断算法：绝不重置 TransitionProgress 到 1.0f。
-	// 从当前被截断的数字直接往下扣，交由底层 Tick 和无坐标赋值的蓝图实现原地坠落。
+	// 注意：这里绝不调用 PopUI！留在拦截栈中抗点击穿透，交由 Tick 动画结束时出栈。
 }
 #pragma endregion

@@ -16,6 +16,9 @@
 // 【新增】：严格按照 IWYU 路径引入战术面板基类
 #include "UI/ActivatableWidget/MyActivatableWidgetBase.h"
 
+// 【新增】：引入全局 UI 射线检测工具库
+#include "Tools/MyUITools.h"
+
 ATopPlayerController::ATopPlayerController()
 {
 	bReplicates = false;
@@ -131,10 +134,8 @@ void ATopPlayerController::OnUnPossess()
 
 void ATopPlayerController::ToggleTacticalWidget()
 {
-	// 1. 同步时空枢纽的子弹时间
 	if (TimeDilationHub) TimeDilationHub->ToggleBulletTime();
 
-	// 2. 懒加载可激活控件 
 	if (!TacticalWidgetInstance && TacticalWidgetClass)
 	{
 		TacticalWidgetInstance = CreateWidget<UMyActivatableWidgetBase>(this, TacticalWidgetClass);
@@ -149,35 +150,26 @@ void ATopPlayerController::ToggleTacticalWidget()
 	if (!TacticalWidgetInstance) return;
 
 	auto* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer());
-
-	// 用高优先级 IMC 是否挂载，作为面板开关的“唯一真理”
 	bool bIsActivating = Subsystem ? !Subsystem->HasMappingContext(TacticalIMC) : true;
 
 	if (bIsActivating)
 	{
-		// 触发 UI 智能出场（会自动清空残留动画并满帧播放）
 		TacticalWidgetInstance->OnWidgetActivated();
 
-		FInputModeUIOnly ModeData;
-		ModeData.SetWidgetToFocus(TacticalWidgetInstance->TakeWidget());
+		// 【满足需求 1】：去掉了 SetIgnoreMoveInput，允许玩家在 UI 期间走位！
+
+		// 【满足需求 2】：不调用 SetWidgetToFocus，防止 UI 吞噬你的第一下点击
+		FInputModeGameAndUI ModeData;
+		ModeData.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		ModeData.SetHideCursorDuringCapture(false);
 		SetInputMode(ModeData);
+
 		bShowMouseCursor = true;
-
-		// 挂载高优先级拦截沙箱（物理级屏蔽角色指令）
-		if (Subsystem && TacticalIMC)
-		{
-			Subsystem->AddMappingContext(TacticalIMC, 10);
-		}
-
-		// ==============================================================================
-		// 【防幽灵按键滑步】：强制清空硬件残留信号！
-		// 解决长按 WASD 瞬间呼出菜单时，移动 IMC 收不到按键抬起信号导致的死锁滑行 Bug。
-		// ==============================================================================
+		if (Subsystem && TacticalIMC) Subsystem->AddMappingContext(TacticalIMC, 10);
 		FlushPressedKeys();
 	}
 	else
 	{
-		// 触发 UI 智能退场（自动计算打断补偿或进行镜像倒播）
 		TacticalWidgetInstance->OnWidgetDeactivated();
 
 		FInputModeGameAndUI GameModeData;
@@ -186,16 +178,9 @@ void ATopPlayerController::ToggleTacticalWidget()
 		SetInputMode(GameModeData);
 		bShowMouseCursor = true;
 
-		// 卸载拦截沙箱，玩家操作瞬间恢复！
-		if (Subsystem && TacticalIMC)
-		{
-			Subsystem->RemoveMappingContext(TacticalIMC);
-		}
+		if (Subsystem && TacticalIMC) Subsystem->RemoveMappingContext(TacticalIMC);
 
-		// ==============================================================================
-		// 【焦点零延迟重置】：物理级粉碎 UI 焦点路径！
-		// 解决关闭菜单后，第一下点击鼠标可能没反应的体感粘滞 Bug。
-		// ==============================================================================
+		// 退场时强制把焦点还给 3D 世界，确保下一次点击流畅无比
 		FSlateApplication::Get().ClearUserFocus(0);
 		FSlateApplication::Get().SetAllUserFocusToGameViewport();
 	}
@@ -224,6 +209,34 @@ void ATopPlayerController::UpdateHUD()
 // 战术指令与总线转发 (Tactical Commands & Bus Forwarding)
 // ==============================================================================
 #pragma region
+
+bool ATopPlayerController::TryConsumeClickForUI()
+{
+	// 1. 【物理隔离】：如果是直接点在了 UI 实体图案上，绝对拦截点击，吃掉事件
+	if (UMyUITools::IsMouseOverUI(this))
+	{
+		return true;
+	}
+
+	bool bHandled = false;
+
+	// 2. 检查战术面板是否开着，开着就关掉，并拦截点击
+	if (TacticalWidgetInstance && TacticalWidgetInstance->GetVisibility() == ESlateVisibility::Visible)
+	{
+		ToggleTacticalWidget();
+		bHandled = true;
+	}
+
+	// 3. 检查切人模式是否开着，开着就关掉，并拦截点击
+	if (IsSwitchModeActive())
+	{
+		SetSwitchMode(false);
+		bHandled = true;
+	}
+
+	return bHandled;
+}
+
 bool ATopPlayerController::IsSwitchModeActive() const
 {
 	// 三元运算符防崩：如果时间枢纽组件存在，返回它的状态；如果组件竟然被意外销毁了，强制返回 false 托底

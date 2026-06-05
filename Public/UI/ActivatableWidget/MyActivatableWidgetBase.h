@@ -71,6 +71,15 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Transition|Settings", meta = (ClampMin = "1.0"))
 	float ClosingExp = 1.0f;
 
+public:
+	// ==============================================================================
+	// 状态查询接口 (State Queries)
+	// ==============================================================================
+	/** 获取当前 UI 的状态机阶段，供 UIManagerSubsystem 仲裁幽灵点击时调用 */
+	UFUNCTION(BlueprintPure, Category = "UI|Transition")
+	EUIState GetCurrentState() const { return CurrentState; }
+
+protected:
 	// ==============================================================================
 	// 核心表现钩子 (Presentation Hooks)
 	// ==============================================================================
@@ -96,6 +105,9 @@ protected:
 
 	/** 核心同步函数：编辑器参数修改时热重载表现 */
 	virtual void SynchronizeProperties() override;
+
+	/** 遗言清理：在 UI 被销毁时，确保它从全局子系统的栈中强制拔除 */
+	virtual void NativeDestruct() override;
 
 	// ==============================================================================
 	// 响应式输入路由 (Input Routing)

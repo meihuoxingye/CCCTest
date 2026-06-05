@@ -42,7 +42,6 @@ protected:
 	UPROPERTY()
 	TObjectPtr<class UMyMainHUDWidget> MainHUDInstance;
 
-	// ---------------- 【新增开始】 ----------------
 	/** 战术呼出控件类 (强约束：必须继承自可激活基类) */
 	UPROPERTY(EditDefaultsOnly, Category = "UI|Tactical")
 	TSubclassOf<class UMyActivatableWidgetBase> TacticalWidgetClass;
@@ -51,13 +50,15 @@ private:
 	/** 瞬时缓存的战术 UI 实例，使用 Transient 防存档污染 */
 	UPROPERTY(Transient)
 	TObjectPtr<class UMyActivatableWidgetBase> TacticalWidgetInstance;
-	// ---------------- 【新增结束】 ----------------
 
 
 	// ==============================================================================
 	// 战术指令与总线转发 (Tactical Commands & Bus Forwarding)
 	// ==============================================================================
 public:
+	// 【新增解耦接口】：集中处理所有的 UI 焦点与状态拦截，提供给角色调用
+	bool TryConsumeClickForUI();
+
 	// 换人系统总线的最终执行者：接收 UI 传来的“目标角色”并执行灵魂交接
 	void SwitchToSpecificCharacter(class ATopCharacter* TargetCharacter);
 
@@ -90,11 +91,9 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Input")
 	TObjectPtr<class UInputMappingContext> TopContext;
 
-	// ---------------- 【新增开始】 ----------------
 	/** 战术模式专用拦截上下文 (挂载优先级 10 的黑洞 IMC) */
 	UPROPERTY(EditAnywhere, Category = "Input|Tactical")
 	TObjectPtr<class UInputMappingContext> TacticalIMC;
-	// ---------------- 【新增结束】 ----------------
 
 	// 绑定给中键的输入动作，绑定的回调函数在时间膨胀组件中
 	UPROPERTY(EditAnywhere, Category = "Input")
@@ -103,10 +102,8 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Input")
 	TObjectPtr<UInputAction> SwitchModeAction;
 
-	// ---------------- 【新增开始】 ----------------
 	// 战术模式总开关：处理中键按下时的子弹时间与 UI 呼出
 	// 只需这一个纯净的宏，让虚幻底层能找到它即可
 	UFUNCTION()
 	void ToggleTacticalWidget();
-	// ---------------- 【新增结束】 ----------------
 };

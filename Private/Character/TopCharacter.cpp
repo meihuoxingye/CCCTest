@@ -15,7 +15,7 @@
 // 【新增模块】
 #include "EnhancedInputComponent.h"
 #include "Component/CombatSystem/MyCombatComponent.h"
-#include "Tools/MyUITools.h" 
+
 // 【新增】：官方角色移动组件（为了修改 bRunPhysicsWithNoController）
 #include "GameFramework/CharacterMovementComponent.h"
 
@@ -155,23 +155,22 @@ void ATopCharacter::Move(const FInputActionValue& InputActionValue)
 
 void ATopCharacter::Attack()
 {
-	// 调用全局防走火工具，鼠标在 UI 上则不执行攻击逻辑
-	if (UMyUITools::IsMouseOverUI(this)) return;
-
-	// 如果正处于切人模式，无论是否切换成功，都会取消切人模式并返回，且不执行攻击逻辑
+	// 1. 玩家点下左键，先问大管家
 	if (ATopPlayerController* PC = Cast<ATopPlayerController>(GetController()))
 	{
-		// 查询切人状态
-		if (PC->IsSwitchModeActive())
+		// 2. 如果此时 UI 开着，大管家会去关掉 UI，并返回 true
+		if (PC->TryConsumeClickForUI())
 		{
-			PC->SetSwitchMode(false);
+			// 3. 核心在这里！如果大管家返回了 true，直接 return 结束这个函数！
+			// 这意味着这一下鼠标点击“被吃掉了”，下面的开火代码根本不会执行！
 			return;
 		}
 	}
 
+	// 4. 只有当 UI 已经关干净了，再点下一次鼠标时，大管家才会返回 false
+	// 代码才会一路畅通走到这里，执行真正的开火！
 	if (MCComponent)
 	{
-		// 告诉战斗组件：开始射击
 		MCComponent->StartWeaponFire();
 	}
 }
