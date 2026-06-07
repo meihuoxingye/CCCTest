@@ -159,7 +159,7 @@ void ATopCharacter::Attack()
 	if (ATopPlayerController* PC = Cast<ATopPlayerController>(GetController()))
 	{
 		// 2. 如果此时 UI 开着，大管家会去关掉 UI，并返回 true
-		if (PC->TryConsumeClickForUI())
+		if (PC->ProcessGlobalClick())
 		{
 			// 3. 核心在这里！如果大管家返回了 true，直接 return 结束这个函数！
 			// 这意味着这一下鼠标点击“被吃掉了”，下面的开火代码根本不会执行！

@@ -56,8 +56,13 @@ private:
 	// 战术指令与总线转发 (Tactical Commands & Bus Forwarding)
 	// ==============================================================================
 public:
-	// 【新增解耦接口】：集中处理所有的 UI 焦点与状态拦截，提供给角色调用
-	bool TryConsumeClickForUI();
+	// 【全局解耦接口】：主交互输入（鼠标左键/确认键）的前置统筹处理器
+	// 核心职责：在角色执行底层 3D 行为（如武器开火）前，综合判定本次点击是否应被高层系统（UI 物理拦截、或特殊游戏状态）接管与消耗。
+	// 架构约束：
+	// 1. 【统一收口】：作为防穿透门神，未来所有直接由鼠标左键触发的 3D 世界交互，均必须优先调用此接口进行审查。
+	// 2. 【重构预警】：当前采用线性分支统筹 UI 与切人逻辑；若未来互斥的输入状态激增（如引入建造模式、技能指示器），必须将此函数内部重构为“状态机”或“责任链”。
+	// 返回值：若输入已被高层逻辑消耗处理，返回 true 以熔断底层的 3D 执行逻辑。
+	bool ProcessGlobalClick();
 
 	// 换人系统总线的最终执行者：接收 UI 传来的“目标角色”并执行灵魂交接
 	void SwitchToSpecificCharacter(class ATopCharacter* TargetCharacter);
@@ -102,8 +107,8 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Input")
 	TObjectPtr<UInputAction> SwitchModeAction;
 
-	// 战术模式总开关：处理中键按下时的子弹时间与 UI 呼出
-	// 只需这一个纯净的宏，让虚幻底层能找到它即可
+	// 处理中键按下时的子弹时间与 UI 呼出的回调函数及委托回调函数；
+	// 用到虚幻的委托，所以加上 UFUNCTION()
 	UFUNCTION()
 	void ToggleTacticalWidget();
 };

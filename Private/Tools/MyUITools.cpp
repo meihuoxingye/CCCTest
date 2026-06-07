@@ -47,7 +47,7 @@ bool UMyUITools::IsMouseOverUI(const UObject* WorldContextObject)
 			// 注意：在 UMG 蓝图里叫 Button、Image，但在 C++ 的 Slate 底层，它们的名字叫 SButton、SImage
 			FString LeafWidgetName = WidgetPath.Widgets.Last().Widget->GetTypeAsString();
 
-			// 【把这行照妖镜加回来】：
+			// 屏幕显示调试信息：鼠标点到了哪个 UI 控件上（底层 C++ 类型名）
 			if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, FString::Printf(TEXT("鼠标点到了: %s"), *LeafWidgetName));
 
 			// 【绝对核心判断逻辑】：

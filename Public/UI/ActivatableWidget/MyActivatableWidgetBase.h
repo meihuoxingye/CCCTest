@@ -1,73 +1,104 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
+// 保证头文件只被编译一次，防止重复包含错误
 #pragma once
 
+// 包含虚幻核心最小化依赖
 #include "CoreMinimal.h"
+// 包含 UserWidget 基类，这是所有 UMG UI 蓝图的 C++ 底层基类
 #include "Blueprint/UserWidget.h"
+
 // 【必须在最后一行】
+// 包含 Unreal Header Tool 生成的反射代码文件
 #include "MyActivatableWidgetBase.generated.h"
 
 // ==============================================================================
 // 事件广播 (Event Broadcasting)
 // ==============================================================================
+
+// 声明一个不带参数的动态多播委托，用于在 C++ 广播后让蓝图节点（Event 节点）绑定并响应 UI 的关闭请求。
+// 为什么开启请求不需要委托：“开启面板”这个动作的发起者，通常拥有最高级别的权力，
+// 有小弟（UI）的直接联系方式（指针），直接调函数（Call Function）是最高效、最直接的，根本不需要委托；
+// “关闭”的情况就复杂太多了。触发关闭的源头，往往来自于UI 内部或底层的仲裁系统，
+// 而这些修改输入模式、隐藏鼠标的终极权力，UI 面板根本没资格调这些底层 API，只能通过委托发送“请求”
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTacticalMenuCloseRequestedSignature);
 
 // ==============================================================================
 // 转换状态机 (Transition State Machine)
 // ==============================================================================
+
+// 声明枚举类型，并标记 BlueprintType 使其可以在蓝图系统中作为变量类型被访问
 UENUM(BlueprintType)
+// 使用 uint8 作为底层数据类型以节约内存
 enum class EUIState : uint8
 {
+	// 使用 UMETA 宏定义在蓝图编辑器中显示的中文本地化名称
 	Idle		UMETA(DisplayName = "静止"),
 	Opening		UMETA(DisplayName = "展开中"),
 	Closing		UMETA(DisplayName = "收起中")
 };
 
-// ==============================================================================
-// 可激活控件基类 (Activatable Widget Base)
-// 纯数学进度驱动版 (Progress-Driven Architecture)
-// ==============================================================================
-/**
- * 可激活控件基类 (Activatable Widget Base)
+/** * 可激活控件基类 (Activatable Widget Base)
  * 3A级战术呼出底层：抗子弹时间、纯数学进度表现驱动、进出场双轨解耦及实时编辑器预览
  */
+ // 声明此类为抽象类 (Abstract，无法直接实例化) 并且允许被蓝图继承创建子类 (Blueprintable)
+ // 使用时设置其为蓝图基类即可
 UCLASS(Abstract, Blueprintable)
+// 继承自 UUserWidget，带有项目模块的 API 导出宏 (CCC_API)
 class CCC_API UMyActivatableWidgetBase : public UUserWidget
 {
+	// 生成引擎要求的反射支持模板代码
 	GENERATED_BODY()
 
 public:
 	// ==============================================================================
 	// 外部委托接口 (External Delegates)
 	// ==============================================================================
+
+	// BlueprintAssignable 允许该委托在蓝图的“事件图表”中被拉出并绑定 (Bind Event)
 	UPROPERTY(BlueprintAssignable, Category = "UI|Events")
+	// 实例化前面声明的多播委托，用于通知外部（如子系统）该 UI 发起了关闭请求
 	FOnTacticalMenuCloseRequestedSignature OnCloseRequested;
 
 protected:
 	// ==============================================================================
 	// 核心转换系统 (Transition System)
 	// ==============================================================================
-	/** 核心状态标尺。在 UMG 编辑器细节面板可手动切换状态进行出/退场分流预览。 */
+
+	// 核心状态标尺。在 UMG 编辑器细节面板可手动切换状态进行出/退场分流预览。
+	// 允许在蓝图编辑器面板的任何位置编辑，并且在蓝图图表中可读可写
+	// 默认状态初始化为“静止”
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Transition|State")
 	EUIState CurrentState = EUIState::Idle;
 
-	/** 核心进度标尺 (0.0 -> 1.0)。在 UMG 编辑器可拖动滑块实时预览位置和透明度。 */
+	// 核心时间标尺 (0.0 -> 1.0)，代表当前动画已完成的绝对百分比（现实时间/总时长）。
+	// 【底层计算】：由 NativeTick 每帧自动累加或递减。单帧变化步长 = 本帧物理时间差 (DeltaTime) / 动画总耗时 (Duration)。
+	// 【架构意义】：将物理秒数强制“归一化”为 0~1 的比例，使后续的缓动曲线公式与蓝图表现彻底脱离具体时长的耦合。
+	// 在 UMG 编辑器可拖动滑块实时预览。限制范围在 0.0 到 1.0 之间，避免越界溢出导致后续动画计算错误。
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Transition|State", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float TransitionProgress = 0.0f;
 
-	/** 出场专属耗时（秒）。通常较长，用于展示张力极强的飞入动画 */
+	// 出场专属耗时（秒）。通常较长，用于展示张力极强的飞入动画
+	// 设置最小限制为 0.01 秒，从源头防止后续 DeltaTime 除零引发崩溃
+	// 默认展开动画耗时 0.35 秒
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Transition|Settings", meta = (ClampMin = "0.01"))
 	float OpeningDuration = 0.35f;
 
-	/** 退场专属耗时（秒）。通常极短（如 0.15），要求干净利落，不拖泥带水 */
+	// 退场专属耗时（秒）。通常极短（如 0.15），要求干净利落，不拖泥带水
+	// 同样限制最小耗时防崩溃
+	// 默认收起动画耗时 0.15 秒
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Transition|Settings", meta = (ClampMin = "0.01"))
 	float ClosingDuration = 0.15f;
 
-	/** 出场缓动指数。推荐 2.0~3.0，飞入时自带丝滑刹车感 */
+	// 出场缓动指数。推荐 2.0~3.0，飞入时自带丝滑刹车感
+	// 限定缓动指数最小为 1.0 (线性)，用于 FMath::InterpEaseInOut 数学函数
+	// 默认开场缓动强度为 2.0
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Transition|Settings", meta = (ClampMin = "1.0"))
 	float OpeningExp = 2.0f;
 
-	/** 退场缓动指数。推荐 1.0 (纯线性)，让透明度匀速消失，绝不拖泥带水 */
+	// 退场缓动指数。推荐 1.0 (纯线性)，让透明度匀速消失，绝不拖泥带水
+	// 同样限制最少为纯线性
+	// 默认退场缓动强度为 1.0
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Transition|Settings", meta = (ClampMin = "1.0"))
 	float ClosingExp = 1.0f;
 
@@ -75,53 +106,155 @@ public:
 	// ==============================================================================
 	// 状态查询接口 (State Queries)
 	// ==============================================================================
-	/** 获取当前 UI 的状态机阶段，供 UIManagerSubsystem 仲裁幽灵点击时调用 */
+
+	// 获取当前 UI 的状态机阶段，供 UIManagerSubsystem 仲裁幽灵点击时调用
+	// 声明为纯节点（无执行引脚，BlueprintPure），因为这是一个不会修改类成员状态的 Getter 函数
 	UFUNCTION(BlueprintPure, Category = "UI|Transition")
+	// const 后缀保证该函数不会改变类的任何成员变量
 	EUIState GetCurrentState() const { return CurrentState; }
-
-protected:
-	// ==============================================================================
-	// 核心表现钩子 (Presentation Hooks)
-	// ==============================================================================
-	/** * 【出场专属钩子】：仅在UI展开时触发。推荐驱动 Y轴位移 和 透明度渐显。
-	 * @param Progress  线性进度 (0.0 到 1.0)
-	 * @param EasedProgress  平滑后的视觉进度
-	 */
-	UFUNCTION(BlueprintImplementableEvent, Category = "UI|Transition")
-	void UpdateOpeningEffect(float Progress, float EasedProgress);
-
-	/** * 【退场专属钩子】：仅在UI收起时触发。推荐仅驱动透明度渐隐，利用 Slate 特性维持最后坐标。
-	 * @param Progress  线性进度 (0.0 到 1.0)
-	 * @param EasedProgress  平滑后的视觉进度
-	 */
-	UFUNCTION(BlueprintImplementableEvent, Category = "UI|Transition")
-	void UpdateClosingEffect(float Progress, float EasedProgress);
-
-	// ==============================================================================
-	// 生命周期与同步 (Lifecycle & Synchronization)
-	// ==============================================================================
-	virtual void NativeOnInitialized() override;
-	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
-
-	/** 核心同步函数：编辑器参数修改时热重载表现 */
-	virtual void SynchronizeProperties() override;
-
-	/** 遗言清理：在 UI 被销毁时，确保它从全局子系统的栈中强制拔除 */
-	virtual void NativeDestruct() override;
-
-	// ==============================================================================
-	// 响应式输入路由 (Input Routing)
-	// ==============================================================================
-	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
-	virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
 
 public:
 	// ==============================================================================
 	// 状态驱动接口 (State Drivers)
 	// ==============================================================================
-	UFUNCTION(BlueprintNativeEvent, Category = "UI|Lifecycle")
+
+	// 【激活接口】：由外部调用，触发 UI 展开逻辑，展开过程中只执行一次。
+	// 声明为 BlueprintNativeEvent（蓝图原生事件），允许 C++ 调用与蓝图重写，C++ 定义时必须带后缀 _Implementation，引用不用
+	// 是事件且无返回值，在虚幻中为 Event On Widget Activated 红色节点；
+	// 目前蓝图中暂无此节点，需要时自行添加，连接 Parent 节点并补上其他逻辑（如播放音效、触发子动画等）；
+	// 目前由玩家控制器 ToggleTacticalWidget 调用
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "UI|Transition")
 	void OnWidgetActivated();
 
-	UFUNCTION(BlueprintNativeEvent, Category = "UI|Lifecycle")
+	// 【激活接口】：由外部调用，触发 UI 收起逻辑，收起过程中只执行一次。
+	// 声明为 BlueprintNativeEvent（蓝图原生事件），允许 C++ 调用蓝图重写，C++ 定义时必须带后缀 _Implementation，引用不用
+	// 是事件且无返回值，在虚幻中为 Event On Widget Deactivated 红色节点；
+	// 目前蓝图中暂无此节点，需要时自行添加，连接 Parent 节点并补上其他逻辑（如播放音效、触发子动画等）；
+	// 目前由玩家控制器 ToggleTacticalWidget 调用
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "UI|Transition")
 	void OnWidgetDeactivated();
+
+protected:
+	// ==============================================================================
+	// 控件生命周期 (Widget Lifecycle)
+	// ==============================================================================
+
+	/** * 【零点确立】：引擎级单次初始化钩子。
+	 * @调用机制：引擎 UMG 框架全自动调用（绝对禁止外部手动调用）。
+	 * @调用者：UMG 实例化工厂 (WidgetFactory)。
+	 * @调用时机：当执行 CreateWidget 在内存中刚把骨架搭建好时触发，终生仅执行一次。
+	 * @职责：在 UI 实例创建时，强行确立状态机的绝对安全起点（重置进度为 0.0，锁定 Idle 状态）。
+	 */
+	virtual void NativeOnInitialized() override;
+
+	// 【生命周期钩子/拦截网挂载点】：当 UI 底层 Slate 控件树构建完毕，且成功与世界 (World) 及本地玩家 (LocalPlayer) 建立绑定关系时触发。
+	// @精准定义：与 NativeOnInitialized（终生仅在内存中执行一次）不同，NativeConstruct 确保了当前 UI 已经具有了完整的运行时上下文。
+	// @为何选在此处挂载：在更早的初始化阶段，UI 可能尚未完全依附于所属的玩家，此时去获取增强输入子系统极易触发空指针崩溃。
+	// 选在 Construct 阶段，能 100% 安全地获取到宿主玩家的 Subsystem，是建立系统级监听与初始化缓存最严谨的时机。
+	// @职责：
+	// 1. 绑定增强输入系统的按键映射重构委托（确立“玩家改键自动同步”的数据驱动机制）。
+	// 2. 首次主动调用 RefreshInputPassthroughCache()，完成物理按键拦截名单的初始建仓。
+	virtual void NativeConstruct() override;
+
+	/** * 【所见即所得】：编辑器与 C++ 数据同步桥梁。
+	 * @调用机制：引擎 UMG 框架全自动调用。
+	 * @调用者：UMG 编辑器框架 / 运行时实例化工厂。
+	 * @调用时机：编辑器内美术拖动参数滑块时实时触发；游戏运行时 UI 创建完毕同步默认参数时触发。
+	 * @绝活：允许在不运行游戏的情况下，在 UMG 视口中实时预览缓动曲线计算后的出/退场动画表现。
+	 */
+	virtual void SynchronizeProperties() override;
+
+	/** * 【核心时钟引擎】：UI 状态机的纯数学驱动源。
+	 * @调用机制：引擎主循环全自动调用。
+	 * @调用者：虚幻 Tick 管理器 (Tick Manager)。
+	 * @调用时机：只要 UI 被 AddToViewport 添加到屏幕且未被暂停，每一帧自动触发。
+	 * @防线：精准控制出栈时机——只有当退场动画进度彻底归零（UI 完全消失）后，才通知 UIMgr 解除拦截。
+	 */
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
+
+	/** * 【终极内存防线】：UI 死亡前的最后遗言。
+	 * @调用机制：引擎底层内存管理全自动调用。
+	 * @调用者：垃圾回收器 (GC) 或 Slate 销毁队列。
+	 * @调用时机：UI 被 RemoveFromParent 且失去所有强引用即将被物理抹除前，或切换关卡导致世界毁灭时触发。
+	 * @意义：物理层面根绝一切悬空指针导致的游戏崩溃，强制通知 UIMgr 将自身剔除。
+	 */
+	virtual void NativeDestruct() override;
+
+	// ==============================================================================
+	// 响应式输入路由 (Input Routing)
+	// ==============================================================================
+
+	/** * 【鼠标物理防穿透盾牌】：裁决当前的鼠标点击是“穿透放行给底层 3D 世界”，还是“被 UI 拦截消化（防走火）”。
+	 * @调用机制：引擎 UI 框架事件驱动全自动调用。
+	 * @调用者：FSlateApplication（虚幻全局 UI 交互大总管）。
+	 * @调用时机：玩家按下鼠标，且大总管发射的隐形射线精确命中了当前 UI 的几何体边界时触发。
+	 * @策略：向 O(1) 缓存动态查表。命中蓝图配置的免检动作（如允许中键缩放）则精准放行（Unhandled）；未命中则交由父类拦截吞噬（Handled）防止底层主角走火。
+	 * @架构说明：为何必须交由父类 (Super) 收尾，而绝不能用任何自定义 UI 检测工具完全替代？
+	 * 任何自定义检测函数（即使能成功返回 Handled 拦截信号），都只停留在“业务拦截”层面。
+	 * UUserWidget 的父类原生逻辑中，封装着虚幻 Slate 引擎不可替代的核心 UI 状态机更新（包括但不限于：Drag&Drop 拖拽初始化、精准的焦点强夺机制、以及向蓝图图表 OnMouseButtonDown 的事件路由）。
+	 * 越过 Super 强行接管，等于直接斩断了当前 UI 与底层引擎状态同步的纽带，会导致一系列引擎级交互失灵。
+	 */
+	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+
+	/** * 【键盘/手柄快捷键断路器】：裁决当前的按键输入是“漏回给全局系统（触发快捷键）”，还是“被 UI 独吞屏蔽（防走位）”。
+	 * @调用机制：引擎 UI 框架事件驱动全自动调用。
+	 * @调用者：FSlateApplication（虚幻全局 UI 交互大总管）。
+	 * @调用时机：玩家按下键盘任意键，且【必须满足当前 UI 已经抢占了引擎的“输入焦点 (User Focus)”】时触发。
+	 * @策略：向 O(1) 缓存动态查表。命中蓝图配置的免检动作（如关闭面板的全局快捷键）则主动放行（Unhandled）防死锁；未命中则交由父类彻底吞噬，防止玩家浏览 UI 时底层主角盲目走位。
+	 */
+	virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
+
+	// 允许穿透 UI 拦截的“输入动作 (Input Action)”白名单数组。
+	// 在蓝图中将全局动作（如关闭面板、切换地图）添加进来，底层会自动反查对应的真实按键并予以放行，完美兼容玩家自定义改键。
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Input Routing")
+	TArray<class UInputAction*> PassthroughActions;
+
+	// 【性能优化核心/O(1) 缓存表】：存储当前被允许穿透 UI 的所有底层物理按键（FKey）。
+	// @穿透含义详解：当 UI 激活并抢占焦点时，默认会像一堵墙一样“吞噬”所有输入，防止玩家在看面板时底层的 3D 角色还在乱跑或开火。
+	// “允许穿透”即赋予这些特定按键免检特权，让它们的信号不在 UI 层被销毁，而是漏回给底层的全局系统（如 PlayerController）。
+	// 典型应用：必须放行“关闭面板”的全局快捷键（如 Tab、Esc）。如果不允许其穿透，UI 会把关闭指令一起吞噬，导致面板永远关不掉（操作死锁）。
+	// @架构意义：将耗时的“遍历 Action 查按键”逻辑提前转移到初始化与改键阶段。在玩家高频输入时，
+	// 仅需对本表进行极速的 O(1) 包含测试（Contains），彻底消除了运行时高频查询产生的 TArray 堆内存分配与 CPU 抖动。
+	TSet<FKey> CachedPassthroughKeys;
+
+private:
+	// 【缓存重建引擎】：根据蓝图配置的 PassthroughActions，向增强输入系统反查对应的物理按键并重构缓存表。
+	// @调用时机：
+	// 1. 首次建仓：UI 创建并加入屏幕时（NativeConstruct）。
+	// 2. 动态刷新：玩家在系统设置中修改了键位，触发增强输入系统 ControlMappingsRebuiltDelegate 时自动回调。
+	// @注意：必须标记为 UFUNCTION()，否则无法被 UE 反射系统识别，进而导致 AddUniqueDynamic 动态多播委托绑定失败。
+	UFUNCTION()
+	void RefreshInputPassthroughCache();
+
+	// 【高频查询关口】：输入路由的终极仲裁者，判断当前按下的物理键是否拥有穿透 UI 的特权。
+	// @参数 InKey：玩家当前按下的真实硬件按键（键盘M、鼠标中键、手柄按键等）。
+	// @性能指标：零内存分配（Zero Allocation），绝对 O(1) 时间复杂度，专为极致帧率环境打造。
+	// 常引用传递：避免不必要的值复制，保护传入的对象免受修改风险
+	// 尾部只读承诺，纯查询函数，调用这个函数绝对不会修改当前 UI 的任何内部状态
+	bool IsPassthroughAction(const FKey& InKey) const;
+
+protected:
+	// ==============================================================================
+	// 核心表现钩子 (Presentation Hooks)
+	// ==============================================================================
+
+	// 【出场专属钩子】：仅在 UI 展开时触发。推荐驱动 Y轴位移 和 透明度渐显。	 
+	// @param Progress  线性进度 (0.0 到 1.0)	 * @param EasedProgress  平滑后的视觉进度；
+	// 这是一个没有 C++ 实现的事件，强制要求蓝图子类去实现处理展开 UI 时的动画表现。
+	// 为什么不在 C++ 写死代码：防止底层被视觉表现绑架！若在 C++ 写死动画逻辑，美术每次修改表现都需要程序员重新编译项目，将千变万化的视觉表演权 100% 移交蓝图
+	// 【架构约束/单向通讯】：返回值为 void 宣告了它是“发射后不管”的事件（蓝图红节点）。
+	// 【参数规范/下行数据】：括号内的变量是 C++ 在原生层全速算好后“喂”给蓝图的纯只读数据载荷；
+	// C++ 仅作为发令枪派发数据，绝不挂起当前线程等待蓝图的执行结果，实现了底层状态机与表层视觉的绝对物理隔离。
+	UFUNCTION(BlueprintImplementableEvent, Category = "UI|Transition")
+	void UpdateOpeningEffect(float Progress, float EasedProgress);
+
+	// 【退场专属钩子】：仅在 UI 收起时触发。推荐仅驱动透明度渐隐，利用 Slate 特性维持最后坐标。	 
+	// @param Progress  线性进度 (0.0 到 1.0)	 * @param EasedProgress  平滑后的视觉进度；
+	// 这是一个没有 C++ 实现的事件，强制要求蓝图子类去实现处理收起 UI 时的动画表现。
+	// // 为什么不在 C++ 写死代码：防止底层被视觉表现绑架！若在 C++ 写死动画逻辑，美术每次修改表现都需要程序员重新编译项目，将千变万化的视觉表演权 100% 移交蓝图
+	// 【架构约束/单向通讯】：返回值为 void 宣告了它是“发射后不管”的事件（蓝图红节点）。
+	// 【参数规范/下行数据】：括号内的变量是 C++ 在原生层全速算好后“喂”给蓝图的纯只读数据载荷；
+	// C++ 仅作为发令枪派发数据，绝不挂起当前线程等待蓝图的执行结果，实现了底层状态机与表层视觉的绝对物理隔离。
+	UFUNCTION(BlueprintImplementableEvent, Category = "UI|Transition")
+	void UpdateClosingEffect(float Progress, float EasedProgress);
 };
