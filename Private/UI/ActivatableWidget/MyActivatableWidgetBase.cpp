@@ -285,9 +285,8 @@ FReply UMyActivatableWidgetBase::NativeOnMouseButtonDown(const FGeometry& InGeom
 		return FReply::Unhandled();
 	}
 
-	// 动作未命中：交由父类执行原生 UI 路由。
-	// 意义：既能在 UI 层安全吞噬该点击（彻底切断穿透，防止玩家点击面板引发底层主角的意外走火），
-	//       又能完美保留 UI 内部控件（如关闭按钮、滑动条）被正常点按的交互功能。
+	// 动作未命中：在 UI 层安全吞噬该点击（彻底切断穿透，防止玩家点击面板引发底层主角的意外走火），
+	// 且能完美保留 UI 内部控件（如关闭按钮、滑动条）被正常点按的交互功能。
 	return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
 }
 

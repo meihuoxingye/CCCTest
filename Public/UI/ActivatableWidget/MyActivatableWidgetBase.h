@@ -205,7 +205,9 @@ protected:
 	virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
 
 	// 允许穿透 UI 拦截的“输入动作 (Input Action)”白名单数组。
-	// 在蓝图中将全局动作（如关闭面板、切换地图）添加进来，底层会自动反查对应的真实按键并予以放行，完美兼容玩家自定义改键。
+	// 在蓝图中将全局动作（如关闭面板、切换地图、移动）添加进来，底层会自动反查对应的真实按键并予以放行，完美兼容玩家自定义改键。
+	// “允许穿透”即赋予这些特定按键免检特权，让它们的信号不在 UI 层被销毁，而是漏回给底层的全局系统（如 PlayerController）。
+	// 典型应用：必须放行“关闭面板”的全局快捷键（如 Tab、Esc）。如果不允许其穿透，UI 会把关闭指令一起吞噬，导致面板永远关不掉（操作死锁）。
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Input Routing")
 	TArray<class UInputAction*> PassthroughActions;
 
