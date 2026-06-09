@@ -196,6 +196,11 @@ protected:
 	 */
 	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 
+	/** * 【鼠标双击防穿透盾牌】：封堵玩家疯狂连点导致的“双击事件”泄露。
+	 * @触发时机：玩家在极短时间内连续点击两次鼠标时触发。
+	 */
+	virtual FReply NativeOnMouseButtonDoubleClick(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+
 	/** * 【键盘/手柄快捷键断路器】：裁决当前的按键输入是“漏回给全局系统（触发快捷键）”，还是“被 UI 独吞屏蔽（防走位）”。
 	 * @调用机制：引擎 UI 框架事件驱动全自动调用。
 	 * @调用者：FSlateApplication（虚幻全局 UI 交互大总管）。

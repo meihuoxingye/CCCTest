@@ -18,6 +18,9 @@
 #include "InputAction.h"
 #include "EnhancedActionKeyMapping.h" // 【修正 4】：必须包含此文件才能访问 Mapping.Action 和 Mapping.Key
 
+#include "Framework/Application/SlateApplication.h"
+
+
 // ==============================================================================
 // 状态驱动接口 (State Drivers)
 // ==============================================================================
@@ -32,6 +35,9 @@
 // 5. 点火起飞：计算首帧缓动进度，触发 UpdateOpeningEffect 钩子，唤醒蓝图动画。
 void UMyActivatableWidgetBase::OnWidgetActivated_Implementation()
 {
+	// 【新增优化】：拦截“虚空编辑器”逻辑，防止 UMG 编辑器在预览/编译时尝试运行底层代码，彻底杜绝缺失上下文引发的崩溃
+	if (IsDesignTime()) return;
+
 	// 如果已经在打开的过程中，直接返回，避免重复触发激活逻辑
 	if (CurrentState == EUIState::Opening) return;
 
@@ -42,12 +48,68 @@ void UMyActivatableWidgetBase::OnWidgetActivated_Implementation()
 		TransitionProgress = 0.0f;
 	}
 
+	// ======================================================================
+	// 【极简核心】：物理级刷新输入缓存
+	// 彻底消除切人键在 UI 激活瞬间因“加载时差”被误吞的 Bug。
+	// ======================================================================
+	RefreshInputPassthroughCache();
+
 	// 将 UI 的根节点（WBP_TacticalMenu）设为可见，从而使整个UI可见，使其开始渲染并接受交互
 	// 因为根节点下就是画布面板，所以实际上整个屏幕都被设为可见
 	// 为什么不只设置 UI 实际区域可见，其他部分可直接穿透到游戏地面？
 	// 因为如果 UI 区域以外的部分不可见了，那么玩家点击屏幕其他地方时，输入事件就会穿透到游戏世界里，导致玩家误操作
 	// 需要 UI 区域以外的部分参与检测，以确定点击到底是控制 UI 还是想要退出 UI
 	SetVisibility(ESlateVisibility::Visible);
+
+	// --------------------------------------------------------------------------
+	// 【核心改变 / 终极防闪烁装甲】：在将控制权交给蓝图之前，强行打断引擎队列，立刻执行底层排版！
+	// 只有在此刻强制算出 Geometry，后续的夺焦逻辑才能因为有了“物理实体”而 100% 成功。
+	// --------------------------------------------------------------------------
+	// [底层机制补充说明]：
+	// 1. Slate 的惰性排版 (Lazy Layout)：为了极致性能，引擎在 AddToViewport 或 SetVisibility(Visible) 时，
+	//    并不会立刻计算 UI 的长宽大小，而是将其塞入“待办队列”，等到下一帧渲染前才统一计算。
+	// 2. 致命的零维度陷阱：如果我们不打断这个队列，紧接着在下一行直接触发 UpdateOpeningEffect 动画，
+	//    蓝图节点 `Get Paint Space Geometry` 拿到的尺寸将是致命的 (0, 0)！
+	// 3. 视觉灾难 (1-Frame Flicker)：尺寸为 0 会导致基于尺寸推演的进场动画（如从屏幕最下方滑入）在第 0 帧彻底算错位置，
+	//    让 UI 在屏幕左上角像幽灵一样“闪烁一帧”，随后才跳回正确位置。
+	// 4. 破局：调用 ForceLayoutPrepass()，相当于拿枪指着引擎的头，逼迫它在当前这行 C++ 走完之前，立刻、同步地算出绝对尺寸！
+	ForceLayoutPrepass();
+
+	// ======================================================================
+	// 【绝对权力夺焦】：在排版完成后，趁热打铁焊死焦点，彻底消除“点一下”的 Bug
+	// ======================================================================
+	bIsFocusable = true;
+	SetIsFocusable(true); // 确保当前 UI 具备获取焦点的资格
+
+	// 强制打开“接纳焦点”的物理通路，无视蓝图里漏勾选的配置。
+	if (UWidget* RootNode = GetRootWidget())
+	{
+		this->bIsFocusable = true;
+	}
+
+	if (APlayerController* PC = GetOwningPlayer())
+	{
+		// 清空所有硬件按键的按下状态，彻底解决玩家按住键呼出菜单导致的“按键粘连”Bug
+		PC->FlushPressedKeys();
+
+		FInputModeGameAndUI InputMode;
+		// 此时 GetCachedWidget() 已经通过了上方的 Prepass 获得了真实数据，绝对有效
+		TSharedPtr<SWidget> SlateWidget = GetCachedWidget();
+		if (!SlateWidget.IsValid()) SlateWidget = TakeWidget();
+
+		InputMode.SetWidgetToFocus(SlateWidget);
+		// 保证鼠标不会被锁在屏幕中心
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		// 强制在视口捕获期间也不隐藏光标，防止点击空白处时鼠标突然消失
+		InputMode.SetHideCursorDuringCapture(false);
+
+		PC->SetInputMode(InputMode);
+		// 配合 GameAndUI 模式，明确显示鼠标指针
+		PC->SetShowMouseCursor(true);
+	}
+
+	// 强制调用原生聚焦，将硬件键盘死死钉在 UI 上
+	SetFocus();
 
 	// 将状态机切换到“正在打开”
 	CurrentState = EUIState::Opening;
@@ -66,24 +128,6 @@ void UMyActivatableWidgetBase::OnWidgetActivated_Implementation()
 			UIMgr->PushUI(this);
 		}
 	}
-
-	// --------------------------------------------------------------------------
-	// 【终极防闪烁装甲】：在将控制权交给蓝图之前，强行打断引擎队列，立刻执行底层排版！
-	// 这等同于蓝图里的 Force Layout Prepass 节点，它会逼迫 Slate 引擎立刻计算尺寸
-	// --------------------------------------------------------------------------
-	// [底层机制补充说明]：
-	// 1. Slate 的惰性排版 (Lazy Layout)：为了极致性能，引擎在 AddToViewport 或 SetVisibility(Visible) 时，
-	//    并不会立刻计算 UI 的长宽大小，而是将其塞入“待办队列”，等到下一帧渲染前才统一计算。
-	// 2. 致命的零维度陷阱：如果我们不打断这个队列，紧接着在下一行直接触发 UpdateOpeningEffect 动画，
-	//    蓝图节点 `Get Paint Space Geometry` 拿到的尺寸将是致命的 (0, 0)！
-	// 3. 视觉灾难 (1-Frame Flicker)：尺寸为 0 会导致基于尺寸推演的进场动画（如从屏幕最下方滑入）在第 0 帧彻底算错位置，
-	//    让 UI 在屏幕左上角像幽灵一样“闪烁一帧”，随后才跳回正确位置。
-	// 4. 破局：调用 ForceLayoutPrepass()，相当于拿枪指着引擎的头，逼迫它在当前这行 C++ 走完之前，立刻、同步地算出绝对尺寸！
-	//    这就保证了下一行传给蓝图的动画，能拿到 100% 准确的 Geometry 数据。
-	ForceLayoutPrepass();
-
-	// 承接上方函数：此时，UI 的绝对像素宽高和空间位置（Geometry）已经被强制算好并存入底层缓存了！
-	// 接下来触发蓝图钩子 UpdateOpeningEffect 时，蓝图里拿到的 Geometry 就会是真实尺寸（如1920x1080），绝对不会再是 (0,0)！
 
 	// 准备首帧时间参数：因为第一帧的 NativeTick 尚未运行，必须手动利用起跑点计算一次初始参数。
 	// 本函数只会在 UI 展开时执行一次，所以此函数里计算的 TransitionProgress 绝对是 0.0f，代表动画起点；
@@ -287,7 +331,27 @@ FReply UMyActivatableWidgetBase::NativeOnMouseButtonDown(const FGeometry& InGeom
 
 	// 动作未命中：在 UI 层安全吞噬该点击（彻底切断穿透，防止玩家点击面板引发底层主角的意外走火），
 	// 且能完美保留 UI 内部控件（如关闭按钮、滑动条）被正常点按的交互功能。
-	return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
+	FReply Reply = Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
+
+	// 【核心护盾修复】：如果父类没有处理（比如点在了 UI 的空白背景上）
+	// 我们必须强行将其标记为 Handled()！
+	// 这一步不仅吞噬了幽灵点击防走火，更保住了 UI 的输入焦点不被底层视口夺走！
+	return Reply.IsEventHandled() ? Reply : FReply::Handled();
+}
+
+FReply UMyActivatableWidgetBase::NativeOnMouseButtonDoubleClick(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	// 1. O(1) 动态查表：看看双击的这个键（比如双击中键）是否在白名单里
+	if (IsPassthroughAction(InMouseEvent.GetEffectingButton()))
+	{
+		return FReply::Unhandled();
+	}
+
+	// 2. 让父类处理常规的 UI 逻辑
+	FReply Reply = Super::NativeOnMouseButtonDoubleClick(InGeometry, InMouseEvent);
+
+	// 3. 【双击护盾修复】：哪怕是连点，只要不在白名单里，照样强行吞噬！
+	return Reply.IsEventHandled() ? Reply : FReply::Handled();
 }
 
 FReply UMyActivatableWidgetBase::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
@@ -302,7 +366,11 @@ FReply UMyActivatableWidgetBase::NativeOnKeyDown(const FGeometry& InGeometry, co
 
 	// 动作未命中：交由父类执行原生 UI 路由。
 	// 意义：在 UI 焦点层彻底销毁该按键信号（如 WASD 或空格），防止玩家在浏览 UI 期间，底层场景中的主角发生盲目的位移或误放技能。
-	return Super::NativeOnKeyDown(InGeometry, InKeyEvent);
+	FReply Reply = Super::NativeOnKeyDown(InGeometry, InKeyEvent);
+
+	// 【防走位死锁修复】：如果父类不认识这个键（比如不在白名单里的非导航键）
+	// 绝对不能放行！强行返回 Handled() 在 UI 层将信号彻底销毁！
+	return Reply.IsEventHandled() ? Reply : FReply::Handled();
 }
 
 void UMyActivatableWidgetBase::RefreshInputPassthroughCache()
@@ -318,21 +386,24 @@ void UMyActivatableWidgetBase::RefreshInputPassthroughCache()
 		// 3. 获取增强输入子系统：定位掌管该玩家按键管线的底层数据库
 		if (auto* InputSubsystem = LP->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
 		{
-			// 4. 获取全量映射快照（5.7.4 标准 API）
-			// @拉取数据：提取当前处于激活状态的所有输入上下文中，所有的动作映射关系。
-			TArray<FEnhancedActionKeyMapping> AllMappings = InputSubsystem->GetAllPlayerMappableActionKeyMappings();
-
-			// 5. 遍历比对与提纯：执行从“抽象逻辑动作 (Action)”到“真实物理按键 (Key)”的降维翻译
-			for (const FEnhancedActionKeyMapping& Mapping : AllMappings)
+			// 4. 【修复核心】：不再拉取全量“可自定义映射”表，而是反向操作！
+			// 直接遍历蓝图里配好的“免检动作 (PassthroughActions)”
+			for (UInputAction* Action : PassthroughActions)
 			{
-				// 6. 白名单碰撞检测：判断当前遍历到的 Action，是否属于我们在蓝图里配置的“免检动作名单”
-				// Contains 触发线性遍历，对比 PassthroughActions 与 Mapping.Action，相同则返回 true
-				if (PassthroughActions.Contains(Mapping.Action))
+				if (Action)
 				{
-					// 7. 缓存建仓：动作命中！将其绑定的【底层物理硬件键位】存入 O(1) 哈希集合
-					// @架构闭环：经过这轮提纯后，高频运行的 IsPassthroughAction 函数将直接对硬件 FKey 进行哈希匹配，
-					// 彻底剥离了复杂的 Action 溯源逻辑，实现了零开销的极限性能过滤。
-					CachedPassthroughKeys.Add(Mapping.Key);
+					// 5. 暴力查询：向子系统逼问“当前处于激活状态的上下文中，这个 Action 到底绑了哪些物理键？”
+					// 此 API 无视任何设置，只要底层能按出这个 Action，它就会把真实硬件键（FKey）交出来！
+					TArray<FKey> MappedKeys = InputSubsystem->QueryKeysMappedToAction(Action);
+
+					// 6. 填入 O(1) 缓存表
+					for (const FKey& Key : MappedKeys)
+					{
+						// 7. 缓存建仓：动作命中！将其绑定的【底层物理硬件键位】存入 O(1) 哈希集合
+						// @架构闭环：经过这轮提纯后，高频运行的 IsPassthroughAction 函数将直接对硬件 FKey 进行哈希匹配，
+						// 彻底剥离了复杂的 Action 溯源逻辑，实现了零开销的极限性能过滤。
+						CachedPassthroughKeys.Add(Key);
+					}
 				}
 			}
 		}
