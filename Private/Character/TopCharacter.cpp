@@ -3,7 +3,7 @@
 #include "Character/TopCharacter.h"
 // 自定义移动控制组件
 #include "Component/MovementControl/MyMovementControlComponent.h"
-// 引入对应的 GameMode 和控制器以触发 UI 刷新机制
+// 引入对应的 GameMode 和控制器以供数据注册与全局输入处理
 #include "Game/MyGameModeBase.h"
 #include "Character/TopPlayerController.h"
 // 角色属性数据资产配置
@@ -68,21 +68,15 @@ void ATopCharacter::BeginPlay()
 	}
 
 
-	// 类型为友好的角色出生自动注册与UI刷新调用
+	// 类型为友好的角色出生自动注册
 	if (Config && Config->CharacterType == ECharacterType::Friendly)
 	{
 		// GetAuthGameMode() 向当前关卡世界申请获取基础游戏模式
 		if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(GetWorld()->GetAuthGameMode()))
 		{
-			// 将此角色注册到 MyGameModeBase 的友军名册里
+			// 将此角色注册 to MyGameModeBase 的友军名册里
+			// 角色现在只做纯粹的数据上报，后续的 UI 刷新将完全由 GameMode 的内部多播事件通知 UI 组件
 			GM->RegisterFriendly(this);
-
-			// 通知玩家控制器更新 HUD 列表
-			// GetFirstPlayerController() 获取0号（第一个）玩家控制器
-			if (ATopPlayerController* PC = Cast<ATopPlayerController>(GetWorld()->GetFirstPlayerController()))
-			{
-				PC->UpdateHUD();
-			}
 		}
 	}
 }
@@ -95,17 +89,13 @@ void ATopCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	if (!Config) return;
 
 
-	// ===================== 【友军阵亡自动注销与UI刷新调用】 =====================
+	// ===================== 【友军阵亡自动注销】 =====================
 	if (Config && Config->CharacterType == ECharacterType::Friendly)
 	{
 		if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(GetWorld()->GetAuthGameMode()))
 		{
+			// 将此角色从友军名册中移除，名册内部的变动会自动触发整个 UI 视图层的刷新
 			GM->UnregisterFriendly(this);
-
-			if (ATopPlayerController* PC = Cast<ATopPlayerController>(GetWorld()->GetFirstPlayerController()))
-			{
-				PC->UpdateHUD();
-			}
 		}
 	}
 
