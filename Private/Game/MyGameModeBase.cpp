@@ -21,7 +21,7 @@ void AMyGameModeBase::UnregisterFriendly(ATopCharacter* Character)
 {
 	if (Character)
 	{
-		// 后续
+		// 待实现：
 		// 把死掉的角色留在队列里“灰色显示”，不需要频繁变动数组
 		// 放弃冷冰冰的系统内置排序，可以让玩家自主手动调整位置
 		FriendlyRoster.Remove(Character);

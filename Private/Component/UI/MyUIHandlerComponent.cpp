@@ -77,13 +77,12 @@ void UMyUIHandlerComponent::UpdateHUD()
 // ==============================================================================
 #pragma region
 
-// 无参版本：向下调用带参数的原子性切换版本，进行精准翻转
+
 void UMyUIHandlerComponent::ToggleTacticalWidget()
 {
 	ToggleTacticalWidget(!bIsTacticalUIOpen);
 }
 
-// 【进阶优化】：带明确参数的原子性切换版本
 void UMyUIHandlerComponent::ToggleTacticalWidget(bool bShouldOpen)
 {
 	// 使用 O(1) 缓存的控制器指针进行拦截
@@ -158,7 +157,7 @@ void UMyUIHandlerComponent::HandleWidgetCloseRequested()
 	// 向上汇报给控制器大管家，让控制器去同时关闭 UI + 退出子弹时间！
 	if (CachedPC)
 	{
-		CachedPC->ToggleTacticalWidget();
+		CachedPC->ToggleTacticalMode();
 	}
 }
 

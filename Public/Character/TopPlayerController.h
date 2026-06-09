@@ -1,4 +1,5 @@
 // Fill out your copyright notice in the Description page of Project Settings.
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -60,9 +61,9 @@ public:
 	// 角色攻击回调函数已调用，必返回退出切人模式的指令
 	void SetSwitchMode(bool bEnable);
 
-	// 处理中键按下时的子弹时间与 UI 呼出的回调函数及委托回调函数
+	// 【修改】：处理中键按下时的战术模式（子弹时间与 UI）宏观统筹切换
 	UFUNCTION()
-	void ToggleTacticalWidget();
+	void ToggleTacticalMode();
 
 
 	// ==============================================================================

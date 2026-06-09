@@ -85,8 +85,8 @@ void ATopPlayerController::SetupInputComponent()
 	// 将普通的 InputComponent 强转为 UE5 新一代的 EnhancedInputComponent
 	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(InputComponent))
 	{
-		// 【还原旧有逻辑】：不再向两个组件分支绑定，统一绑回控制器大管家，彻底解决软关闭不同步问题！
-		EnhancedInputComponent->BindAction(BulletTimeAction, ETriggerEvent::Completed, this, &ATopPlayerController::ToggleTacticalWidget);
+		// 【修改】：绑定到控制器的“战术模式”父级指令
+		EnhancedInputComponent->BindAction(BulletTimeAction, ETriggerEvent::Completed, this, &ATopPlayerController::ToggleTacticalMode);
 
 		EnhancedInputComponent->BindAction(SwitchModeAction, ETriggerEvent::Started, ToRawPtr(TimeDilationHub), &UTimeDilationHubComponent::ToggleSwitchMode);
 	}
@@ -176,9 +176,9 @@ void ATopPlayerController::SetSwitchMode(bool bEnable)
 	if (TimeDilationHub) TimeDilationHub->SetSwitchMode(bEnable);
 }
 
-void ATopPlayerController::ToggleTacticalWidget()
+void ATopPlayerController::ToggleTacticalMode()
 {
-	// 【绝对还原】：无论是由物理按键触发，还是鼠标点击背景触发回调，在此统一执行 UI 与时空的双重切换
+	// 向两个不同职责的子集下发专属于它们的执行指令，层级极其清晰
 	if (TimeDilationHub) TimeDilationHub->ToggleBulletTime();
 	if (UIHandlerComp) UIHandlerComp->ToggleTacticalWidget();
 }

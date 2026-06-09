@@ -28,8 +28,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTacticalMenuCloseRequestedSignature);
 // ==============================================================================
 
 // 声明枚举类型，并标记 BlueprintType 使其可以在蓝图系统中作为变量类型被访问
-UENUM(BlueprintType)
 // 使用 uint8 作为底层数据类型以节约内存
+UENUM(BlueprintType)
 enum class EUIState : uint8
 {
 	// 使用 UMETA 宏定义在蓝图编辑器中显示的中文本地化名称
@@ -56,8 +56,8 @@ public:
 	// ==============================================================================
 
 	// BlueprintAssignable 允许该委托在蓝图的“事件图表”中被拉出并绑定 (Bind Event)
-	UPROPERTY(BlueprintAssignable, Category = "UI|Events")
 	// 实例化前面声明的多播委托，用于通知外部（如子系统）该 UI 发起了关闭请求
+	UPROPERTY(BlueprintAssignable, Category = "UI|Events")
 	FOnTacticalMenuCloseRequestedSignature OnCloseRequested;
 
 protected:
@@ -109,8 +109,8 @@ public:
 
 	// 获取当前 UI 的状态机阶段，供 UIManagerSubsystem 仲裁幽灵点击时调用
 	// 声明为纯节点（无执行引脚，BlueprintPure），因为这是一个不会修改类成员状态的 Getter 函数
-	UFUNCTION(BlueprintPure, Category = "UI|Transition")
 	// const 后缀保证该函数不会改变类的任何成员变量
+	UFUNCTION(BlueprintPure, Category = "UI|Transition")
 	EUIState GetCurrentState() const { return CurrentState; }
 
 public:

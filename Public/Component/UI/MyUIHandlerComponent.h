@@ -55,20 +55,24 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UMyActivatableWidgetBase> TacticalWidgetInstance;
 
-	/** 极其稳定的状态锁，用来代替之前依赖 IMC 的脆弱判断 */
+	// 战术面板是否开启
+	// 极其稳定的状态锁，用来代替之前依赖 IMC 的脆弱判断：系统是否开启，全凭自己内部的变量说了算
 	bool bIsTacticalUIOpen = false;
 
 	// ==============================================================================
 	// 战术指令与总线转发 (Tactical Commands & Bus Forwarding)
 	// ==============================================================================
 public:
-	// 切换战术 UI 面板的状态 (对外保留的无参翻转接口，保持与原控制器兼容)
+	// 切换战术 UI 面板的状态 ：向下调用带参数的原子性切换版本，进行 UI 状态翻转
+	// 对外保留的无参翻转接口，保持与原控制器兼容
+	// 1.增强输入系统的回调函数绑定时无法传入 bool 参数，因此需要此无参接口
+	// 2.外界不用获取当前 bIsTacticalUIOpen 状态也能通过这个无参接口切换 UI 状态，降低耦合
 	void ToggleTacticalWidget();
 
-	// 【进阶优化】：切换战术 UI 面板的状态 (带明确目标状态参数的原子性切换接口)
+	// 【进阶优化】：设置战术 UI 面板的状态 (带明确目标状态参数的原子性切换接口)
 	void ToggleTacticalWidget(bool bShouldOpen);
 
-	// 【还原逻辑】：专门接收 UI 内部发出的关闭请求，向上汇报给控制器
+	// 委托回调函数：专门接收 UI 内部发出的关闭请求，向上汇报给控制器
 	UFUNCTION()
 	void HandleWidgetCloseRequested();
 };
