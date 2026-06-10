@@ -2,9 +2,13 @@
 
 
 #include "SkillSystem/SkillPointSubsystem.h"
-
 // 识别 UWorld 指针
 #include "Engine/World.h"
+
+#include "Engine/GameInstance.h"
+// 【主动依赖】：底层系统去依赖高层的统筹数据容器，这是符合解耦规范的
+#include "SaveGame/Subsystem/MySaveSubsystem.h"
+#include "SaveGame/MySaveGame.h"
 
 
 // ==============================================================================
@@ -21,6 +25,38 @@ void USkillPointSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     FCharacterSPData WarriorData;
     WarriorData.LastSyncGameTime = 0.0;
     SquadSPMap.Add(TEXT("Hero_Warrior"), WarriorData);
+
+    // 2. 主动插上网线，监听全局存档总线
+    if (UWorld* World = GetWorld())
+    {
+        if (UGameInstance* GI = World->GetGameInstance())
+        {
+            if (UMySaveSubsystem* SaveSub = GI->GetSubsystem<UMySaveSubsystem>())
+            {
+                SaveSub->OnGameSaving.AddUObject(this, &USkillPointSubsystem::HandleGameSaving);
+                SaveSub->OnGameLoading.AddUObject(this, &USkillPointSubsystem::HandleGameLoading);
+            }
+        }
+    }
+}
+
+void USkillPointSubsystem::Deinitialize()
+{
+    // 内存安全兜底：WorldSubsystem 生命周期（单地图）短于 GameInstance（全游戏）。
+    // 在切地图时自身销毁前，必须主动拔掉网线，防止大管家给死人发广播导致崩溃。
+    if (UWorld* World = GetWorld())
+    {
+        if (UGameInstance* GI = World->GetGameInstance())
+        {
+            if (UMySaveSubsystem* SaveSub = GI->GetSubsystem<UMySaveSubsystem>())
+            {
+                SaveSub->OnGameSaving.RemoveAll(this);
+                SaveSub->OnGameLoading.RemoveAll(this);
+            }
+        }
+    }
+
+    Super::Deinitialize();
 }
 
 #pragma endregion
@@ -186,6 +222,29 @@ void USkillPointSubsystem::PostLoadSync()
             DataPtr->bIsRegenFrozen = false;
         }
     }
+}
+
+void USkillPointSubsystem::HandleGameSaving(UMySaveGame* SaveObj)
+{
+    // 绝对安全保护
+    if (!SaveObj) return;
+
+    // 1. 整理自身内部数据（触发原有的冻结与快照操作）
+    PrepareForSave();
+
+    // 2. 把准备好的数据，物理搬运到存档盒子里
+    SaveObj->SavedSquadSPMap = this->SquadSPMap;
+}
+
+void USkillPointSubsystem::HandleGameLoading(UMySaveGame* SaveObj)
+{
+    if (!SaveObj) return;
+
+    // 1. 从存档盒子里拿回属于自己的那一块数据
+    this->SquadSPMap = SaveObj->SavedSquadSPMap;
+
+    // 2. 唤醒内部计算引擎（触发原有的解冻与时间轴对齐操作）
+    PostLoadSync();
 }
 
 #pragma endregion

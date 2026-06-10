@@ -56,6 +56,9 @@ public:
 	// 系统初始化，预设一个测试角色并加入哈希表
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
+	// 系统销毁时，切记清除委托监听，防止换地图时产生野指针
+	virtual void Deinitialize() override;
+
 	// 为处理不可预测的突发事件（如技能释放、装备升级），使用委托
 	// 不经过虚幻反射系统，只在 C++ 使用的原生多播委托，性能略好一些
 	// 原生委托不需要也不能加 UPROPERTY，它就是纯 C++ 变量
@@ -112,6 +115,13 @@ public:
 	// 读档后对齐时间轴，解冻技能点恢复功能
 	UFUNCTION(BlueprintCallable, Category = "Squad|SaveSystem")
 	void PostLoadSync();
+
+private:
+	// 监听到存档大管家的发车信号，主动把数据放进车里
+	void HandleGameSaving(class UMySaveGame* SaveObj);
+
+	// 监听到读档大管家的卸货信号，主动从车里拿走属于自己的数据
+	void HandleGameLoading(class UMySaveGame* SaveObj);
 
 
 	// ==============================================================================

@@ -15,10 +15,18 @@
 // 【新增模块】
 #include "EnhancedInputComponent.h"
 #include "Component/CombatSystem/MyCombatComponent.h"
-
 // 【新增】：官方角色移动组件（为了修改 bRunPhysicsWithNoController）
 #include "GameFramework/CharacterMovementComponent.h"
 
+// 【新增：交互系统所需的头文件】
+#include "Components/SphereComponent.h"
+#include "Interaction/MyInteractableInterface.h"
+#include "Math/UnrealMathUtility.h"
+
+// 【新增：屏幕文本输出所需的全局引擎头文件】
+#include "Engine/Engine.h"
+
+#include "Components/SkeletalMeshComponent.h"
 
 // Sets default values
 ATopCharacter::ATopCharacter()
@@ -27,8 +35,15 @@ ATopCharacter::ATopCharacter()
 	PrimaryActorTick.bCanEverTick = true;
 
 	MMCComponent = CreateDefaultSubobject<UMyMovementControlComponent>(TEXT("MyMovementControlComponent"));
-}
 
+	// 【新增】：初始化交互探测球
+	InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
+	InteractionSphere->SetupAttachment(RootComponent);
+	InteractionSphere->SetSphereRadius(150.f);
+	InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	InteractionSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
+	InteractionSphere->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Overlap);
+}
 
 // ==============================================================================
 // 核心生命周期 (Core Lifecycle)
@@ -67,7 +82,6 @@ void ATopCharacter::BeginPlay()
 		);
 	}
 
-
 	// 类型为友好的角色出生自动注册
 	if (Config && Config->CharacterType == ECharacterType::Friendly)
 	{
@@ -78,6 +92,13 @@ void ATopCharacter::BeginPlay()
 			// 角色现在只做纯粹的数据上报，后续的 UI 刷新将完全由 GameMode 的内部多播事件通知 UI 组件
 			GM->RegisterFriendly(this);
 		}
+	}
+
+	// 【新增】：绑定物理范围重叠委托
+	if (InteractionSphere)
+	{
+		InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &ATopCharacter::OnInteractSphereBeginOverlap);
+		InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &ATopCharacter::OnInteractSphereEndOverlap);
 	}
 }
 
@@ -104,7 +125,6 @@ void ATopCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 #pragma endregion
 
-
 // ==============================================================================
 // 玩家输入与行为绑定 (Player Input & Actions)
 // ==============================================================================
@@ -126,6 +146,9 @@ void ATopCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
 		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Started, this, &ATopCharacter::Attack);
 		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Completed, this, &ATopCharacter::AttackEnd);
+
+		// 【新增】：绑定交互按键
+		EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &ATopCharacter::OnInteractKeyPressed);
 	}
 }
 
@@ -171,6 +194,137 @@ void ATopCharacter::AttackEnd()
 	{
 		// 告诉战斗组件：停止射击
 		MCComponent->StopWeaponFire();
+	}
+}
+
+#pragma endregion
+
+// ==============================================================================
+// 交互统筹系统 (Interaction Management System)
+// ==============================================================================
+#pragma region
+
+void ATopCharacter::OnInteractSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+	if (OtherActor && OtherActor != this && OtherActor->Implements<UMyInteractableInterface>())
+	{
+		InteractableActorsInRange.AddUnique(OtherActor);
+
+		// 【测谎仪节点 1 - 绿色】：验证物理边界撞击以及接口识别
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, FString::Printf(TEXT("[雷达成功探测] 目标物体: %s 进入交互范围，且已成功识别交互接口契约！"), *OtherActor->GetName()));
+		}
+	}
+}
+
+void ATopCharacter::OnInteractSphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+{
+	if (OtherActor)
+	{
+		InteractableActorsInRange.Remove(OtherActor);
+
+		// 【测谎仪节点 2 - 红色】：验证物体离开
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString::Printf(TEXT("[雷达目标撤销] 目标物体: %s 离开了范围，已将其从待选队列移出。"), *OtherActor->GetName()));
+		}
+	}
+}
+
+AActor* ATopCharacter::GetClosestInteractableActor()
+{
+	if (InteractableActorsInRange.IsEmpty())
+	{
+		// 【测谎仪节点 3 - 橙色警告】：按键按下了，但列表居然是空的
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Orange, TEXT("[排查警告] 名单列表为空！雷达此时没有捕获到任何实现了接口的合法物体，请检查碰撞通道。"));
+		}
+		return nullptr;
+	}
+
+	AActor* BestActor = nullptr;
+	double MinDistanceSq = MAX_dbl;
+	int32 HighestPriority = MIN_int32;
+
+	const FVector PlayerLocation = GetActorLocation();
+	// 【核心修复】：改用骨骼网格体（视觉模型）的实际正前方
+	FVector PlayerForward = GetMesh()->GetForwardVector();
+
+	// 抹平 Z 轴，专为 2.5D 视角优化朝向判定
+	PlayerForward.Z = 0.0;
+	PlayerForward.Normalize();
+
+	for (int32 i = InteractableActorsInRange.Num() - 1; i >= 0; --i)
+	{
+		AActor* CurrentActor = InteractableActorsInRange[i].Get();
+
+		// 严密防御机制：剔除已被破坏或销毁的无效指针
+		if (!IsValid(CurrentActor) || CurrentActor->IsActorBeingDestroyed())
+		{
+			InteractableActorsInRange.RemoveAt(i);
+			continue;
+		}
+
+		// 朝向权重判定
+		FVector DirToTarget = CurrentActor->GetActorLocation() - PlayerLocation;
+		DirToTarget.Z = 0.0;
+		DirToTarget.Normalize();
+
+		const double DotWeight = FVector::DotProduct(PlayerForward, DirToTarget);
+
+		// 过滤掉位于玩家背后（>90度）的物体
+		if (DotWeight < 0.0)
+		{
+			// 【测谎仪节点 4 - 黄色信息】：物体在身边，但因为角度被点积算出来在背后，被无情过滤了
+			if (GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Yellow, FString::Printf(TEXT("[排查提示] 发现了 %s，但它的点积结果为负数，判断在角色背后，已被剥夺交互权。"), *CurrentActor->GetName()));
+			}
+			continue;
+		}
+
+		// 优先级与距离演算
+		const int32 CurrentPriority = IMyInteractableInterface::Execute_GetInteractionPriority(CurrentActor);
+		const double DistanceSq = FVector::DistSquared(PlayerLocation, CurrentActor->GetActorLocation());
+
+		if (CurrentPriority > HighestPriority)
+		{
+			HighestPriority = CurrentPriority;
+			MinDistanceSq = DistanceSq;
+			BestActor = CurrentActor;
+		}
+		else if (CurrentPriority == HighestPriority)
+		{
+			if (DistanceSq < MinDistanceSq)
+			{
+				MinDistanceSq = DistanceSq;
+				BestActor = CurrentActor;
+			}
+		}
+	}
+
+	return BestActor;
+}
+
+void ATopCharacter::OnInteractKeyPressed()
+{
+	// 【测谎仪节点 5 - 浅蓝色】：验证增强输入到底有没有通到这个 C++ 函数里
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Cyan, TEXT("[输入激活] 键盘 E 键已按下！增强输入底层管道打通，正在激活选品过滤算法..."));
+	}
+
+	// 只触发唯一的最佳目标，消除误操作
+	if (AActor* TargetActor = GetClosestInteractableActor())
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Cyan, FString::Printf(TEXT("[锁定成功] 最终决出的最优目标是: %s！正在向其投掷 Execute_Interact 接口调用命令！"), *TargetActor->GetName()));
+		}
+
+		IMyInteractableInterface::Execute_Interact(TargetActor, this);
 	}
 }
 

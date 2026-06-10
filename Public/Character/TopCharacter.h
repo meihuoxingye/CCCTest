@@ -46,6 +46,27 @@ protected:
 
 
 	// ==============================================================================
+	// 交互统筹系统 (Interaction Management System)
+	// ==============================================================================
+protected:
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Interaction")
+	TObjectPtr<class USphereComponent> InteractionSphere;
+
+	// 缓存当前处于范围内的所有合法物体
+	TArray<TWeakObjectPtr<AActor>> InteractableActorsInRange;
+
+	UFUNCTION()
+	void OnInteractSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+
+	UFUNCTION()
+	void OnInteractSphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+
+private:
+	// 核心算法：提取距离最近、朝向最准且优先级最高的目标
+	AActor* GetClosestInteractableActor();
+
+
+	// ==============================================================================
 	// 玩家输入与行为绑定 (Player Input & Actions)
 	// ==============================================================================
 public:
@@ -60,9 +81,14 @@ private:
 	TObjectPtr<class UInputAction> JumpAction;
 	UPROPERTY(EditAnywhere, Category = "Input")
 	TObjectPtr<class UInputAction> AttackAction;
+	// 【新增】：交互按键动作
+	UPROPERTY(EditAnywhere, Category = "Input")
+	TObjectPtr<class UInputAction> InteractAction;
 
 	/** Input Callback Functions*/
 	void Move(const FInputActionValue& InputActionValue);
 	void Attack();
 	void AttackEnd();
+	// 【新增】：交互触发回调
+	void OnInteractKeyPressed();
 };
