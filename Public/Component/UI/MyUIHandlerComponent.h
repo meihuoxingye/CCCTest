@@ -50,6 +50,11 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Input|Tactical")
 	TObjectPtr<UInputMappingContext> TacticalIMC;
 
+
+	/** 存档菜单控件类 */
+	UPROPERTY(EditDefaultsOnly, Category = "UI|SaveGame")
+	TSubclassOf<UMyActivatableWidgetBase> SaveMenuClass;
+
 private:
 	/** 瞬时缓存的战术 UI 实例，使用 Transient 防存档污染 */
 	UPROPERTY(Transient)
@@ -58,6 +63,14 @@ private:
 	// 战术面板是否开启
 	// 极其稳定的状态锁，用来代替之前依赖 IMC 的脆弱判断：系统是否开启，全凭自己内部的变量说了算
 	bool bIsTacticalUIOpen = false;
+
+
+	/** 瞬时缓存的存档面板实例 */
+	UPROPERTY(Transient)
+	TObjectPtr<UMyActivatableWidgetBase> SaveMenuInstance;
+
+	// 存档面板是否开启的状态锁
+	bool bIsSaveMenuOpen = false;
 
 	// ==============================================================================
 	// 战术指令与总线转发 (Tactical Commands & Bus Forwarding)
@@ -75,4 +88,15 @@ public:
 	// 委托回调函数：专门接收 UI 内部发出的关闭请求，向上汇报给控制器
 	UFUNCTION()
 	void HandleWidgetCloseRequested();
+
+
+	// 切换存档 UI 面板的状态 (无参翻转接口)
+	void ToggleSaveMenuWidget();
+
+	// 设置存档 UI 面板的状态 (带参翻转接口)
+	void ToggleSaveMenuWidget(bool bShouldOpen);
+
+	// 专门接收存档 UI 内部发出的关闭请求
+	UFUNCTION()
+	void HandleSaveMenuCloseRequested();
 };

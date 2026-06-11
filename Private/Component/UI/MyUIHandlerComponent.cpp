@@ -161,4 +161,51 @@ void UMyUIHandlerComponent::HandleWidgetCloseRequested()
 	}
 }
 
+void UMyUIHandlerComponent::ToggleSaveMenuWidget()
+{
+	ToggleSaveMenuWidget(!bIsSaveMenuOpen);
+}
+
+void UMyUIHandlerComponent::ToggleSaveMenuWidget(bool bShouldOpen)
+{
+	if (!CachedPC) return;
+
+	// 状态原子性锁：杜绝重复触发
+	if (bIsSaveMenuOpen == bShouldOpen) return;
+
+	// 懒加载模式：创建存档面板实例
+	if (!SaveMenuInstance && SaveMenuClass)
+	{
+		SaveMenuInstance = CreateWidget<UMyActivatableWidgetBase>(CachedPC, SaveMenuClass);
+		if (SaveMenuInstance)
+		{
+			SaveMenuInstance->AddToViewport(10);
+			SaveMenuInstance->SetVisibility(ESlateVisibility::Collapsed);
+			SaveMenuInstance->OnCloseRequested.AddUniqueDynamic(this, &UMyUIHandlerComponent::HandleSaveMenuCloseRequested);
+		}
+	}
+
+	if (!SaveMenuInstance) return;
+
+	// 应用状态
+	bIsSaveMenuOpen = bShouldOpen;
+
+	if (bIsSaveMenuOpen)
+	{
+		SaveMenuInstance->SetVisibility(ESlateVisibility::Visible);
+		// 发送点火信号，UI 基类全自动推流、入栈
+		SaveMenuInstance->OnWidgetActivated();
+	}
+	else
+	{
+		// 触发收起信号，UI 基类全自动播放动画、出栈
+		SaveMenuInstance->OnWidgetDeactivated();
+	}
+}
+
+void UMyUIHandlerComponent::HandleSaveMenuCloseRequested()
+{
+	// 接收 UI 内部的关闭请求（比如点击了取消按钮或成功存档后的自动关闭）
+	ToggleSaveMenuWidget(false);
+}
 #pragma endregion

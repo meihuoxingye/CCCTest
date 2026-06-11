@@ -29,10 +29,6 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UBoxComponent> TriggerBox;
 
-	// 指定呼出的 UI (在蓝图编辑器中设置为 WBP_SaveMenu)
-	UPROPERTY(EditAnywhere, Category = "UI")
-	TSubclassOf<class UMyActivatableWidgetBase> SaveMenuWidgetClass;
-
 public:
 	// ==============================================================================
 	// 接口规范实现 (Interface Implementation)

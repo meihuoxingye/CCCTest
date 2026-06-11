@@ -17,6 +17,9 @@
 // 【新增：日志组件】
 #include "Engine/Engine.h"
 
+// 记得在顶部包含组件头文件
+#include "Component/UI/MyUIHandlerComponent.h"
+
 // ==============================================================================
 // 物理存档终端 (Physical Save Station Actor)
 // ==============================================================================
@@ -38,46 +41,16 @@ AMySaveStationActor::AMySaveStationActor()
 
 void AMySaveStationActor::Interact_Implementation(ACharacter* Interactor)
 {
-	if (!SaveMenuWidgetClass || !Interactor)
-	{
-		// 【测谎仪节点 6 - 红色致命报错】：终端收到指令了，但你忘在细节面板选图纸了！
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 10.f, FColor::Red, TEXT("[致命红字] 存档终端已被唤醒，但是由于 SaveMenuWidgetClass 为空 (None)，放弃 UI 实例化！请去蓝图细节面板指定 WBP_SaveMenu！"));
-		}
-		return;
-	}
+	if (!Interactor) return;
 
-	// 【测谎仪节点 7 - 亮紫色】：接口命令成功跨河，送达物理 Actor 内部
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Magenta, TEXT("[业务接管] 物理存档终端已被调用！开始逆向层级反查本地控制器的 UMyUIManagerSubsystem..."));
-	}
-
-	// 获取玩家控制器
+	// 1. 先获取角色的玩家控制器
 	if (APlayerController* PC = Cast<APlayerController>(Interactor->GetController()))
 	{
-		// 获取本地玩家
-		if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
+		// 2. 从玩家控制器身上，抓取 UI 处理器组件
+		if (UMyUIHandlerComponent* UIComp = PC->FindComponentByClass<UMyUIHandlerComponent>())
 		{
-			// 【关键】：从 LocalPlayer 身上获取 UI 子系统
-			if (UMyUIManagerSubsystem* UISub = LocalPlayer->GetSubsystem<UMyUIManagerSubsystem>())
-			{
-				if (UMyActivatableWidgetBase* SpawnedMenu = CreateWidget<UMyActivatableWidgetBase>(GetWorld(), SaveMenuWidgetClass))
-				{
-					// 【测谎仪节点 8 - 亮紫色】：证明已经一脚把球踢进了 UI 管理子系统的最终大门
-					if (GEngine)
-					{
-						GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Magenta, TEXT("[全链路打通] WBP_SaveMenu 实例创建成功，已提交推流数据：UISub->PushUI(SpawnedMenu)！"));
-					}
-
-					UISub->PushUI(SpawnedMenu);
-				}
-			}
-			else
-			{
-				if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("[户籍报错] UMyUIManagerSubsystem 获取失败！它可能不是本地玩家子系统。"));
-			}
+			// 3. 无脑翻转状态
+			UIComp->ToggleSaveMenuWidget();
 		}
 	}
 }
