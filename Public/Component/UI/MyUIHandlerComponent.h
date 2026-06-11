@@ -42,18 +42,17 @@ protected:
 	UPROPERTY()
 	TObjectPtr<class ATopPlayerController> CachedPC;
 
-	/** 战术呼出控件类 (强约束：必须继承自可激活基类) */
+	/** 战术呼出控件类 (强约束：必须继承自可激活基类) - 【适配预热修改为软指针】 */
 	UPROPERTY(EditDefaultsOnly, Category = "UI|Tactical")
-	TSubclassOf<UMyActivatableWidgetBase> TacticalWidgetClass;
+	TSoftClassPtr<UMyActivatableWidgetBase> TacticalWidgetClass;
 
 	/** 战术模式专用拦截上下文 (挂载优先级 10 的黑洞 IMC) */
 	UPROPERTY(EditAnywhere, Category = "Input|Tactical")
 	TObjectPtr<UInputMappingContext> TacticalIMC;
 
-
-	/** 存档菜单控件类 */
+	/** 存档菜单控件类 - 【适配预热修改为软指针】 */
 	UPROPERTY(EditDefaultsOnly, Category = "UI|SaveGame")
-	TSubclassOf<UMyActivatableWidgetBase> SaveMenuClass;
+	TSoftClassPtr<UMyActivatableWidgetBase> SaveMenuClass;
 
 private:
 	/** 瞬时缓存的战术 UI 实例，使用 Transient 防存档污染 */
@@ -71,6 +70,16 @@ private:
 
 	// 存档面板是否开启的状态锁
 	bool bIsSaveMenuOpen = false;
+
+	// ==============================================================================
+	// 时间分片预热状态机 (Time-Sliced Warmup State Machine)
+	// ==============================================================================
+
+	// 当前预热到了哪一步 (0=战术面板, 1=存档面板)
+	int32 CurrentWarmupStep = 0;
+
+	// 错峰执行下一步预热
+	void ProcessNextWarmup();
 
 	// ==============================================================================
 	// 战术指令与总线转发 (Tactical Commands & Bus Forwarding)

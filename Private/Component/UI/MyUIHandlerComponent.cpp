@@ -9,6 +9,11 @@
 #include "Framework/Application/SlateApplication.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
+// 【新增】引入异步加载与系统管理头文件
+#include "Engine/GameInstance.h"
+#include "TimerManager.h"
+#include "Engine/AssetManager.h"
+#include "SaveGame/Subsystem/MySaveSubsystem.h"
 // 引入控制器
 #include "Character/TopPlayerController.h"
 
@@ -53,6 +58,94 @@ void UMyUIHandlerComponent::BeginPlay()
 			UpdateHUD();
 		}
 	}
+
+	// ==============================================================================
+	// 启动时间分片预热 (错开主 HUD 的性能峰值)
+	// 等玩家出生 2 秒后，后台再开始偷偷干活
+	// ==============================================================================
+	if (UGameInstance* GI = GetWorld()->GetGameInstance())
+	{
+		if (UMySaveSubsystem* SaveSub = GI->GetSubsystem<UMySaveSubsystem>())
+		{
+			// 触发大管家的硬盘异步读取
+			SaveSub->PreloadRegistry();
+		}
+	}
+
+	// 定时器：延迟 2 秒后，开始执行第一步界面渲染预热
+	FTimerHandle WarmupStartTimer;
+	GetWorld()->GetTimerManager().SetTimer(WarmupStartTimer, this, &UMyUIHandlerComponent::ProcessNextWarmup, 2.0f, false);
+}
+
+// ==============================================================================
+// 工业级：时间分片后台预热器
+// ==============================================================================
+void UMyUIHandlerComponent::ProcessNextWarmup()
+{
+	if (!CachedPC) return;
+
+	// 第一步：预热战术面板 (开局第 2 秒触发)
+	if (CurrentWarmupStep == 0)
+	{
+		CurrentWarmupStep++; // 推进状态
+
+		if (!TacticalWidgetClass.IsNull())
+		{
+			FStreamableManager& Streamable = UAssetManager::GetStreamableManager();
+			Streamable.RequestAsyncLoad(TacticalWidgetClass.ToSoftObjectPath(), [this]()
+				{
+					if (UClass* LoadedClass = TacticalWidgetClass.Get())
+					{
+						// 【核心】：直接创建真正的实例，绝不销毁！
+						TacticalWidgetInstance = CreateWidget<UMyActivatableWidgetBase>(CachedPC, LoadedClass);
+						if (TacticalWidgetInstance)
+						{
+							TacticalWidgetInstance->AddToViewport(-999); // 垫在最底层
+							TacticalWidgetInstance->SetVisibility(ESlateVisibility::Hidden); // Hidden：强制点火着色器与字体
+							TacticalWidgetInstance->OnCloseRequested.AddUniqueDynamic(this, &UMyUIHandlerComponent::HandleWidgetCloseRequested);
+
+							// 让它 Hidden 运转一帧，下一帧悄悄转为最省性能的常驻 Collapsed 状态
+							GetWorld()->GetTimerManager().SetTimerForNextTick([this]() {
+								if (TacticalWidgetInstance && !bIsTacticalUIOpen) TacticalWidgetInstance->SetVisibility(ESlateVisibility::Collapsed);
+								});
+						}
+					}
+
+					// 当前面板渲染预热搞定后，再让 CPU 休息 1.5 秒，然后触发下一个预热！
+					FTimerHandle NextTimer;
+					GetWorld()->GetTimerManager().SetTimer(NextTimer, this, &UMyUIHandlerComponent::ProcessNextWarmup, 1.5f, false);
+				});
+		}
+		else { ProcessNextWarmup(); } // 跳过空项，继续下一步
+	}
+
+	// 第二步：预热存档面板 (开局第 3.5 秒左右触发)
+	else if (CurrentWarmupStep == 1)
+	{
+		CurrentWarmupStep++;
+
+		if (!SaveMenuClass.IsNull())
+		{
+			FStreamableManager& Streamable = UAssetManager::GetStreamableManager();
+			Streamable.RequestAsyncLoad(SaveMenuClass.ToSoftObjectPath(), [this]()
+				{
+					if (UClass* LoadedClass = SaveMenuClass.Get())
+					{
+						SaveMenuInstance = CreateWidget<UMyActivatableWidgetBase>(CachedPC, LoadedClass);
+						if (SaveMenuInstance)
+						{
+							SaveMenuInstance->AddToViewport(10); // 存档界面层级
+							SaveMenuInstance->SetVisibility(ESlateVisibility::Hidden);
+							SaveMenuInstance->OnCloseRequested.AddUniqueDynamic(this, &UMyUIHandlerComponent::HandleSaveMenuCloseRequested);
+
+							GetWorld()->GetTimerManager().SetTimerForNextTick([this]() {
+								if (SaveMenuInstance && !bIsSaveMenuOpen) SaveMenuInstance->SetVisibility(ESlateVisibility::Collapsed);
+								});
+						}
+					}
+				});
+		}
+	}
 }
 
 void UMyUIHandlerComponent::UpdateHUD()
@@ -93,22 +186,26 @@ void UMyUIHandlerComponent::ToggleTacticalWidget(bool bShouldOpen)
 	if (bIsTacticalUIOpen == bShouldOpen) return;
 
 	// 懒加载模式：如果战术 UI 实例还未创建，且蓝图里配置了具体的类模板，则开始创建
-	if (!TacticalWidgetInstance && TacticalWidgetClass)
+	// 【适配预热保底】：即使玩家在开局前 2 秒预热没跑完时就按了键，使用 LoadSynchronous() 保底瞬间加载
+	if (!TacticalWidgetInstance && !TacticalWidgetClass.IsNull())
 	{
 		// 在当前控制器的内存名下创建这个战术 UI 蓝图的实例
-		TacticalWidgetInstance = CreateWidget<UMyActivatableWidgetBase>(CachedPC, TacticalWidgetClass);
-
-		// 确保 UI 实例创建成功
-		if (TacticalWidgetInstance)
+		if (UClass* LoadedClass = TacticalWidgetClass.LoadSynchronous())
 		{
-			// 添加到屏幕视口，ZOrder 设置为 100 保证它盖在游戏画面和其他普通 UI 之上
-			// ZOrder（Z 轴排序/层级），数字越大，这个 UI 所在的层就越靠前，会遮挡住底下的 UI
-			TacticalWidgetInstance->AddToViewport(100);
-			// 初始创建时强制设为隐藏（Collapsed），防止在还没播放动画时出现一帧的画面闪烁
-			TacticalWidgetInstance->SetVisibility(ESlateVisibility::Collapsed);
+			TacticalWidgetInstance = CreateWidget<UMyActivatableWidgetBase>(CachedPC, LoadedClass);
 
-			// 绑定到当前组件特制的转发函数，用于通知控制器！
-			TacticalWidgetInstance->OnCloseRequested.AddUniqueDynamic(this, &UMyUIHandlerComponent::HandleWidgetCloseRequested);
+			// 确保 UI 实例创建成功
+			if (TacticalWidgetInstance)
+			{
+				// 添加到屏幕视口，ZOrder 设置为 100 保证它盖在游戏画面和其他普通 UI 之上
+				// ZOrder（Z 轴排序/层级），数字越大，这个 UI 所在的层就越靠前，会遮挡住底下的 UI
+				TacticalWidgetInstance->AddToViewport(100);
+				// 初始创建时强制设为隐藏（Collapsed），防止在还没播放动画时出现一帧的画面闪烁
+				TacticalWidgetInstance->SetVisibility(ESlateVisibility::Collapsed);
+
+				// 绑定到当前组件特制的转发函数，用于通知控制器！
+				TacticalWidgetInstance->OnCloseRequested.AddUniqueDynamic(this, &UMyUIHandlerComponent::HandleWidgetCloseRequested);
+			}
 		}
 	}
 
@@ -174,14 +271,18 @@ void UMyUIHandlerComponent::ToggleSaveMenuWidget(bool bShouldOpen)
 	if (bIsSaveMenuOpen == bShouldOpen) return;
 
 	// 懒加载模式：创建存档面板实例
-	if (!SaveMenuInstance && SaveMenuClass)
+	// 【适配预热保底】：如果玩家在后台 3.5 秒预热完成前就跑去点了存档点，提供强制同步加载保底
+	if (!SaveMenuInstance && !SaveMenuClass.IsNull())
 	{
-		SaveMenuInstance = CreateWidget<UMyActivatableWidgetBase>(CachedPC, SaveMenuClass);
-		if (SaveMenuInstance)
+		if (UClass* LoadedClass = SaveMenuClass.LoadSynchronous())
 		{
-			SaveMenuInstance->AddToViewport(10);
-			SaveMenuInstance->SetVisibility(ESlateVisibility::Collapsed);
-			SaveMenuInstance->OnCloseRequested.AddUniqueDynamic(this, &UMyUIHandlerComponent::HandleSaveMenuCloseRequested);
+			SaveMenuInstance = CreateWidget<UMyActivatableWidgetBase>(CachedPC, LoadedClass);
+			if (SaveMenuInstance)
+			{
+				SaveMenuInstance->AddToViewport(10);
+				SaveMenuInstance->SetVisibility(ESlateVisibility::Collapsed);
+				SaveMenuInstance->OnCloseRequested.AddUniqueDynamic(this, &UMyUIHandlerComponent::HandleSaveMenuCloseRequested);
+			}
 		}
 	}
 

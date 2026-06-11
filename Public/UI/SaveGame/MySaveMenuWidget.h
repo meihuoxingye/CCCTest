@@ -8,7 +8,7 @@
 
 class UButton;
 class UTextBlock;
-class UScrollBox;
+class UListView; // 替换了 UScrollBox
 class UMySaveSlotWidget;
 
 // ==============================================================================
@@ -29,13 +29,15 @@ protected:
 	// ==============================================================================
 
 	UPROPERTY(meta = (BindWidget))
-	TObjectPtr<UScrollBox> Scroll_SlotList;
+	TObjectPtr<UListView> List_SaveSlots; // 将 Scroll_SlotList 替换为 ListView
 
 	// 暴露给蓝图，让美术指定要生成哪个槽位蓝图 (比如 WBP_SaveSlot)
 	UPROPERTY(EditDefaultsOnly, Category = "SaveMenu|Classes")
 	TSubclassOf<UMySaveSlotWidget> SlotWidgetClass;
 
 	// 执行 C++ 极速列表构建
+	// <--- 【必须加上这顶帽子！！！】
+	UFUNCTION() 
 	void BuildSaveSlotList();
 
 	// ==============================================================================

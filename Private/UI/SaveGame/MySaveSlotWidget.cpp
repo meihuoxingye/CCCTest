@@ -4,17 +4,14 @@
 #include "Components/Button.h"
 #include "Engine/GameInstance.h"
 #include "SaveGame/Subsystem/MySaveSubsystem.h"
+#include "UI/SaveGame/MySaveDataObj.h"
 
-// ==============================================================================
-// 存档槽位条目基类 (Save Slot Entry Widget Base)
-// ==============================================================================
 #pragma region
 
 void UMySaveSlotWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 
-	// 纯 C++ 绑定按钮，蓝图里连线都不用拉了
 	if (Btn_Save)
 	{
 		Btn_Save->OnClicked.AddDynamic(this, &UMySaveSlotWidget::OnSaveButtonClicked);
@@ -23,30 +20,32 @@ void UMySaveSlotWidget::NativeConstruct()
 	{
 		Btn_Load->OnClicked.AddDynamic(this, &UMySaveSlotWidget::OnLoadButtonClicked);
 	}
-	// 【新增 1】：绑定删除事件
 	if (Btn_DeleteSlot)
 	{
 		Btn_DeleteSlot->OnClicked.AddDynamic(this, &UMySaveSlotWidget::OnDeleteSlotClicked);
 	}
 }
 
-void UMySaveSlotWidget::InitializeSlotData(const FSaveSlotMetaData& SlotMetaData)
+// ListView 循环复用该控件时，会把轻量级的 DataObj 塞进来
+void UMySaveSlotWidget::NativeOnListItemObjectSet(UObject* ListItemObject)
 {
-	CachedSlotName = SlotMetaData.SlotName;
+	if (UMySaveDataObj* DataObj = Cast<UMySaveDataObj>(ListItemObject))
+	{
+		// 更新真名缓存，供按钮使用
+		CachedSlotName = DataObj->MetaData.SlotName;
 
-	// 通知蓝图更新文本等纯视觉表现
-	BP_OnSlotDataInitialized(SlotMetaData);
+		// 呼叫蓝图更改 UI 的文本和图像显示
+		BP_OnSlotDataInitialized(DataObj->MetaData);
+	}
 }
 
 void UMySaveSlotWidget::OnSaveButtonClicked()
 {
 	if (CachedSlotName.IsEmpty()) return;
-
 	if (UGameInstance* GI = GetGameInstance())
 	{
 		if (UMySaveSubsystem* SaveSub = GI->GetSubsystem<UMySaveSubsystem>())
 		{
-			// 触发异步覆盖写入
 			SaveSub->PerformAsyncSave(CachedSlotName);
 		}
 	}
@@ -55,12 +54,10 @@ void UMySaveSlotWidget::OnSaveButtonClicked()
 void UMySaveSlotWidget::OnLoadButtonClicked()
 {
 	if (CachedSlotName.IsEmpty()) return;
-
 	if (UGameInstance* GI = GetGameInstance())
 	{
 		if (UMySaveSubsystem* SaveSub = GI->GetSubsystem<UMySaveSubsystem>())
 		{
-			// 触发时空回溯 (物理位置与系统状态瞬移)
 			SaveSub->LoadGameFromSlot(CachedSlotName);
 		}
 	}
@@ -69,12 +66,10 @@ void UMySaveSlotWidget::OnLoadButtonClicked()
 void UMySaveSlotWidget::OnDeleteSlotClicked()
 {
 	if (CachedSlotName.IsEmpty()) return;
-
 	if (UGameInstance* GI = GetGameInstance())
 	{
 		if (UMySaveSubsystem* SaveSub = GI->GetSubsystem<UMySaveSubsystem>())
 		{
-			// 利用已经缓存好的真名，申请人道毁灭
 			SaveSub->DeleteSaveSlot(CachedSlotName);
 		}
 	}

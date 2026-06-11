@@ -4,7 +4,8 @@
 #include "UI/SaveGame/MySaveSlotWidget.h"
 #include "Components/Button.h"
 #include "Components/TextBlock.h"
-#include "Components/ScrollBox.h"
+#include "Components/ListView.h" // 替换了 ScrollBox.h
+#include "UI/SaveGame/MySaveDataObj.h" // 引入数据壳子
 #include "SaveGame/Subsystem/MySaveSubsystem.h"
 #include "Engine/GameInstance.h"
 #include "TimerManager.h"
@@ -54,9 +55,9 @@ void UMySaveMenuWidget::NativeDestruct()
 
 void UMySaveMenuWidget::BuildSaveSlotList()
 {
-	if (!Scroll_SlotList || !SlotWidgetClass) return;
+	if (!List_SaveSlots) return;
 
-	Scroll_SlotList->ClearChildren();
+	List_SaveSlots->ClearListItems();
 
 	// 【附带修复】：每次刷新列表，清空状态文本
 	if (Text_SaveStatus)
@@ -73,11 +74,10 @@ void UMySaveMenuWidget::BuildSaveSlotList()
 			// C++ 极速实例化并推入滚动框
 			for (const FSaveSlotMetaData& Meta : MetaList)
 			{
-				if (UMySaveSlotWidget* NewSlotWidget = CreateWidget<UMySaveSlotWidget>(this, SlotWidgetClass))
-				{
-					NewSlotWidget->InitializeSlotData(Meta);
-					Scroll_SlotList->AddChild(NewSlotWidget);
-				}
+				// 将数据装入 UObject 壳子并喂给 ListView
+				UMySaveDataObj* DataObj = NewObject<UMySaveDataObj>();
+				DataObj->MetaData = Meta;
+				List_SaveSlots->AddItem(DataObj);
 			}
 		}
 	}
