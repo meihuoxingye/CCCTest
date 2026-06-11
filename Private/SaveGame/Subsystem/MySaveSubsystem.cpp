@@ -85,6 +85,31 @@ void UMySaveSubsystem::OnAsyncSaveComplete(const FString& SlotName, const int32 
 	OnSaveFinished.Broadcast(bSuccess);
 }
 
+bool UMySaveSubsystem::DeleteSaveSlot(const FString& SlotName)
+{
+	// 1. 物理删除硬盘文件
+	if (UGameplayStatics::DoesSaveGameExist(SlotName, 0))
+	{
+		UGameplayStatics::DeleteGameInSlot(SlotName, 0);
+	}
+
+	// 2. 抹除注册表记录
+	const FString RegistrySlot = TEXT("GlobalSaveRegistry");
+	if (UGameplayStatics::DoesSaveGameExist(RegistrySlot, 0))
+	{
+		if (UMySaveRegistry* Registry = Cast<UMySaveRegistry>(UGameplayStatics::LoadGameFromSlot(RegistrySlot, 0)))
+		{
+			Registry->SaveSlots.Remove(SlotName);
+			UGameplayStatics::SaveGameToSlot(Registry, RegistrySlot, 0);
+		}
+	}
+
+	// 3. 【核心】：敲响大喇叭！通知主面板立刻刷新滚动框！
+	OnSaveRegistryChanged.Broadcast();
+
+	return true;
+}
+
 bool UMySaveSubsystem::LoadGameFromSlot(const FString& SlotName)
 {
 	if (!UGameplayStatics::DoesSaveGameExist(SlotName, 0)) return false;

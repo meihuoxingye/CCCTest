@@ -23,6 +23,11 @@ void UMySaveSlotWidget::NativeConstruct()
 	{
 		Btn_Load->OnClicked.AddDynamic(this, &UMySaveSlotWidget::OnLoadButtonClicked);
 	}
+	// 【新增 1】：绑定删除事件
+	if (Btn_DeleteSlot)
+	{
+		Btn_DeleteSlot->OnClicked.AddDynamic(this, &UMySaveSlotWidget::OnDeleteSlotClicked);
+	}
 }
 
 void UMySaveSlotWidget::InitializeSlotData(const FSaveSlotMetaData& SlotMetaData)
@@ -57,6 +62,20 @@ void UMySaveSlotWidget::OnLoadButtonClicked()
 		{
 			// 触发时空回溯 (物理位置与系统状态瞬移)
 			SaveSub->LoadGameFromSlot(CachedSlotName);
+		}
+	}
+}
+
+void UMySaveSlotWidget::OnDeleteSlotClicked()
+{
+	if (CachedSlotName.IsEmpty()) return;
+
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UMySaveSubsystem* SaveSub = GI->GetSubsystem<UMySaveSubsystem>())
+		{
+			// 利用已经缓存好的真名，申请人道毁灭
+			SaveSub->DeleteSaveSlot(CachedSlotName);
 		}
 	}
 }

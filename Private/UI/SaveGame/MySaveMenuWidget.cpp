@@ -19,22 +19,22 @@ void UMySaveMenuWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 
-	// 1. 绑定新建档位按钮
 	if (Btn_CreateNewSave)
 	{
 		Btn_CreateNewSave->OnClicked.AddDynamic(this, &UMySaveMenuWidget::OnCreateNewSaveClicked);
 	}
 
-	// 2. 监听全局总线：无论哪个子槽位触发了存档，主面板都能听到并更新 UI 状态
 	if (UGameInstance* GI = GetGameInstance())
 	{
 		if (UMySaveSubsystem* SaveSub = GI->GetSubsystem<UMySaveSubsystem>())
 		{
 			SaveSub->OnSaveFinished.AddDynamic(this, &UMySaveMenuWidget::HandleSaveFinished);
+
+			// 【修复 3】：只要大管家喊“删档了”，这里全自动调用你写好的极速重建函数！
+			SaveSub->OnSaveRegistryChanged.AddDynamic(this, &UMySaveMenuWidget::BuildSaveSlotList);
 		}
 	}
 
-	// 3. 构建动态列表
 	BuildSaveSlotList();
 }
 
@@ -45,6 +45,8 @@ void UMySaveMenuWidget::NativeDestruct()
 		if (UMySaveSubsystem* SaveSub = GI->GetSubsystem<UMySaveSubsystem>())
 		{
 			SaveSub->OnSaveFinished.RemoveDynamic(this, &UMySaveMenuWidget::HandleSaveFinished);
+			// 【安全解绑】
+			SaveSub->OnSaveRegistryChanged.RemoveDynamic(this, &UMySaveMenuWidget::BuildSaveSlotList);
 		}
 	}
 	Super::NativeDestruct();
@@ -55,6 +57,12 @@ void UMySaveMenuWidget::BuildSaveSlotList()
 	if (!Scroll_SlotList || !SlotWidgetClass) return;
 
 	Scroll_SlotList->ClearChildren();
+
+	// 【附带修复】：每次刷新列表，清空状态文本
+	if (Text_SaveStatus)
+	{
+		Text_SaveStatus->SetText(FText::GetEmpty());
+	}
 
 	if (UGameInstance* GI = GetGameInstance())
 	{
@@ -106,18 +114,20 @@ void UMySaveMenuWidget::HandleSaveFinished(bool bSuccess)
 			Text_SaveStatus->SetText(FText::FromString(TEXT("数据同步完成。")));
 		}
 
+		// ==========================================
+		// 【修复 1】：立刻重建列表，让新建立的存档瞬间刷新出来！
+		// ==========================================
+		BuildSaveSlotList();
+
+		// ==========================================
+		// 【修复 2】：立刻把变灰的按钮恢复。因为 UI 是常驻内存的，不恢复的话下次打开依然是灰的！
+		// ==========================================
+		if (Btn_CreateNewSave)
+		{
+			Btn_CreateNewSave->SetIsEnabled(true);
+		}
+
 		BP_PlaySaveSuccessAnimation();
-
-		FTimerHandle TimerHandle;
-		TWeakObjectPtr<UMySaveMenuWidget> WeakThis(this);
-
-		GetWorld()->GetTimerManager().SetTimer(TimerHandle, [WeakThis]()
-			{
-				if (WeakThis.IsValid())
-				{
-					WeakThis->OnWidgetDeactivated();
-				}
-			}, 0.6f, false);
 	}
 	else
 	{

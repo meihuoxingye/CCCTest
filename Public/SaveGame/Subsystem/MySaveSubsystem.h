@@ -10,8 +10,10 @@
 // 供 UI 监听的异步完成委托
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSaveFinishedSignature, bool, bSuccess);
 
+// 【修复新增】：声明存档名册变动大喇叭（无参数）
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnSaveRegistryChangedSignature);
+
 // 【核心解耦：全局读写总线】
-// 不使用 DYNAMIC，使用原生 C++ 多播委托，性能最高，且不需要经过反射系统
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnGameSavingSignature, UMySaveGame* /*SaveObj*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnGameLoadingSignature, UMySaveGame* /*SaveObj*/);
 
@@ -32,14 +34,19 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "SaveSystem|Events")
 	FOnSaveFinishedSignature OnSaveFinished;
 
-	// 【新增】：存档广播频道（下达收集数据的指令）
-	FOnGameSavingSignature OnGameSaving;
+	// 【修复新增】：实例化删档大喇叭
+	UPROPERTY(BlueprintAssignable, Category = "SaveSystem|Events")
+	FOnSaveRegistryChangedSignature OnSaveRegistryChanged;
 
-	// 【新增】：读档广播频道（下达分发数据的指令）
+	FOnGameSavingSignature OnGameSaving;
 	FOnGameLoadingSignature OnGameLoading;
 
 	UFUNCTION(BlueprintCallable, Category = "SaveSystem|Execution")
 	void PerformAsyncSave(const FString& SlotName);
+
+	// 【修复新增】：物理删除指定存档接口
+	UFUNCTION(BlueprintCallable, Category = "SaveSystem|Execution")
+	bool DeleteSaveSlot(const FString& SlotName);
 
 	UFUNCTION(BlueprintCallable, Category = "SaveSystem|Execution")
 	bool LoadGameFromSlot(const FString& SlotName);

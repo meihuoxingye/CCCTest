@@ -40,11 +40,19 @@ protected:
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UButton> Btn_Load;
 
+	// 【新增 1】：绑定蓝图里的删除按钮 (确保你在蓝图里命名为 Btn_DeleteSlot)
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UButton> Btn_DeleteSlot;
+
 	UFUNCTION()
 	void OnSaveButtonClicked();
 
 	UFUNCTION()
 	void OnLoadButtonClicked();
+
+	// 【新增 2】：删除按钮的回调函数
+	UFUNCTION()
+	void OnDeleteSlotClicked();
 
 	// 蓝图必须实现的事件：用于将 C++ 数据渲染到文本框上
 	UFUNCTION(BlueprintImplementableEvent, Category = "SaveSystem|Slot")
