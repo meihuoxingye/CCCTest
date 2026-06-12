@@ -92,7 +92,7 @@ private:
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<class UButton> AvatarButton;
 
-	// 当玩家鼠标点击了这张头像卡片时，UI 的底层 UButton 立刻向换人子系统发广播，传递换人请求和角色指针；
+	// 当玩家鼠标点击了这张头像卡片时，UI 的底层 UButton 立刻向控制器递交换人请求；
 	// 必须加 UFUNCTION()！虚幻委托经过引擎反射系统；
 	// UI 到此为止绝不立刻改高亮！广播发出的瞬间，玩家控制器会听到请求并进行合法性仲裁
 	UFUNCTION()

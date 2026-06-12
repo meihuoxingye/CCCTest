@@ -14,8 +14,10 @@
 // 用于在运行时动态修改材质参数
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Components/Button.h"
+// 【必须保留！】因为 NativeOnInitialized 和 NativeDestruct 需要监听下行广播
 #include "SwitchSubsystem/CharacterSwitchSubsystem.h"
-
+// 【新增】：契约接口，UI 向上级发送请求用
+#include "Interaction/MyPlayerUIInterface.h"
 
 // ==============================================================================
 // 核心生命周期与初始化 (Core Lifecycle & Initialization)
@@ -255,14 +257,20 @@ void UMyCharacterStatusWidget::OnAvatarClicked()
 	// 只有确保肉体有效，才允许发起切换请求，杜绝向总线抛出脏数据（野指针）
 	if (!CachedCharacterRef.IsValid()) return;
 
-	if (UWorld* World = GetWorld())
+	// 2. 【契约调用：点对点发送意图】：
+	// UI 根本不需要大喇叭广播，它只是通过 UI 通信契约，
+	// 把“自己绑定的角色指针”拍给拥有它的玩家控制器，申请灵魂交接
+	if (APlayerController* PC = GetOwningPlayer())
 	{
-		if (UCharacterSwitchSubsystem* SwitchSub = World->GetSubsystem<UCharacterSwitchSubsystem>())
+		// Implements 就是反射系统提供的一个安全查询函数，检查是否存在接口实现
+		if (PC->Implements<UMyPlayerUIInterface>())
 		{
-			// 2. 【频道一：发射意图】：
-			// 这就是我们说的“盲发广播”。UI 根本不知道控制器在哪，它只是把“自己绑定的角色指针（Payload）”
-			// 拍在子系统的公共黑板上，然后大喊一声：“有人请求把灵魂转移给这个人！”
-			SwitchSub->OnSwitchRequest.Broadcast(CachedCharacterRef.Get());
+			// 接口发起方，带Execute_
+			// Execute_ 的作用：它会去检查 PC 的底细，如果 PC 有蓝图节点，就去触发蓝图；
+			// 如果只有 C++ 代码，就去执行 PC 的 RequestCharacterSwitch_Implementation 函数。
+			// PC：接收执行方；CachedCharacterRef.Get()：传递的数据
+			// .Get()：之前在头文件里，为了防内存泄漏，把 CachedCharacterRef 定义成了弱指针，需要强行转回普通指针才能用
+			IMyPlayerUIInterface::Execute_RequestCharacterSwitch(PC, CachedCharacterRef.Get());
 		}
 	}
 }

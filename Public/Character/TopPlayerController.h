@@ -5,6 +5,8 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
 #include "InputActionValue.h"
+// 【新增】：包含 UI 契约接口
+#include "Interaction/MyPlayerUIInterface.h"
 #include "TopPlayerController.generated.h"
 
 class UTimeDilationHubComponent;
@@ -14,7 +16,7 @@ class UInputMappingContext;
 class UInputAction;
 
 UCLASS()
-class CCC_API ATopPlayerController : public APlayerController
+class CCC_API ATopPlayerController : public APlayerController, public IMyPlayerUIInterface // 【新增】：继承接口
 {
 	GENERATED_BODY()
 
@@ -64,6 +66,19 @@ public:
 	// 【修改】：处理中键按下时的战术模式（子弹时间与 UI）宏观统筹切换
 	UFUNCTION()
 	void ToggleTacticalMode();
+
+
+	// ==============================================================================
+	// 玩家 UI 交互契约实现 (Player UI Interface Implementation)
+	// ==============================================================================
+public:
+	// 契约 1：处理呼出/关闭存档面板请求
+	virtual void ToggleSaveMenu_Implementation() override;
+
+	// 契约 2：处理 UI 发来的换人请求
+	// 发起方：UMyCharacterStatusWidget::OnAvatarClicked()：当玩家点击角色头像时
+	// 接收方：ATopPlayerController::RequestCharacterSwitch_Implementation()：转接到具体处理角色附身逻辑的函数
+	virtual void RequestCharacterSwitch_Implementation(class ABaseCharacter* TargetCharacter) override;
 
 
 	// ==============================================================================

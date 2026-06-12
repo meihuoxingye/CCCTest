@@ -328,6 +328,26 @@ FReply UMyActivatableWidgetBase::NativeOnMouseButtonDown(const FGeometry& InGeom
 	return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
 }
 
+FReply UMyActivatableWidgetBase::NativeOnMouseButtonDoubleClick(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	// 1. 同样的免检放行逻辑
+	if (IsPassthroughAction(InMouseEvent.GetEffectingButton()))
+	{
+		return FReply::Unhandled();
+	}
+
+	// 2. 同样的保留父类与蓝图处理权
+	FReply Reply = Super::NativeOnMouseButtonDoubleClick(InGeometry, InMouseEvent);
+
+	// 3. 【终极防线】：将漏网的双击信号强行斩断，绝不让它接触到底层 3D 世界！
+	if (!Reply.IsEventHandled())
+	{
+		return FReply::Handled();
+	}
+
+	return Reply;
+}
+
 FReply UMyActivatableWidgetBase::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
 {
 	// 【动态动作寻址】：向 O(1) 缓存查询当前按下的物理键（无论键盘还是手柄）是否隶属于蓝图配置的免检动作名单。

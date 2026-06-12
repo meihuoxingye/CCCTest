@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+//// Fill out your copyright notice in the Description page of Project Settings.
 #include "Character/TopPlayerController.h"
 // 增强输入
 #include "EnhancedInputComponent.h"
@@ -60,15 +60,6 @@ void ATopPlayerController::BeginPlay()
 
 	// 应用键盘鼠标输入配置
 	SetInputMode(InputModeData);
-
-	// 架构精髓：解耦。UI 蓝图不会直接获取 PlayerController 的指针，然后强行调用换人函数，而是向换人子系统的 OnSwitchRequest频道 广播
-	// 而控制器找到中央子系统，告诉它：“如果有人在 OnSwitchRequest 频道发广播，请立刻调用我身上的 SwitchToSpecificCharacter 函数！”
-	if (UCharacterSwitchSubsystem* SwitchSub = GetWorld()->GetSubsystem<UCharacterSwitchSubsystem>())
-	{
-		// 绑定 SwitchToSpecificCharacter 函数到 OnSwitchRequest 频道上
-		// 虚幻底层会自动为你创建一个安全弱引用：万一这个控制器被销毁了，这根网线会自动断开，绝对不会导致野指针崩溃
-		SwitchSub->OnSwitchRequest.AddUObject(this, &ATopPlayerController::SwitchToSpecificCharacter);
-	}
 }
 
 #pragma endregion
@@ -209,6 +200,30 @@ void ATopPlayerController::SwitchToSpecificCharacter(ATopCharacter* TargetCharac
 
 	// 同上：确保附身新躯体后，玩家能立刻用键盘鼠标操控角色，而不是按键继续被 UI 吞噬
 	FSlateApplication::Get().SetAllUserFocusToGameViewport();
+}
+
+#pragma endregion
+
+// ==============================================================================
+// 玩家 UI 交互契约实现 (Player UI Interface Implementation)
+// ==============================================================================
+#pragma region
+
+void ATopPlayerController::ToggleSaveMenu_Implementation()
+{
+	if (UIHandlerComp)
+	{
+		UIHandlerComp->ToggleSaveMenuWidget();
+	}
+}
+
+void ATopPlayerController::RequestCharacterSwitch_Implementation(ABaseCharacter* TargetCharacter)
+{
+	// UI 通过契约点对点发来的请求，直接复用已有的完美切人逻辑
+	if (ATopCharacter* CastedChar = Cast<ATopCharacter>(TargetCharacter))
+	{
+		SwitchToSpecificCharacter(CastedChar);
+	}
 }
 
 #pragma endregion

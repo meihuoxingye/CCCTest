@@ -1,5 +1,4 @@
 // Fill out your copyright notice in the Description page of Project Settings.
-
 #include "SaveGame/Actors/MySaveStationActor.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -10,21 +9,20 @@
 #include "UI/ActivatableWidget/MyActivatableWidgetBase.h" // 请根据你工程的实际路径确认
 #include "GameFramework/PlayerController.h"
 #include "Engine/LocalPlayer.h"
-
 // 【新增】：引入角色核心定义，消除 C2027 未定义类型错误
 #include "GameFramework/Character.h"
-
 // 【新增：日志组件】
 #include "Engine/Engine.h"
 
-// 记得在顶部包含组件头文件
-#include "Component/UI/MyUIHandlerComponent.h"
+// 记得在顶部包含组件头文件 
+// （为了实现零耦合，此处将原先的 MyUIHandlerComponent.h 替换为刚刚建立的 UI 契约）
+#include "Interaction/MyPlayerUIInterface.h"
+
 
 // ==============================================================================
 // 物理存档终端 (Physical Save Station Actor)
 // ==============================================================================
 #pragma region
-
 AMySaveStationActor::AMySaveStationActor()
 {
 	PrimaryActorTick.bCanEverTick = false;
@@ -46,11 +44,11 @@ void AMySaveStationActor::Interact_Implementation(ACharacter* Interactor)
 	// 1. 先获取角色的玩家控制器
 	if (APlayerController* PC = Cast<APlayerController>(Interactor->GetController()))
 	{
-		// 2. 从玩家控制器身上，抓取 UI 处理器组件
-		if (UMyUIHandlerComponent* UIComp = PC->FindComponentByClass<UMyUIHandlerComponent>())
+		// 2. 从玩家控制器身上，检查是否签订了 UI 契约 (绝不去查组件户口)
+		if (PC->Implements<UMyPlayerUIInterface>())
 		{
-			// 3. 无脑翻转状态
-			UIComp->ToggleSaveMenuWidget();
+			// 3. 无脑翻转状态 (通过契约盲发指令，彻底解耦 UI 组件)
+			IMyPlayerUIInterface::Execute_ToggleSaveMenu(PC);
 		}
 	}
 }
@@ -65,5 +63,4 @@ int32 AMySaveStationActor::GetInteractionPriority_Implementation() const
 	// 赋予核心设施最高优先级 (如 10)，彻底碾压常规掉落物 (默认 0)
 	return 10;
 }
-
 #pragma endregion

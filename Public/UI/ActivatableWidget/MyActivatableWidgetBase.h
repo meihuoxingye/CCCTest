@@ -199,6 +199,9 @@ protected:
 	 */
 	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 
+	// 【新增】：双击物理防穿透盾牌
+	virtual FReply NativeOnMouseButtonDoubleClick(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+
 	/** * 【键盘/手柄快捷键断路器】：裁决当前的按键输入是“漏回给全局系统（触发快捷键）”，还是“被 UI 独吞屏蔽（防走位）”。
 	 * @调用机制：引擎 UI 框架事件驱动全自动调用。
 	 * @调用者：FSlateApplication（虚幻全局 UI 交互大总管）。
