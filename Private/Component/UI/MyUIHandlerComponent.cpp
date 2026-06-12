@@ -94,20 +94,23 @@ void UMyUIHandlerComponent::ProcessNextWarmup()
 			FStreamableManager& Streamable = UAssetManager::GetStreamableManager();
 			Streamable.RequestAsyncLoad(TacticalWidgetClass.ToSoftObjectPath(), [this]()
 				{
-					if (UClass* LoadedClass = TacticalWidgetClass.Get())
+					// 【防抢占锁】：如果玩家手速极快，在 2 秒内已经按 Tab 触发了同步保底加载，
+					// 那么实例已存在，绝不能覆盖指针！直接跳过本次创建。
+					if (!TacticalWidgetInstance)
 					{
-						// 【核心】：直接创建真正的实例，绝不销毁！
-						TacticalWidgetInstance = CreateWidget<UMyActivatableWidgetBase>(CachedPC, LoadedClass);
-						if (TacticalWidgetInstance)
+						if (UClass* LoadedClass = TacticalWidgetClass.Get())
 						{
-							TacticalWidgetInstance->AddToViewport(-999); // 垫在最底层
-							TacticalWidgetInstance->SetVisibility(ESlateVisibility::Hidden); // Hidden：强制点火着色器与字体
-							TacticalWidgetInstance->OnCloseRequested.AddUniqueDynamic(this, &UMyUIHandlerComponent::HandleWidgetCloseRequested);
+							TacticalWidgetInstance = CreateWidget<UMyActivatableWidgetBase>(CachedPC, LoadedClass);
+							if (TacticalWidgetInstance)
+							{
+								TacticalWidgetInstance->AddToViewport(-999);
+								TacticalWidgetInstance->SetVisibility(ESlateVisibility::Hidden);
+								TacticalWidgetInstance->OnCloseRequested.AddUniqueDynamic(this, &UMyUIHandlerComponent::HandleWidgetCloseRequested);
 
-							// 让它 Hidden 运转一帧，下一帧悄悄转为最省性能的常驻 Collapsed 状态
-							GetWorld()->GetTimerManager().SetTimerForNextTick([this]() {
-								if (TacticalWidgetInstance && !bIsTacticalUIOpen) TacticalWidgetInstance->SetVisibility(ESlateVisibility::Collapsed);
-								});
+								GetWorld()->GetTimerManager().SetTimerForNextTick([this]() {
+									if (TacticalWidgetInstance && !bIsTacticalUIOpen) TacticalWidgetInstance->SetVisibility(ESlateVisibility::Collapsed);
+									});
+							}
 						}
 					}
 
@@ -129,18 +132,23 @@ void UMyUIHandlerComponent::ProcessNextWarmup()
 			FStreamableManager& Streamable = UAssetManager::GetStreamableManager();
 			Streamable.RequestAsyncLoad(SaveMenuClass.ToSoftObjectPath(), [this]()
 				{
-					if (UClass* LoadedClass = SaveMenuClass.Get())
+					// 【防抢占锁】：如果玩家在 3.5 秒内已经摸到了存档点，触发了同步保底，
+					// 实例必然已存在，绝不覆盖指针！产生孤儿 UI 会导致面板永远无法关闭！
+					if (!SaveMenuInstance)
 					{
-						SaveMenuInstance = CreateWidget<UMyActivatableWidgetBase>(CachedPC, LoadedClass);
-						if (SaveMenuInstance)
+						if (UClass* LoadedClass = SaveMenuClass.Get())
 						{
-							SaveMenuInstance->AddToViewport(10); // 存档界面层级
-							SaveMenuInstance->SetVisibility(ESlateVisibility::Hidden);
-							SaveMenuInstance->OnCloseRequested.AddUniqueDynamic(this, &UMyUIHandlerComponent::HandleSaveMenuCloseRequested);
+							SaveMenuInstance = CreateWidget<UMyActivatableWidgetBase>(CachedPC, LoadedClass);
+							if (SaveMenuInstance)
+							{
+								SaveMenuInstance->AddToViewport(10);
+								SaveMenuInstance->SetVisibility(ESlateVisibility::Hidden);
+								SaveMenuInstance->OnCloseRequested.AddUniqueDynamic(this, &UMyUIHandlerComponent::HandleSaveMenuCloseRequested);
 
-							GetWorld()->GetTimerManager().SetTimerForNextTick([this]() {
-								if (SaveMenuInstance && !bIsSaveMenuOpen) SaveMenuInstance->SetVisibility(ESlateVisibility::Collapsed);
-								});
+								GetWorld()->GetTimerManager().SetTimerForNextTick([this]() {
+									if (SaveMenuInstance && !bIsSaveMenuOpen) SaveMenuInstance->SetVisibility(ESlateVisibility::Collapsed);
+									});
+							}
 						}
 					}
 				});

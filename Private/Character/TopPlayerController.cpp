@@ -219,6 +219,18 @@ void ATopPlayerController::ToggleSaveMenu_Implementation()
 
 void ATopPlayerController::RequestCharacterSwitch_Implementation(ABaseCharacter* TargetCharacter)
 {
+	// 【找回被我私自删掉的逻辑】：状态防火墙！
+	// 绝对不允许在“非切人模式”下响应任何 UI 的换人请求。
+	// 拦截玩家在正常游戏流逝下，直接点击头像导致的“非法强切”。
+	if (!IsSwitchModeActive())
+	{
+		// 防卡死：由于玩家鼠标点击了 UI，UI 底层机制会瞬间抢走输入焦点。
+		// 此时既然我们拒绝了换人请求，就必须立刻把焦点一脚踢回给 3D 游戏视口，
+		// 否则玩家接下来按 WASD 或空格键将会毫无反应！
+		FSlateApplication::Get().SetAllUserFocusToGameViewport();
+		return;
+	}
+
 	// UI 通过契约点对点发来的请求，直接复用已有的完美切人逻辑
 	if (ATopCharacter* CastedChar = Cast<ATopCharacter>(TargetCharacter))
 	{
