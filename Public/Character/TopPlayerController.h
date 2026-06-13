@@ -33,12 +33,12 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UTimeDilationHubComponent> TimeDilationHub;
 
-	// 【核心挂件】：UI 统筹组件，全权负责 UI 的实例化、入栈出栈以及面板渲染刷新
+	// 【核心挂件】：UI 处理组件，全权负责 UI 的实例化、入栈出栈以及面板渲染刷新
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMyUIHandlerComponent> UIHandlerComp;
 
 public:
-	// 开放给外界索要 UI 统筹组件的快捷接口
+	// 开放给外界索要 UI 处理组件的快捷接口
 	FORCEINLINE UMyUIHandlerComponent* GetUIHandler() const { return UIHandlerComp; }
 
 
