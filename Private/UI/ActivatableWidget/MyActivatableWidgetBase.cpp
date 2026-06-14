@@ -76,6 +76,12 @@ void UMyActivatableWidgetBase::OnWidgetActivated_Implementation()
 		}
 	}
 
+	// 【修改】：读取蓝图配置！如果是重度面板，就在这里释放“黑洞”，强行吸走焦点阻断 WASD 移动！
+	if (bAutoStealFocusWhenActivated)
+	{
+		SetFocus();
+	}
+
 	// --------------------------------------------------------------------------
 	// 【终极防闪烁装甲】：在将控制权交给蓝图之前，强行打断引擎队列，立刻执行底层排版！
 	// 这等同于蓝图里的 Force Layout Prepass 节点，它会逼迫 Slate 引擎立刻计算尺寸
@@ -139,6 +145,13 @@ void UMyActivatableWidgetBase::NativeOnInitialized()
 	TransitionProgress = 0.0f;
 	// 将 UI 的初始状态设置为待机（Idle）
 	CurrentState = EUIState::Idle;
+
+	// 【修改】：只有当策划勾选了“需要抢夺焦点”时，才在后台创建 UI 实例时底层赋予该 UI 获取焦点的资格
+	// 有资格不代表一定会抢到焦点，只有在 UI 展开逻辑 OnWidgetActivated_Implementation 调用 SetFocus() 时才会抢夺焦点
+	if (bAutoStealFocusWhenActivated)
+	{
+		SetIsFocusable(true);
+	}
 }
 
 void UMyActivatableWidgetBase::NativeConstruct()
@@ -294,7 +307,6 @@ void UMyActivatableWidgetBase::NativeDestruct()
 	Super::NativeDestruct();
 }
 
-// 【新增】：焦点丢失回调，防止 Alt-Tab 切屏后 UI 彻底失焦卡死
 void UMyActivatableWidgetBase::NativeOnFocusLost(const FFocusEvent& InFocusEvent)
 {
 	Super::NativeOnFocusLost(InFocusEvent);
@@ -358,9 +370,23 @@ FReply UMyActivatableWidgetBase::NativeOnKeyDown(const FGeometry& InGeometry, co
 		return FReply::Unhandled();
 	}
 
-	// 动作未命中：交由父类执行原生 UI 路由。
-	// 意义：在 UI 焦点层彻底销毁该按键信号（如 WASD 或空格），防止玩家在浏览 UI 期间，底层场景中的主角发生盲目的位移或误放技能。
-	return Super::NativeOnKeyDown(InGeometry, InKeyEvent);
+	// 动作未命中：交由父类执行原生按键信号销毁逻辑，并将处理结果存进 Reply 变量里
+	// 在 UI 焦点层彻底销毁该按键信号（如 WASD 或空格），防止玩家在浏览 UI 期间，底层场景中的主角发生盲目的位移或误放技能。
+	FReply Reply = Super::NativeOnKeyDown(InGeometry, InKeyEvent);
+
+	// 【新增】：终极补刀防线！
+	// 检查引擎底层的处理结果：!Reply.IsEventHandled()
+	// 如果 IsEventHandled() 为 false，说明引擎底层判定为 Unhandled
+	// 这代表它不认识这个在白名单之外的键位且没处理它
+	if (!Reply.IsEventHandled())
+	{
+		// 既然引擎底层不管（比如 WASD），那我们就强行把它吃掉！
+		// 强制返回 Handled()，告诉引擎：这个键已经被处理了，信号就地销毁！
+		return FReply::Handled();
+	}
+
+	// 如果引擎底层认识且处理了这个白名单之外的键，那就直接把原本的结果原样返回回去。
+	return Reply;
 }
 
 void UMyActivatableWidgetBase::RefreshInputPassthroughCache()

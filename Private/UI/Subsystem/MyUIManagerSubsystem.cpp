@@ -66,8 +66,12 @@ bool UMyUIManagerSubsystem::ProcessUIClick()
 			// 如果这个栈顶 UI 的状态机不等于 "正在关闭" （即处于展开中或静止展开完毕状态）
 			if (TopUI->GetCurrentState() != EUIState::Closing)
 			{
-				// 触发该面板的关闭请求信号，通知其自身或蓝图进行退场收尾工作
-				TopUI->OnCloseRequested.Broadcast();
+				// 【核心新增逻辑】：查阅该 UI 的档案，看它是否允许被背景点击强制关闭
+				if (TopUI->bCanBeClosedByBackgroundClick)
+				{
+					// 触发该面板的关闭请求信号，通知其自身或蓝图进行退场收尾工作
+					TopUI->OnCloseRequested.Broadcast();
+				}
 			}
 
 			// 只要栈里还有激活面板，这次在背景的点击就予以拦截，并关闭当前顶级菜单的交互

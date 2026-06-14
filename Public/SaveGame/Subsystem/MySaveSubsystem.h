@@ -45,7 +45,8 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "SaveSystem|Events")
 	FOnSaveFinishedSignature OnSaveFinished;
 
-	// 对外暴露的事件绑定点：注册表变化（UI 刷新用）
+	// 对外暴露的事件绑定点：当底层的 CachedRegistry 内存实例成功加载（从硬盘读入或新建兜底成功），或内部存档数据发生增删时广播
+	// 委托回调函数 UMySaveMenuWidget::BuildSaveSlotList() 用来刷新 UI
 	UPROPERTY(BlueprintAssignable, Category = "SaveSystem|Events")
 	FOnSaveRegistryChangedSignature OnSaveRegistryChanged;
 
@@ -55,7 +56,10 @@ public:
 	// C++ 内部总线：读取数据钩子
 	FOnGameLoadingSignature OnGameLoading;
 
-	// 异步加载注册表入口。在游戏刚启动或 UI 预热时调用，防止玩家点开存档面板时画面卡顿
+	// 在物理硬盘上后台异步识别并提取名为“GlobalSaveRegistry”的存档文件；
+	// 注：存档文件只有名称、时间、关卡标识的数据，不包含具体游戏状态数据（如玩家位置、血量等）。
+	// 并且绑定识别完毕时的单播委托回调函数 OnRegistryLoaded，将在回调函数把物理文件转为游戏数据
+	// UI 处理组件的 BeginPlay 中调用（等玩家出生 2 秒后，后台再开始调用）
 	void PreloadRegistry();
 
 	// 核心功能：非阻塞式异步存盘。传入档位名字即可
@@ -70,7 +74,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "SaveSystem|Execution")
 	bool LoadGameFromSlot(const FString& SlotName);
 
-	// 改为 O(1) 极速读内存。直接返回内存中缓存的档位列表，消除磁盘 IO 卡顿
+	// O(1) 极速读内存。直接返回内存中缓存的档位列表，消除磁盘 IO 卡顿
+	// UMySaveMenuWidget::BuildSaveSlotList() 构建列表时调用
 	UFUNCTION(BlueprintCallable, Category = "SaveSystem|Query")
 	TArray<FSaveSlotMetaData> GetSaveSlotList();
 
@@ -79,8 +84,9 @@ public:
 	// ==============================================================================
 private:
 
-	// 存档注册表的常驻内存镜像
-	// 只保存每个档位的“元数据”(名字、时间、关卡名)，不存具体血量位置，内存占用极小。
+	// 缓存的全局存档常驻内存目录表，本质上是继承自 USaveGame 的数据容器
+	// [数据功能] 仅存储所有槽位的索引元数据（名称、时间、关卡标识），不包含具体游戏状态数据（如玩家位置、血量等）。
+	// [生命周期] 通过 UPROPERTY 强引用标记，强制拦截垃圾回收(GC)巡检，防止此目录表被误销毁。
 	UPROPERTY()
 	TObjectPtr<UMySaveRegistry> CachedRegistry;
 
@@ -89,7 +95,9 @@ private:
 	// ==============================================================================
 private:
 
-	// 异步加载回调函数，当硬盘上的注册表读取到内存后自动触发
+	// 异步加载回调函数，当在硬盘上读取到存档文件内存后自动触发
+	// 将物理存档文件转换为的对象储存到 CachedRegistry 存档常驻内存目录表里
+	// 并且只有在储存成功的情况下，才在 OnSaveRegistryChanged 发送广播通知 UI 刷新列表
 	void OnRegistryLoaded(const FString& SlotName, const int32 UserIndex, USaveGame* LoadedGame);
 
 	// 内部工具：每次存盘时，更新内存镜像，并把最新的“目录”写进物理硬盘

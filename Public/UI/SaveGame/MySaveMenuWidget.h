@@ -22,7 +22,13 @@ class CCC_API UMySaveMenuWidget : public UMyActivatableWidgetBase
 	// ==============================================================================
 	// 核心生命周期与初始化 (Core Lifecycle & Initialization)
 	// ==============================================================================
+public:
+	// 构造函数
+	UMySaveMenuWidget();
+
 protected:
+	// UI 蓝图预构建阶段：负责在底层 Slate 控件成型前，处理属性配置（如剥夺按钮焦点）
+	virtual void NativePreConstruct() override;
 
 	// UI 的生命周期函数：创建时调用
 	virtual void NativeConstruct() override;

@@ -6,10 +6,40 @@
 #include "SaveGame/Subsystem/MySaveSubsystem.h"
 #include "UI/SaveGame/MySaveDataObj.h"
 
+
 // ==============================================================================
 // 生命周期与核心虚函数 (Lifecycle & Core Virtual Functions)
 // ==============================================================================
 #pragma region
+
+void UMySaveSlotWidget::NativePreConstruct()
+{
+	Super::NativePreConstruct();
+
+	// 无法通过 C++ 设置按钮能否聚焦，要到蓝图设置不可聚焦
+	/*
+	// 防御性编程：检查保存按钮是否已被蓝图正确绑定，防止蓝图损坏导致空指针崩溃
+	if (Btn_Save)
+	{
+		// 不允许按钮本身获取焦点
+		UMyUITools::SetButtonFocusable(Btn_Save, false);
+	}
+
+	// 检查读取按钮是否有效
+	if (Btn_Load)
+	{
+		// 不允许按钮本身获取焦点
+		UMyUITools::SetButtonFocusable(Btn_Load, false);
+	}
+
+	// 检查删除按钮是否有效
+	if (Btn_DeleteSlot)
+	{
+		// 不允许按钮本身获取焦点
+		UMyUITools::SetButtonFocusable(Btn_DeleteSlot, false);
+	}
+	*/
+}
 
 // 实现 UI 创建时的初始化逻辑
 void UMySaveSlotWidget::NativeConstruct()

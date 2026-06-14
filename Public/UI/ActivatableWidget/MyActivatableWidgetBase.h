@@ -102,6 +102,24 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Transition|Settings", meta = (ClampMin = "1.0"))
 	float ClosingExp = 1.0f;
 
+
+	// ==============================================================================
+	// 交互配置 (Interaction Configuration)
+	// ==============================================================================
+public:
+
+	// 控制开关：该面板是否允许玩家通过点击屏幕外（背景）的空白处来关闭它。
+	// 如果为 false，点击背景时依然会拦截开火信号，但不会关闭 UI，玩家只能通过显式的“关闭/返回”按钮或快捷键退出。
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Interaction")
+	bool bCanBeClosedByBackgroundClick = true;
+
+	// 控制开关：该面板在展开时，是否自动抢夺键盘/手柄的输入焦点？
+	// 如果为 true：UI 展开瞬间化身“输入黑洞”，玩家的 WASD 会被 NativeOnKeyDown 拦截吞噬，底层角色被定身。适合“重度面板”（如存档、全屏背包）。
+	// 如果为 false：UI 处于“礼貌状态”，只拦截鼠标点击，不管键盘输入。玩家可以一边看 UI 一边走路。适合“轻度面板”（如悬浮任务栏）。
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Interaction")
+	bool bAutoStealFocusWhenActivated = false;
+
+
 public:
 	// ==============================================================================
 	// 状态查询接口 (State Queries)
@@ -181,6 +199,7 @@ protected:
 	virtual void NativeDestruct() override;
 
 	// 【新增】：焦点丢失回调，防止 Alt-Tab 切屏后 UI 彻底失焦卡死
+	// 触发时机：在当前 UI 曾经拥有“输入焦点”的前提下，焦点被任何外部力量强行剥夺的瞬间
 	virtual void NativeOnFocusLost(const FFocusEvent& InFocusEvent) override;
 
 	// ==============================================================================
@@ -188,6 +207,7 @@ protected:
 	// ==============================================================================
 
 	/** * 【鼠标物理防穿透盾牌】：裁决当前的鼠标点击是“穿透放行给底层 3D 世界”，还是“被 UI 拦截消化（防走火）”。
+	 * 活动面板的第一道防线，拦截点击到 UI 的不能放行的鼠标按键，其他可放行的点击 UI 事件以及未点到 UI 的事件将会经过 UI 管理子系统的判决
 	 * @调用机制：引擎 UI 框架事件驱动全自动调用。
 	 * @调用者：FSlateApplication（虚幻全局 UI 交互大总管）。
 	 * @调用时机：玩家按下鼠标，且大总管发射的隐形射线精确命中了当前 UI 的几何体边界时触发。

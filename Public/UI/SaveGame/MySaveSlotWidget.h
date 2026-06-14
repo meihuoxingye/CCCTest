@@ -31,6 +31,8 @@ class CCC_API UMySaveSlotWidget : public UUserWidget, public IUserObjectListEntr
 	// 生命周期与核心虚函数 (Lifecycle & Core Virtual Functions)
 	// ==============================================================================
 protected:
+	// UI 蓝图预构建阶段：负责在底层 Slate 控件成型前，处理属性配置（如剥夺按钮焦点）
+	virtual void NativePreConstruct() override;
 
 	// 重写父类的构造回调，在 UI 控件被实际创建并添加到屏幕的那一刻触发
 	virtual void NativeConstruct() override;

@@ -13,32 +13,40 @@
 
 void UMySaveSubsystem::PreloadRegistry()
 {
-	// 注册表在硬盘上永远固定存为一个叫 "GlobalSaveRegistry" 的文件
+	// 指定内部存档槽位名称。
+	// 虚幻底层 ISaveGameSystem 会以该名称为基准，自动追加 .sav 后缀来操作物理硬盘文件。
 	const FString RegistrySlot = TEXT("GlobalSaveRegistry");
 
-	// 绑定回调委托：当异步读取完成时，去执行 OnRegistryLoaded
+	// 实例化一个局部委托对象
 	FAsyncLoadGameFromSlotDelegate LoadedDelegate;
+	// 绑定回调委托：当异步识别完成时，去执行 OnRegistryLoaded
+	// 动态多播委托 AddDynamic：可以同时绑定好几个人，支持蓝图和反射系统
+	// 单播委托 BindUObject：只能绑定一个人，纯 C++，不走反射系统
 	LoadedDelegate.BindUObject(this, &UMySaveSubsystem::OnRegistryLoaded);
 
-	// 彻底告别主线程阻塞，开启后台异步读取。玩家在游戏中完全感觉不到在读盘
+	// 开启后台异步读取物理硬盘文件。玩家在游戏中完全感觉不到在读盘，彻底告别主线程阻塞；
+	// RegistrySlot：存档槽位的名称；
+	// 0：分屏玩家本地索引号；
+	// LoadedDelegate：指定异步回调委托
 	UGameplayStatics::AsyncLoadGameFromSlot(RegistrySlot, 0, LoadedDelegate);
 }
 
 TArray<FSaveSlotMetaData> UMySaveSubsystem::GetSaveSlotList()
 {
+	// MySaveGame 里的数据结构体 FSaveSlotMetaData
 	TArray<FSaveSlotMetaData> OutList;
 
 	// 直接 O(1) 读内存缓存，不碰物理硬盘，耗时无限趋近于 0
 	if (CachedRegistry)
 	{
-		// 遍历注册表里的 TMap，把所有元数据塞进数组里
+		// 遍历数据容器 CachedRegistry 里的成员变量TMap SaveSlots，把所有元数据结构体 FSaveSlotMetaData 塞进数组里
 		for (const auto& Pair : CachedRegistry->SaveSlots)
 		{
 			OutList.Add(Pair.Value);
 		}
 
-		// 现代 C++ Lambda 表达式排序算法：
-		// 按时间降序排列 (A > B)，确保玩家打开菜单时，最新存的档永远在最上面！
+		// 现代 C++ Lambda 表达式重新排序算法：
+		// 按数据结构体时间降序排列 (A > B)，确保玩家打开菜单时，最新存的档永远在最上面！
 		OutList.Sort([](const FSaveSlotMetaData& A, const FSaveSlotMetaData& B) {
 			return A.SaveTime > B.SaveTime;
 			});
@@ -142,6 +150,7 @@ bool UMySaveSubsystem::LoadGameFromSlot(const FString& SlotName)
 
 void UMySaveSubsystem::OnRegistryLoaded(const FString& SlotName, const int32 UserIndex, USaveGame* LoadedGame)
 {
+	// LoadedGame 是物理存档文件转换为的对象的内存地址
 	if (LoadedGame)
 	{
 		// 如果硬盘上有文件，说明是老玩家，强转并缓存到内存里
@@ -154,8 +163,11 @@ void UMySaveSubsystem::OnRegistryLoaded(const FString& SlotName, const int32 Use
 		CachedRegistry = Cast<UMySaveRegistry>(UGameplayStatics::CreateSaveGameObject(UMySaveRegistry::StaticClass()));
 	}
 
-	// 注册表就绪，敲响大喇叭告诉 UI：“数据准备好了，如果存档面板开着，赶紧刷新显示！”
-	OnSaveRegistryChanged.Broadcast();
+	if (CachedRegistry)
+	{
+		// 只有在内存分配绝对成功、指针绝对合法的情况下，才敲响大喇叭！
+		OnSaveRegistryChanged.Broadcast();
+	}
 }
 
 void UMySaveSubsystem::UpdateSaveRegistry(const FString& SlotName, FName CurrentLevelName)

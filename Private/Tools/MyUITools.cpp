@@ -12,9 +12,12 @@
 // 修复 GEngine 未识别报错，引入虚幻核心引擎头文件
 #include "Engine/Engine.h"
 
+// 【新增】：确保 UButton 和底层 Slate 组件的完整定义可见
+#include "Components/Button.h"
+
 
 // ==============================================================================
-// UI 检测工具 (UI Detection Tools)
+// UI 辅助工具 (UI Utilities)
 // ==============================================================================
 #pragma region
 bool UMyUITools::IsMouseOverUI(const UObject* WorldContextObject)
@@ -68,4 +71,19 @@ bool UMyUITools::IsMouseOverUI(const UObject* WorldContextObject)
 
 	return bIsOverUI;
 }
+
+/*
+void UMyUITools::SetButtonFocusable(UButton* InButton, bool bCanFocus)
+{
+	if (InButton)
+	{
+		// 1. 修改 UMG 层的属性 (注：变量名以 5.7 源码为准，IsFocusable 或 bIsFocusable)
+		InButton->IsFocusable = bCanFocus;
+
+		// 2. 核心：强制同步到底层 Slate
+		// 完美解决运行时 UMG 数据与 Slate 物理状态脱节的千古难题！
+		InButton->SynchronizeProperties();
+	}
+}
+*/
 #pragma endregion

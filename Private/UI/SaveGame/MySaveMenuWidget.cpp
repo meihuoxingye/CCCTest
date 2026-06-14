@@ -11,10 +11,37 @@
 #include "TimerManager.h"
 #include "Engine/World.h"
 
+
 // ==============================================================================
 // 核心生命周期与初始化 (Core Lifecycle & Initialization)
 // ==============================================================================
 #pragma region
+
+UMySaveMenuWidget::UMySaveMenuWidget()
+{
+	// 在子类的构造函数中，强行覆盖基类的默认值
+	// 不允许通过鼠标点击空地来取消 UI
+	bCanBeClosedByBackgroundClick = false;
+
+	// 吞噬没经过 UI 拦截的白名单的键盘按键输入
+	bAutoStealFocusWhenActivated = true;
+}
+
+void UMySaveMenuWidget::NativePreConstruct()
+{
+	Super::NativePreConstruct();
+
+	// 无法通过 C++ 设置按钮能否聚焦，要到蓝图设置不可聚焦
+	/*
+	if (Btn_CreateNewSave)
+	{
+		// 【新增】：C++ 级强行防错！
+		// 无论蓝图里美术有没有忘记去掉勾选，只要代码运行，强行剥夺该按钮的焦点抢夺权！
+		// 不写在构造函数里是因为，构造函数里按钮控件还没有被创建出来
+		UMyUITools::SetButtonFocusable(Btn_CreateNewSave, false);
+	}
+	*/
+}
 
 void UMySaveMenuWidget::NativeConstruct()
 {
@@ -23,6 +50,7 @@ void UMySaveMenuWidget::NativeConstruct()
 	// 1. 绑定新建按钮的点击事件
 	if (Btn_CreateNewSave)
 	{
+		// 将新建存档按钮的点击事件动态绑定到本类的响应函数上
 		Btn_CreateNewSave->OnClicked.AddDynamic(this, &UMySaveMenuWidget::OnCreateNewSaveClicked);
 	}
 
