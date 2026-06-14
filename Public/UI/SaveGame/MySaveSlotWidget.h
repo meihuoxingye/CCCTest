@@ -6,8 +6,6 @@
 #include "CoreMinimal.h"
 // 引入 UMG UI 系统中所有用户自定义控件的基类
 #include "Blueprint/UserWidget.h"
-// 必须引入列表接口：这是接入虚幻引擎 UListView 虚拟化渲染管线的核心接口类
-#include "Blueprint/IUserObjectListEntry.h" 
 // 引入自定义的存档游戏类，以便识别 FSaveSlotMetaData 等数据结构
 #include "SaveGame/MySaveGame.h" 
 // 虚幻引擎反射系统自动生成的头文件，必须放在最末尾
@@ -17,12 +15,12 @@
 class UButton;
 
 // ==============================================================================
-// 多重继承接口配置 (Multiple Inheritance Interface Setup)
+// 存档槽位界面 (Save Slot Widget)
 // ==============================================================================
 
 // Abstract：标记为抽象类禁止直接实例化；Blueprintable：允许在编辑器中基于此类创建蓝图
 UCLASS(Abstract, Blueprintable)
-class CCC_API UMySaveSlotWidget : public UUserWidget, public IUserObjectListEntry
+class CCC_API UMySaveSlotWidget : public UUserWidget
 {
 	// 注入虚幻引擎反射系统的核心宏，自动生成底层的样板代码
 	GENERATED_BODY()
@@ -37,9 +35,9 @@ protected:
 	// 重写父类的构造回调，在 UI 控件被实际创建并添加到屏幕的那一刻触发
 	virtual void NativeConstruct() override;
 
-	// 【重构核心】：ListView 虚拟化回掉。当列表给当前控件分配新数据时触发！
-	// 重写列表接口的回调函数，当 UListView 将屏幕外移入的卡片分配新数据壳子时由引擎自动调用
-	virtual void NativeOnListItemObjectSet(UObject* ListItemObject) override;
+public:
+	// 极致暴力的注水接口，替代 ListView 繁杂的虚拟化回掉
+	void InitSlotData(const FString& InSlotName, const FSaveSlotMetaData* MetaData);
 
 	// ==============================================================================
 	// 控件绑定与交互逻辑 (Widget Binding & Interaction Logic)
@@ -77,15 +75,15 @@ protected:
 	void OnDeleteSlotClicked();
 
 	// 声明一个没有 C++ 实现的接口，强制交由 UI 蓝图去连节点实现（纯表现层拆分）
-	// 蓝图事件：当数据刷新时，把元数据传给蓝图，让美术去更新文字和图片
+	// 蓝图事件：把元数据传给蓝图，bHasData 控制是显示“新建存档”还是显示读取/删除按钮
 	UFUNCTION(BlueprintImplementableEvent, Category = "SaveSystem|Slot")
-	void BP_OnSlotDataInitialized(const FSaveSlotMetaData& SlotMetaData);
+	void BP_OnSlotDataInitialized(const FSaveSlotMetaData& SlotMetaData, bool bHasData);
 
 	// ==============================================================================
 	// 内部数据缓存 (Internal Data Cache)
 	// ==============================================================================
 private:
 
-	// 缓存当前卡片绑定的物理存档槽位名称（例如 "Save_2026..."），UI 通过这串字符串作为主键向底层发号施令
+	// 缓存当前卡片绑定的物理存档槽位名称（例如 "SaveSlot_001"），UI 通过这串字符串作为主键向底层发号施令
 	FString CachedSlotName;
 };

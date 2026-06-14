@@ -4,7 +4,6 @@
 #include "Components/Button.h"
 #include "Engine/GameInstance.h"
 #include "SaveGame/Subsystem/MySaveSubsystem.h"
-#include "UI/SaveGame/MySaveDataObj.h"
 
 
 // ==============================================================================
@@ -69,20 +68,20 @@ void UMySaveSlotWidget::NativeConstruct()
 	}
 }
 
-// ListView 循环复用该控件时，会把轻量级的 DataObj 塞进来
-// 实现接口回调：当卡片被复用并注入新数据时触发
-void UMySaveSlotWidget::NativeOnListItemObjectSet(UObject* ListItemObject)
+void UMySaveSlotWidget::InitSlotData(const FString& InSlotName, const FSaveSlotMetaData* MetaData)
 {
-	// 将引擎传来的泛型 UObject 安全向下转型为我们自定义的数据壳子
-	if (UMySaveDataObj* DataObj = Cast<UMySaveDataObj>(ListItemObject))
-	{
-		// 更新真名缓存，供按钮使用
-		// 剥离出壳子中的元数据，将物理存档名（如"Save_xxx"）缓存到本卡片的私有变量中，供按钮交互时当作主键使用
-		CachedSlotName = DataObj->MetaData.SlotName;
+	// 更新真名缓存，将物理存档名（如"SaveSlot_xxx"）缓存到本卡片的私有变量中，供按钮交互时当作主键使用
+	CachedSlotName = InSlotName;
 
-		// 呼叫蓝图更改 UI 的文本和图像显示
-		// C++ 只做数据拆解，将拆好的 MetaData 丢给蓝图事件，驱动表现层去改文字和截图
-		BP_OnSlotDataInitialized(DataObj->MetaData);
+	// 如果 O(1) 查表找到了数据，给蓝图传入真和拆解好的 MetaData，驱动表现层去改文字和截图
+	if (MetaData)
+	{
+		BP_OnSlotDataInitialized(*MetaData, true);
+	}
+	// 如果是个空档位，给蓝图传入假
+	else
+	{
+		BP_OnSlotDataInitialized(FSaveSlotMetaData(), false);
 	}
 }
 
@@ -105,7 +104,7 @@ void UMySaveSlotWidget::OnSaveButtonClicked()
 		// 从游戏实例中拉取负责统筹存档的 MySaveSubsystem
 		if (UMySaveSubsystem* SaveSub = GI->GetSubsystem<UMySaveSubsystem>())
 		{
-			// 拿着缓存的身份证号（档位名），命令子系统执行多线程异步物理覆盖存档
+			// 拿着缓存的身份证号（档位名），命令子系统执行多线程异步物理覆盖存档（或新建存档）
 			SaveSub->PerformAsyncSave(CachedSlotName);
 		}
 	}
@@ -141,7 +140,7 @@ void UMySaveSlotWidget::OnDeleteSlotClicked()
 		// 获取存档总管子系统
 		if (UMySaveSubsystem* SaveSub = GI->GetSubsystem<UMySaveSubsystem>())
 		{
-			// 命令子系统从硬盘彻底抹除此档位，子系统删完后会自动广播通知上级菜单移除此卡片
+			// 命令子系统从硬盘彻底抹除此档位，子系统删完后会自动广播通知上级菜单刷新此卡片
 			SaveSub->DeleteSaveSlot(CachedSlotName);
 		}
 	}

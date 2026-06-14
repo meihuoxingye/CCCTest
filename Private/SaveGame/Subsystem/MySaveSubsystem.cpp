@@ -20,38 +20,10 @@ void UMySaveSubsystem::PreloadRegistry()
 	// 实例化一个局部委托对象
 	FAsyncLoadGameFromSlotDelegate LoadedDelegate;
 	// 绑定回调委托：当异步识别完成时，去执行 OnRegistryLoaded
-	// 动态多播委托 AddDynamic：可以同时绑定好几个人，支持蓝图和反射系统
-	// 单播委托 BindUObject：只能绑定一个人，纯 C++，不走反射系统
 	LoadedDelegate.BindUObject(this, &UMySaveSubsystem::OnRegistryLoaded);
 
 	// 开启后台异步读取物理硬盘文件。玩家在游戏中完全感觉不到在读盘，彻底告别主线程阻塞；
-	// RegistrySlot：存档槽位的名称；
-	// 0：分屏玩家本地索引号；
-	// LoadedDelegate：指定异步回调委托
 	UGameplayStatics::AsyncLoadGameFromSlot(RegistrySlot, 0, LoadedDelegate);
-}
-
-TArray<FSaveSlotMetaData> UMySaveSubsystem::GetSaveSlotList()
-{
-	// MySaveGame 里的数据结构体 FSaveSlotMetaData
-	TArray<FSaveSlotMetaData> OutList;
-
-	// 直接 O(1) 读内存缓存，不碰物理硬盘，耗时无限趋近于 0
-	if (CachedRegistry)
-	{
-		// 遍历数据容器 CachedRegistry 里的成员变量TMap SaveSlots，把所有元数据结构体 FSaveSlotMetaData 塞进数组里
-		for (const auto& Pair : CachedRegistry->SaveSlots)
-		{
-			OutList.Add(Pair.Value);
-		}
-
-		// 现代 C++ Lambda 表达式重新排序算法：
-		// 按数据结构体时间降序排列 (A > B)，确保玩家打开菜单时，最新存的档永远在最上面！
-		OutList.Sort([](const FSaveSlotMetaData& A, const FSaveSlotMetaData& B) {
-			return A.SaveTime > B.SaveTime;
-			});
-	}
-	return OutList;
 }
 
 void UMySaveSubsystem::PerformAsyncSave(const FString& SlotName)
@@ -109,7 +81,7 @@ bool UMySaveSubsystem::DeleteSaveSlot(const FString& SlotName)
 		UGameplayStatics::SaveGameToSlot(CachedRegistry, TEXT("GlobalSaveRegistry"), 0);
 	}
 
-	// 4. 敲响大喇叭，UI 听到后会自动让那个被删掉的卡片消失
+	// 4. 敲响大喇叭，UI 听到后会自动让那个被删掉的卡片刷新显示为空白
 	OnSaveRegistryChanged.Broadcast();
 	return true;
 }
@@ -139,6 +111,28 @@ bool UMySaveSubsystem::LoadGameFromSlot(const FString& SlotName)
 	OnGameLoading.Broadcast(SaveObj);
 
 	return true;
+}
+
+#pragma endregion
+
+// ==============================================================================
+// 分页系统 (Pagination System)
+// ==============================================================================
+#pragma region
+
+void UMySaveSubsystem::UnlockNewSavePage()
+{
+	// 绝对的安全性：必须小于 50 页
+	if (CachedRegistry && CachedRegistry->UnlockedPages < 50)
+	{
+		CachedRegistry->UnlockedPages++;
+
+		// 同步覆写至全局硬盘注册表
+		UGameplayStatics::SaveGameToSlot(CachedRegistry, TEXT("GlobalSaveRegistry"), 0);
+
+		// 敲响喇叭，UI 面板的 BuildSaveSlotList 会自动听到并注入新的一页
+		OnSaveRegistryChanged.Broadcast();
+	}
 }
 
 #pragma endregion
@@ -196,6 +190,8 @@ void UMySaveSubsystem::OnAsyncSaveComplete(const FString& SlotName, const int32 
 {
 	// 收到引擎底层的磁盘回调后，将其转发给 UI 蓝图，触发右上角的“保存成功”弹窗等表现
 	OnSaveFinished.Broadcast(bSuccess);
+	// 同时触发数据池刷新（例如新覆盖了一个存档，时间戳或者关卡变了）
+	OnSaveRegistryChanged.Broadcast();
 }
 
 #pragma endregion

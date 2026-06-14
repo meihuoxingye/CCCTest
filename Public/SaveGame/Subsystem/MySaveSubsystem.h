@@ -14,7 +14,7 @@
 // 蓝图可用的多播委托：用于异步存档写盘结束时，通知 UI 弹出“保存成功”或“保存失败”提示
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSaveFinishedSignature, bool, bSuccess);
 
-// 蓝图可用的多播委托：当存档列表发生增删改（比如删档、存新档）时，通知 UI 刷新列表
+// 蓝图可用的多播委托：当存档列表发生增删改（比如删档、扩容页数）时，通知 UI 刷新列表
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnSaveRegistryChangedSignature);
 
 // C++ 专属多播大喇叭（架构精髓）：
@@ -45,8 +45,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "SaveSystem|Events")
 	FOnSaveFinishedSignature OnSaveFinished;
 
-	// 对外暴露的事件绑定点：当底层的 CachedRegistry 内存实例成功加载（从硬盘读入或新建兜底成功），或内部存档数据发生增删时广播
-	// 委托回调函数 UMySaveMenuWidget::BuildSaveSlotList() 用来刷新 UI
+	// 对外暴露的事件绑定点：当底层的 CachedRegistry 内存实例成功加载，或内部发生增删时广播
 	UPROPERTY(BlueprintAssignable, Category = "SaveSystem|Events")
 	FOnSaveRegistryChangedSignature OnSaveRegistryChanged;
 
@@ -57,9 +56,6 @@ public:
 	FOnGameLoadingSignature OnGameLoading;
 
 	// 在物理硬盘上后台异步识别并提取名为“GlobalSaveRegistry”的存档文件；
-	// 注：存档文件只有名称、时间、关卡标识的数据，不包含具体游戏状态数据（如玩家位置、血量等）。
-	// 并且绑定识别完毕时的单播委托回调函数 OnRegistryLoaded，将在回调函数把物理文件转为游戏数据
-	// UI 处理组件的 BeginPlay 中调用（等玩家出生 2 秒后，后台再开始调用）
 	void PreloadRegistry();
 
 	// 核心功能：非阻塞式异步存盘。传入档位名字即可
@@ -74,18 +70,21 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "SaveSystem|Execution")
 	bool LoadGameFromSlot(const FString& SlotName);
 
-	// O(1) 极速读内存。直接返回内存中缓存的档位列表，消除磁盘 IO 卡顿
-	// UMySaveMenuWidget::BuildSaveSlotList() 构建列表时调用
-	UFUNCTION(BlueprintCallable, Category = "SaveSystem|Query")
-	TArray<FSaveSlotMetaData> GetSaveSlotList();
+	// ==============================================================================
+	// 分页系统 (Pagination System)
+	// ==============================================================================
+
+	// 核心功能：扩充档案页数并强制落盘
+	UFUNCTION(BlueprintCallable, Category = "SaveSystem|Execution")
+	void UnlockNewSavePage();
 
 	// ==============================================================================
 	// 内部数据缓存 (Internal Data Cache)
 	// ==============================================================================
-private:
+public: // 调整为 public，以供 UI 面板的 BuildSaveSlotList 进行 O(1) 绝对查表读取
 
 	// 缓存的全局存档常驻内存目录表，本质上是继承自 USaveGame 的数据容器
-	// [数据功能] 仅存储所有槽位的索引元数据（名称、时间、关卡标识），不包含具体游戏状态数据（如玩家位置、血量等）。
+	// [数据功能] 仅存储所有槽位的索引元数据（名称、时间、关卡标识），不包含具体游戏状态数据。
 	// [生命周期] 通过 UPROPERTY 强引用标记，强制拦截垃圾回收(GC)巡检，防止此目录表被误销毁。
 	UPROPERTY()
 	TObjectPtr<UMySaveRegistry> CachedRegistry;
@@ -96,14 +95,11 @@ private:
 private:
 
 	// 异步加载回调函数，当在硬盘上读取到存档文件内存后自动触发
-	// 将物理存档文件转换为的对象储存到 CachedRegistry 存档常驻内存目录表里
-	// 并且只有在储存成功的情况下，才在 OnSaveRegistryChanged 发送广播通知 UI 刷新列表
 	void OnRegistryLoaded(const FString& SlotName, const int32 UserIndex, USaveGame* LoadedGame);
 
 	// 内部工具：每次存盘时，更新内存镜像，并把最新的“目录”写进物理硬盘
 	void UpdateSaveRegistry(const FString& SlotName, FName CurrentLevelName);
 
 	// 内部回调：底层 AsyncSaveGameToSlot 执行完毕后触发，用于向 UI 宣告结果
-	// AsyncSaveGameToSlot 异步保存，当后台线程保存结束时会调用这个回调函数
 	void OnAsyncSaveComplete(const FString& SlotName, const int32 UserIndex, bool bSuccess);
 };

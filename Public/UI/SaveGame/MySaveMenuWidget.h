@@ -8,7 +8,7 @@
 
 class UButton;
 class UTextBlock;
-class UListView;
+class UVerticalBox;
 class UMySaveSlotWidget;
 
 // ==============================================================================
@@ -37,40 +37,66 @@ protected:
 	virtual void NativeDestruct() override;
 
 	// ==============================================================================
-	// 动态列表生成 (Dynamic List Generation)
+	// 绝对排版与分页系统 (Absolute Layout & Pagination)
 	// ==============================================================================
 protected:
 
-	// 强制要求蓝图必须有一个叫 List_SaveSlots 的 ListView 控件，否则 C++ 直接报错拒绝编译
+	// 强制要求蓝图必须有一个叫 Box_SaveSlots 的垂直框，否则 C++ 直接报错拒绝编译
 	UPROPERTY(meta = (BindWidget))
-	TObjectPtr<UListView> List_SaveSlots;
+	TObjectPtr<UVerticalBox> Box_SaveSlots;
 
-	// 暴露给蓝图，让美术指定要在上面的 ListView 控件里生成哪个槽位蓝图 (比如 WBP_SaveSlot)
+	// 页码显示 (如 "1 / 3")
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UTextBlock> Text_PageInfo;
+
+	// 翻页控制按钮
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UButton> Btn_PrevPage;
+
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UButton> Btn_NextPage;
+
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UButton> Btn_AddPage;
+
+	// 暴露给蓝图，让美术指定要生成的卡片类 (如 WBP_SaveSlot)
 	UPROPERTY(EditDefaultsOnly, Category = "SaveMenu|Classes")
 	TSubclassOf<UMySaveSlotWidget> SlotWidgetClass;
 
-	// 执行 C++ 极速列表构建
-	// 为什么必须加 UFUNCTION()？因为这个函数在 cpp 中被绑定到了动态多播委托 (AddDynamic) 上。
-	// 虚幻的反射系统要求，凡是绑定到动态委托的函数，必须戴上 UFUNCTION 标签，否则引擎运行时找不到这个函数！
+private:
+
+	// 内存状态锁与物理写死限制
+	int32 CurrentPage = 1;
+	const int32 SlotsPerPage = 5;
+	const int32 MaxAllowedPages = 50;
+
+	// 【新增】：核心 UI 对象池，在内存中死死捏住这 5 个卡片的物理地址
+	UPROPERTY()
+	TArray<TObjectPtr<UMySaveSlotWidget>> SlotPool;
+
+	// 仅在 Construct 时调用一次，蓄满对象池并构建焦点铁壁
+	void InitializeSlotPool();
+
+	// 执行 C++ 极速 O(1) 提取数据并刷新池子里的卡片长相
 	UFUNCTION()
 	void BuildSaveSlotList();
 
+	// 刷新分页按钮状态
+	void RefreshPaginationUI(int32 TotalPages);
+
+	UFUNCTION()
+	void OnPrevPageClicked();
+
+	UFUNCTION()
+	void OnNextPageClicked();
+
+	UFUNCTION()
+	void OnAddPageClicked();
+
 	// ==============================================================================
-	// 底部新建档位逻辑与全局状态监听 (New Save & Global State)
+	// 全局状态监听 (Global State)
 	// ==============================================================================
 protected:
-
-	// 新建存档按钮
-	UPROPERTY(meta = (BindWidget))
-	TObjectPtr<UButton> Btn_CreateNewSave;
-
-	// 存档状态提示文本（如“正在保存”、“保存成功”）
-	UPROPERTY(meta = (BindWidget))
-	TObjectPtr<UTextBlock> Text_SaveStatus;
-
-	// 点击“新建存档”按钮的回调函数，必须加 UFUNCTION 以便绑定到 OnClicked 委托
-	UFUNCTION()
-	void OnCreateNewSaveClicked();
 
 	// 接收大管家（SaveSubsystem）存盘完成后的广播回调
 	UFUNCTION()

@@ -4,8 +4,7 @@
 #include "UI/SaveGame/MySaveSlotWidget.h"
 #include "Components/Button.h"
 #include "Components/TextBlock.h"
-#include "Components/ListView.h" 
-#include "UI/SaveGame/MySaveDataObj.h" 
+#include "Components/VerticalBox.h" 
 #include "SaveGame/Subsystem/MySaveSubsystem.h"
 #include "Engine/GameInstance.h"
 #include "TimerManager.h"
@@ -30,45 +29,35 @@ UMySaveMenuWidget::UMySaveMenuWidget()
 void UMySaveMenuWidget::NativePreConstruct()
 {
 	Super::NativePreConstruct();
-
-	// 无法通过 C++ 设置按钮能否聚焦，要到蓝图设置不可聚焦
-	/*
-	if (Btn_CreateNewSave)
-	{
-		// 【新增】：C++ 级强行防错！
-		// 无论蓝图里美术有没有忘记去掉勾选，只要代码运行，强行剥夺该按钮的焦点抢夺权！
-		// 不写在构造函数里是因为，构造函数里按钮控件还没有被创建出来
-		UMyUITools::SetButtonFocusable(Btn_CreateNewSave, false);
-	}
-	*/
 }
 
 void UMySaveMenuWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 
-	// 1. 绑定新建按钮的点击事件
-	if (Btn_CreateNewSave)
-	{
-		// 将新建存档按钮的点击事件动态绑定到本类的响应函数上
-		Btn_CreateNewSave->OnClicked.AddDynamic(this, &UMySaveMenuWidget::OnCreateNewSaveClicked);
-	}
+	// 1. 绑定分页按钮的点击事件
+	if (Btn_PrevPage) Btn_PrevPage->OnClicked.AddDynamic(this, &UMySaveMenuWidget::OnPrevPageClicked);
+	if (Btn_NextPage) Btn_NextPage->OnClicked.AddDynamic(this, &UMySaveMenuWidget::OnNextPageClicked);
+	if (Btn_AddPage) Btn_AddPage->OnClicked.AddDynamic(this, &UMySaveMenuWidget::OnAddPageClicked);
 
 	// 2. 找到全局的存档大管家，戴上耳机监听它的广播
 	if (UGameInstance* GI = GetGameInstance())
 	{
 		if (UMySaveSubsystem* SaveSub = GI->GetSubsystem<UMySaveSubsystem>())
 		{
-			// 监听频道A：存盘是否成功（成功了才去播放动画、恢复按钮可用状态）
+			// 监听频道A：存盘是否成功（成功了才去播放动画、恢复文本状态）
 			SaveSub->OnSaveFinished.AddDynamic(this, &UMySaveMenuWidget::HandleSaveFinished);
 
-			// 监听频道B：注册表是否发生变化（有人删档或新建档）
+			// 监听频道B：注册表是否发生变化（有人删档、扩充页数或存新档）
 			// 只要大管家喊“删档了”，这里全自动调用极速重建函数，实现数据的绝对同步响应！
 			SaveSub->OnSaveRegistryChanged.AddDynamic(this, &UMySaveMenuWidget::BuildSaveSlotList);
 		}
 	}
 
-	// 3. 面板刚打开时，主动去拉取一次当前已有的存档列表进行显示
+	// 3. 物理打地基：生成且仅生成 5 个卡片，扔进池子里，锁死导航防线
+	InitializeSlotPool();
+
+	// 4. 面板刚打开时，主动去拉取一次当前已有的存档列表进行显示
 	BuildSaveSlotList();
 }
 
@@ -92,113 +81,140 @@ void UMySaveMenuWidget::NativeDestruct()
 #pragma endregion
 
 // ==============================================================================
-// 动态列表生成 (Dynamic List Generation)
+// 绝对排版与分页系统 (Absolute Layout & Pagination)
 // ==============================================================================
 #pragma region
 
-void UMySaveMenuWidget::BuildSaveSlotList()
+void UMySaveMenuWidget::InitializeSlotPool()
 {
-	if (!List_SaveSlots) return;
+	if (!Box_SaveSlots || !SlotWidgetClass) return;
 
-	// 先把旧列表彻底清空，准备重新生成
-	List_SaveSlots->ClearListItems();
+	Box_SaveSlots->ClearChildren();
+	SlotPool.Empty();
 
-	// 每次刷新列表，清空底部的状态文本（防止残留上次的“正在保存”字样）
-	if (Text_SaveStatus)
+	// 1. 强行在堆内存中生成并渲染 5 个卡片
+	for (int32 i = 0; i < SlotsPerPage; ++i)
 	{
-		Text_SaveStatus->SetText(FText::GetEmpty());
+		if (UMySaveSlotWidget* SlotWidget = CreateWidget<UMySaveSlotWidget>(GetOwningPlayer(), SlotWidgetClass))
+		{
+			Box_SaveSlots->AddChildToVerticalBox(SlotWidget);
+			SlotPool.Add(SlotWidget);
+		}
 	}
 
-	if (UGameInstance* GI = GetGameInstance())
+	// 2. 构造显式导航防线 (Explicit Navigation)，防止跨页焦点迷失
+	for (int32 i = 0; i < SlotPool.Num(); ++i)
 	{
-		if (UMySaveSubsystem* SaveSub = GI->GetSubsystem<UMySaveSubsystem>())
+		// 往上推摇杆：如果不是第一个，焦点强行交给上面的卡片；如果是第一个，往上推则保持不动(Stop)
+		if (i > 0)
 		{
-			// 从大管家的内存镜像中，瞬间 O(1) 拉取所有的存档摘要数据
-			TArray<FSaveSlotMetaData> MetaList = SaveSub->GetSaveSlotList();
-
-			// C++ 极速实例化并推入滚动框
-			for (const FSaveSlotMetaData& Meta : MetaList)
-			{
-				// UListView 不接受普通结构体，只接受 UObject 对象作为数据源
-				// 所以用一个极轻量级的 UMySaveDataObj 数据壳子，把纯数据 Meta 包装进去，再喂给 ListView
-				UMySaveDataObj* DataObj = NewObject<UMySaveDataObj>();
-				DataObj->MetaData = Meta;
-				List_SaveSlots->AddItem(DataObj);
-			}
+			SlotPool[i]->SetNavigationRuleExplicit(EUINavigation::Up, SlotPool[i - 1]);
 		}
+		else
+		{
+			SlotPool[i]->SetNavigationRuleBase(EUINavigation::Up, EUINavigationRule::Stop);
+		}
+
+		// 往下推摇杆：如果不是最后一个，焦点强行交给下面的卡片；如果是最后一个，往下推则保持不动(Stop)
+		if (i < SlotPool.Num() - 1)
+		{
+			SlotPool[i]->SetNavigationRuleExplicit(EUINavigation::Down, SlotPool[i + 1]);
+		}
+		else
+		{
+			SlotPool[i]->SetNavigationRuleBase(EUINavigation::Down, EUINavigationRule::Stop);
+		}
+	}
+}
+
+void UMySaveMenuWidget::BuildSaveSlotList()
+{
+	UMySaveSubsystem* SaveSub = GetGameInstance()->GetSubsystem<UMySaveSubsystem>();
+	if (!SaveSub || !SaveSub->CachedRegistry || SlotPool.Num() == 0) return;
+
+	int32 TotalPages = SaveSub->CachedRegistry->UnlockedPages;
+	if (CurrentPage > TotalPages) CurrentPage = TotalPages;
+	if (CurrentPage < 1) CurrentPage = 1;
+
+	// 算出当前页的第一张卡片编号 (如第1页是从第1个开始，第3页是从第11个开始)
+	int32 StartIndex = (CurrentPage - 1) * SlotsPerPage + 1;
+
+	// 【核心降维打击】：不再销毁和重建 UI，只是机械地拿着底层数据，给池子里的 5 个卡片重新注水
+	for (int32 i = 0; i < SlotPool.Num(); ++i)
+	{
+		int32 SlotIndex = StartIndex + i;
+		FString CurrentSlotName = FString::Printf(TEXT("SaveSlot_%03d"), SlotIndex);
+
+		// O(1) 查表：从大管家的内存镜像中砸门
+		FSaveSlotMetaData* FoundMeta = SaveSub->CachedRegistry->SaveSlots.Find(CurrentSlotName);
+
+		// 直接呼叫卡片的 Init 函数，卡片内部会自动切成“空档”或“满档”显示
+		SlotPool[i]->InitSlotData(CurrentSlotName, FoundMeta);
+	}
+
+	RefreshPaginationUI(TotalPages);
+}
+
+void UMySaveMenuWidget::RefreshPaginationUI(int32 TotalPages)
+{
+	if (Text_PageInfo)
+	{
+		Text_PageInfo->SetText(FText::FromString(FString::Printf(TEXT("%d / %d"), CurrentPage, TotalPages)));
+	}
+
+	if (Btn_PrevPage) Btn_PrevPage->SetIsEnabled(CurrentPage > 1);
+	if (Btn_NextPage) Btn_NextPage->SetIsEnabled(CurrentPage < TotalPages);
+
+	if (Btn_AddPage)
+	{
+		Btn_AddPage->SetVisibility(TotalPages < MaxAllowedPages ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+}
+
+void UMySaveMenuWidget::OnPrevPageClicked()
+{
+	if (CurrentPage > 1)
+	{
+		CurrentPage--;
+		BuildSaveSlotList(); // 重新注水
+	}
+}
+
+void UMySaveMenuWidget::OnNextPageClicked()
+{
+	CurrentPage++;
+	BuildSaveSlotList(); // 重新注水
+}
+
+void UMySaveMenuWidget::OnAddPageClicked()
+{
+	if (UMySaveSubsystem* SaveSub = GetGameInstance()->GetSubsystem<UMySaveSubsystem>())
+	{
+		// 记录新的页数并强制翻页过去，随后大管家存盘完毕的广播会自动触发 BuildSaveSlotList
+		CurrentPage = SaveSub->CachedRegistry->UnlockedPages + 1;
+		SaveSub->UnlockNewSavePage();
 	}
 }
 
 #pragma endregion
 
 // ==============================================================================
-// 底部新建档位逻辑与全局状态监听 (New Save & Global State)
+// 全局状态监听 (Global State)
 // ==============================================================================
 #pragma region
-
-void UMySaveMenuWidget::OnCreateNewSaveClicked()
-{
-	if (!Btn_CreateNewSave) return;
-
-	// 防玩家手贱设计：玩家点完新建存档后，立刻把按钮变灰（禁用）
-	// 防止玩家在硬盘写入期间疯狂点击，生成几百个同样的存档导致崩溃
-	Btn_CreateNewSave->SetIsEnabled(false);
-
-	if (Text_SaveStatus)
-	{
-		Text_SaveStatus->SetText(FText::FromString(TEXT("正在开辟新扇区...")));
-	}
-
-	if (UGameInstance* GI = GetGameInstance())
-	{
-		if (UMySaveSubsystem* SaveSub = GI->GetSubsystem<UMySaveSubsystem>())
-		{
-			// 利用当前系统绝对时间戳生成档位名（例如：Save_2026.06.12-11.55.00）
-			// 确保就算玩家疯狂新建，每个档位在硬盘上的名字也绝对唯一，绝不会相互覆盖
-			FString NewSlotName = TEXT("Save_") + FDateTime::Now().ToString();
-
-			// 把名字丢给大管家，开启后台异步写盘
-			SaveSub->PerformAsyncSave(NewSlotName);
-		}
-	}
-}
 
 void UMySaveMenuWidget::HandleSaveFinished(bool bSuccess)
 {
 	// 收到大管家传回来的异步写盘结果
 	if (bSuccess)
 	{
-		if (Text_SaveStatus)
-		{
-			Text_SaveStatus->SetText(FText::FromString(TEXT("数据同步完成。")));
-		}
-
-		// 立刻重建列表，让新建立的存档瞬间刷新出现在 ListView 的最顶端
-		BuildSaveSlotList();
-
-		// 立刻把变灰的按钮恢复可用
-		// 因为 UI 使用了 ActivatableWidget 架构，面板是常驻隐藏的，不恢复下次打开按钮还是灰的
-		if (Btn_CreateNewSave)
-		{
-			Btn_CreateNewSave->SetIsEnabled(true);
-		}
-
 		// 触发蓝图动画，给玩家一个酷炫的视觉反馈
 		BP_PlaySaveSuccessAnimation();
 	}
 	else
 	{
 		// 极低概率触发（硬盘满、权限不足）的错误托底
-		if (Text_SaveStatus)
-		{
-			Text_SaveStatus->SetText(FText::FromString(TEXT("写入失败，请重试。")));
-		}
 
-		// 即使失败了，也要把按钮还给玩家，让他们可以再试一次
-		if (Btn_CreateNewSave)
-		{
-			Btn_CreateNewSave->SetIsEnabled(true);
-		}
 	}
 }
 
