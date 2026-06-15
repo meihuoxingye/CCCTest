@@ -78,6 +78,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "SaveSystem|Execution")
 	void UnlockNewSavePage();
 
+	// 核心功能：清空指定页的所有物理存档，但绝对不削减页数上限
+	UFUNCTION(BlueprintCallable, Category = "SaveSystem|Execution")
+	void ClearSavePage(int32 PageIndex, int32 SlotsPerPage);
+
+	// 核心功能：存档碎片整理（一键物理压缩所有空页，并自动将后续存档前移补齐）
+	UFUNCTION(BlueprintCallable, Category = "SaveSystem|Execution")
+	void CompactEmptySavePages(int32 SlotsPerPage);
+
 	// ==============================================================================
 	// 内部数据缓存 (Internal Data Cache)
 	// ==============================================================================

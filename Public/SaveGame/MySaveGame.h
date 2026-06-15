@@ -16,7 +16,6 @@
  * 虚幻的底层序列化系统（ISaveGameSystem）极其死板。当你调用 AsyncSaveGameToSlot 或 AsyncLoadGameFromSlot 去读写硬盘时
  * 引擎只认继承自 USaveGame 的类对象
  */
-
 USTRUCT(BlueprintType)
 struct FSaveSlotMetaData
 {
@@ -52,8 +51,8 @@ class CCC_API UMySaveRegistry : public USaveGame
 	GENERATED_BODY()
 
 public:
-	// 记录所有已存在的存档位及其元数据
-	// Key 为物理档位名，Value 为对应的极轻量 UI 展示数据。
+	// 记录所有已存在的存档位及其元数据；
+	// Key 为物理档位名，Value 为对应的极轻量 UI 展示数据（只包含时间和名称，不包含角色属性、位置）。
 	// 【架构核武】：这不仅是数据的清单，它更是对玩家物理硬盘的“防暴力遍历锁”。
 	// 虚幻引擎底层去遍历硬盘文件开销极大，有了这个固定的全局词典，永远只读它一次就能掌握所有存档状况。
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Registry")
@@ -90,6 +89,7 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Squad")
 	TMap<FName, FCharacterSPData> SavedSquadSPMap;
 
+	// 暂时没用到
 	// 记录已被击杀的精英怪或已拾取的唯一道具的 GUID
 	// 【现代独立游戏标准的“生死簿”】：
 	// 在你的游戏世界里，切关卡或读档重生时，所有怪物/宝箱在出生前，都要来向这个集合查阅：“我死过了吗？”

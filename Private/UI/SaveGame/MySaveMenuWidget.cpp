@@ -40,6 +40,10 @@ void UMySaveMenuWidget::NativeConstruct()
 	if (Btn_NextPage) Btn_NextPage->OnClicked.AddDynamic(this, &UMySaveMenuWidget::OnNextPageClicked);
 	if (Btn_AddPage) Btn_AddPage->OnClicked.AddDynamic(this, &UMySaveMenuWidget::OnAddPageClicked);
 
+	// 绑定清空与整理按钮
+	if (Btn_ClearPage) Btn_ClearPage->OnClicked.AddDynamic(this, &UMySaveMenuWidget::OnClearPageClicked);
+	if (Btn_CompactPages) Btn_CompactPages->OnClicked.AddDynamic(this, &UMySaveMenuWidget::OnCompactPagesClicked);
+
 	// 2. 找到全局的存档大管家，戴上耳机监听它的广播
 	if (UGameInstance* GI = GetGameInstance())
 	{
@@ -162,8 +166,9 @@ void UMySaveMenuWidget::RefreshPaginationUI(int32 TotalPages)
 		Text_PageInfo->SetText(FText::FromString(FString::Printf(TEXT("%d / %d"), CurrentPage, TotalPages)));
 	}
 
-	if (Btn_PrevPage) Btn_PrevPage->SetIsEnabled(CurrentPage > 1);
-	if (Btn_NextPage) Btn_NextPage->SetIsEnabled(CurrentPage < TotalPages);
+	// 无缝循环分页，上一页和下一页按钮永远保持可用
+	if (Btn_PrevPage) Btn_PrevPage->SetIsEnabled(true);
+	if (Btn_NextPage) Btn_NextPage->SetIsEnabled(true);
 
 	if (Btn_AddPage)
 	{
@@ -173,16 +178,35 @@ void UMySaveMenuWidget::RefreshPaginationUI(int32 TotalPages)
 
 void UMySaveMenuWidget::OnPrevPageClicked()
 {
-	if (CurrentPage > 1)
+	UMySaveSubsystem* SaveSub = GetGameInstance()->GetSubsystem<UMySaveSubsystem>();
+	if (!SaveSub || !SaveSub->CachedRegistry) return;
+
+	int32 TotalPages = SaveSub->CachedRegistry->UnlockedPages;
+
+	CurrentPage--;
+	// 【循环翻页】：如果退到了第 0 页，直接变成最后 1 页
+	if (CurrentPage < 1)
 	{
-		CurrentPage--;
-		BuildSaveSlotList(); // 重新注水
+		CurrentPage = TotalPages;
 	}
+
+	BuildSaveSlotList(); // 重新注水
 }
 
 void UMySaveMenuWidget::OnNextPageClicked()
 {
+	UMySaveSubsystem* SaveSub = GetGameInstance()->GetSubsystem<UMySaveSubsystem>();
+	if (!SaveSub || !SaveSub->CachedRegistry) return;
+
+	int32 TotalPages = SaveSub->CachedRegistry->UnlockedPages;
+
 	CurrentPage++;
+	// 【循环翻页】：如果超过了总页数，直接回到第 1 页
+	if (CurrentPage > TotalPages)
+	{
+		CurrentPage = 1;
+	}
+
 	BuildSaveSlotList(); // 重新注水
 }
 
@@ -193,6 +217,31 @@ void UMySaveMenuWidget::OnAddPageClicked()
 		// 记录新的页数并强制翻页过去，随后大管家存盘完毕的广播会自动触发 BuildSaveSlotList
 		CurrentPage = SaveSub->CachedRegistry->UnlockedPages + 1;
 		SaveSub->UnlockNewSavePage();
+	}
+}
+
+void UMySaveMenuWidget::OnClearPageClicked()
+{
+	if (UMySaveSubsystem* SaveSub = GetGameInstance()->GetSubsystem<UMySaveSubsystem>())
+	{
+		// 仅仅清空数据，页码不会变，所以不需要重置 CurrentPage
+		SaveSub->ClearSavePage(CurrentPage, SlotsPerPage);
+	}
+}
+
+void UMySaveMenuWidget::OnCompactPagesClicked()
+{
+	if (UMySaveSubsystem* SaveSub = GetGameInstance()->GetSubsystem<UMySaveSubsystem>())
+	{
+		// 执行高强度的底层 I/O 整理
+		SaveSub->CompactEmptySavePages(SlotsPerPage);
+
+		// 如果因为碎片整理导致总页数变少，且玩家刚好处于被砍掉的页数上，自动将视角拉回最后一页
+		if (CurrentPage > SaveSub->CachedRegistry->UnlockedPages)
+		{
+			CurrentPage = SaveSub->CachedRegistry->UnlockedPages;
+		}
+		if (CurrentPage < 1) CurrentPage = 1;
 	}
 }
 

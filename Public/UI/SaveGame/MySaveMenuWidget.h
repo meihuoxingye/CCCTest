@@ -59,6 +59,14 @@ protected:
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UButton> Btn_AddPage;
 
+	// 清空本页按钮
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UButton> Btn_ClearPage;
+
+	// 整理碎片（删除所有空页）按钮
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UButton> Btn_CompactPages;
+
 	// 暴露给蓝图，让美术指定要生成的卡片类 (如 WBP_SaveSlot)
 	UPROPERTY(EditDefaultsOnly, Category = "SaveMenu|Classes")
 	TSubclassOf<UMySaveSlotWidget> SlotWidgetClass;
@@ -92,6 +100,12 @@ private:
 
 	UFUNCTION()
 	void OnAddPageClicked();
+
+	UFUNCTION()
+	void OnClearPageClicked();
+
+	UFUNCTION()
+	void OnCompactPagesClicked();
 
 	// ==============================================================================
 	// 全局状态监听 (Global State)
