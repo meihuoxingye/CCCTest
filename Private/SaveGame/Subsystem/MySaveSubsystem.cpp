@@ -34,6 +34,9 @@ void UMySaveSubsystem::PreloadRegistry()
 void UMySaveSubsystem::PerformAsyncSave(const FString& SlotName)
 {
 	// 1. 创建一个空白的“存档数据盒子”
+	// UMySaveGame::StaticClass()：获取 UMySaveGame 这个类的静态反射类型元数据
+	// 为什么用 CreateSaveGameObject 创建 UMySaveGame 对象而不用 new：参与 GC 管理体系；支持转为二进制写入物理硬盘的
+	// 从不能存数据的类的元数据转为可以储存数据的内存中的实体对象
 	UMySaveGame* SaveObj = Cast<UMySaveGame>(UGameplayStatics::CreateSaveGameObject(UMySaveGame::StaticClass()));
 	if (!SaveObj)
 	{
@@ -64,20 +67,28 @@ void UMySaveSubsystem::PerformAsyncSave(const FString& SlotName)
 		}
 
 		// 【中介调度】：主动向各业务系统索要纯净的数据切片，打包进大卡车
+		// 将来优化方向：使用接口，最适合收集数据
 		if (USkillPointSubsystem* SPSubsystem = World->GetSubsystem<USkillPointSubsystem>())
 		{
 			SaveObj->SquadMasterArchive = SPSubsystem->ExtractSaveData();
 		}
 	}
 
-	// 5. 【架构神笔】：敲响大喇叭，把 SaveObj 传给全图！
+	// 5. 敲响大喇叭，把 SaveObj 传给全图！
 	// 此时，UI、背包、战斗系统听到喇叭，会瞬间把他们的物资、血量全塞进这个 SaveObj 里。
 	// 这行代码执行完后，SaveObj 已经被各路系统塞得满满当当了！
+
+	// 将来优化方向：使用接口，最适合收集数据
 	OnGameSaving.Broadcast(SaveObj);
 
 	// 6. 绑定硬盘写入完成的回调，开启多线程异步存盘，不卡主线程
+	// 写成局部委托，就是为了实现“阅后即焚”，不用担心在 Deinitialize 或销毁时忘记调用 .Unbind()
 	FAsyncSaveGameToSlotDelegate SaveDelegate;
+	// 为什么用 BindUObject 而不是直接传函数指针？
+	// 因为虚幻引擎极其注重内存安全。如果在这个异步存盘期间，玩家突然退出了游戏，大管家（this）被销毁了。
+	// 当后台存完盘准备打电话时，引擎底层会自动检查 this 是否还活着。如果死了，电话就会静默取消，绝对不会因为打给一个死对象而引发野指针崩溃。
 	SaveDelegate.BindUObject(this, &UMySaveSubsystem::OnAsyncSaveComplete);
+	// 全局异步存盘函数，存档数据盒子、传入的存档名、0 本地 1P 玩家、硬盘写入完成的委托
 	UGameplayStatics::AsyncSaveGameToSlot(SaveObj, SlotName, 0, SaveDelegate);
 }
 

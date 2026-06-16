@@ -10,10 +10,8 @@
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 // 【新增】引入异步加载与系统管理头文件
-#include "Engine/GameInstance.h"
 #include "TimerManager.h"
 #include "Engine/AssetManager.h"
-#include "SaveGame/Subsystem/MySaveSubsystem.h"
 // 引入控制器
 #include "Character/TopPlayerController.h"
 
@@ -58,23 +56,6 @@ void UMyUIHandlerComponent::BeginPlay()
 			UpdateHUD();
 		}
 	}
-
-	// ==============================================================================
-	// 启动时间分片预热 (错开主 HUD 的性能峰值)
-	// 等玩家出生 2 秒后，后台再开始偷偷干活
-	// ==============================================================================
-	if (UGameInstance* GI = GetWorld()->GetGameInstance())
-	{
-		if (UMySaveSubsystem* SaveSub = GI->GetSubsystem<UMySaveSubsystem>())
-		{
-			// 触发大管家的硬盘异步读取
-			SaveSub->PreloadRegistry();
-		}
-	}
-
-	// 定时器：延迟 2 秒后，开始执行第一步界面渲染预热
-	FTimerHandle WarmupStartTimer;
-	GetWorld()->GetTimerManager().SetTimer(WarmupStartTimer, this, &UMyUIHandlerComponent::ProcessNextWarmup, 2.0f, false);
 }
 
 // ==============================================================================

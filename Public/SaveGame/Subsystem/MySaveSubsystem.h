@@ -56,9 +56,11 @@ public:
 	FOnGameLoadingSignature OnGameLoading;
 
 	// 在物理硬盘上后台异步识别并提取名为“GlobalSaveRegistry”的存档文件；
+	// AMyGameModeBase::StartPlay() 游戏开始 2 秒后调用
 	void PreloadRegistry();
 
-	// 核心功能：非阻塞式异步存盘。传入档位名字即可
+	// 核心功能：非阻塞式异步存盘。传入档位名字即可；
+	// UMySaveSlotWidget::OnSaveButtonClicked() 按下保存键调用
 	UFUNCTION(BlueprintCallable, Category = "SaveSystem|Execution")
 	void PerformAsyncSave(const FString& SlotName);
 

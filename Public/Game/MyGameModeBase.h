@@ -16,12 +16,23 @@ class CCC_API AMyGameModeBase : public AGameModeBase
 {
 	GENERATED_BODY()
 
+	// ==============================================================================
+	// 生命周期 (Lifecycle)
+	// ==============================================================================
+public:
+	// 重写 StartPlay，作为后台基建预热的触发点
+	virtual void StartPlay() override;
+
+
+	// ==============================================================================
+	// 队伍名册系统 (Squad Roster System)
+	// ==============================================================================
 public:
 	// 动态维护当前存活友军的轻量级指针数组
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Roster")
 	TArray<class ATopCharacter*> FriendlyRoster;
 
-	// 【新增总线】：名册变动广播频道
+	// 名册变动广播频道
 	UPROPERTY(BlueprintAssignable, Category = "Roster|Event")
 	FOnRosterChangedSignature OnRosterChanged;
 

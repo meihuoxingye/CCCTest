@@ -1,9 +1,60 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-
 #include "Game/MyGameModeBase.h"
-//角色
+// 角色
 #include "Character/TopCharacter.h"
+
+// 引入后台预热所需的底层系统头文件
+#include "Engine/World.h"
+#include "Engine/GameInstance.h"
+#include "TimerManager.h"
+#include "SaveGame/Subsystem/MySaveSubsystem.h"
+
+
+// ==============================================================================
+// 生命周期 (Lifecycle)
+// ==============================================================================
+#pragma region
+
+void AMyGameModeBase::StartPlay()
+{
+	// GameMode 的 StartPlay 是所有 Actor 准备就绪、游戏正式开始的冲锋号
+	Super::StartPlay();
+
+	// ==============================================================================
+	// 后台基建任务预热 (Background Infrastructure Warm-up)
+	// ==============================================================================
+
+	// 使用弱引用捕获 'this'，防止在 2 秒内切换关卡导致的崩溃风险 (UE5.7 规范)
+	TWeakObjectPtr<AMyGameModeBase> WeakThis(this);
+
+	// 设置一个 2 秒的后台定时器，避开加载地图初期的 CPU 性能峰值
+	FTimerHandle SaveWarmupTimer;
+	GetWorld()->GetTimerManager().SetTimer(SaveWarmupTimer, [WeakThis]()
+		{
+			// 匿名函数 (Lambda) 极度干净利落，不需要额外去 .h 里声明一个专门的预热函数
+			// 检查 GameMode 是否依然存活
+			if (WeakThis.IsValid())
+			{
+				if (UGameInstance* GI = WeakThis->GetGameInstance())
+				{
+					if (UMySaveSubsystem* SaveSub = GI->GetSubsystem<UMySaveSubsystem>())
+					{
+						// 避开 CPU 负载尖峰，平稳执行异步预加载
+						SaveSub->PreloadRegistry();
+					}
+				}
+			}
+		}, 2.0f, false);
+}
+
+#pragma endregion
+
+
+// ==============================================================================
+// 队伍名册系统 (Squad Roster System)
+// ==============================================================================
+#pragma region
 
 void AMyGameModeBase::RegisterFriendly(ATopCharacter* Character)
 {
@@ -21,8 +72,7 @@ void AMyGameModeBase::UnregisterFriendly(ATopCharacter* Character)
 {
 	if (Character)
 	{
-		// 待实现：
-		// 把死掉的角色留在队列里“灰色显示”，不需要频繁变动数组
+		// 遵循你的设计：目前直接移除，未来可扩展为灰色显示
 		// 放弃冷冰冰的系统内置排序，可以让玩家自主手动调整位置
 		FriendlyRoster.Remove(Character);
 
@@ -30,3 +80,5 @@ void AMyGameModeBase::UnregisterFriendly(ATopCharacter* Character)
 		OnRosterChanged.Broadcast();
 	}
 }
+
+#pragma endregion
