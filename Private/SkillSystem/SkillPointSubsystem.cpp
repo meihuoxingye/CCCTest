@@ -4,7 +4,10 @@
 // 识别 UWorld 指针
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
+// 在顶部引入：
+#include "JsonObjectConverter.h"
 // 【完美解耦】：我们已经彻底移除了对 SaveSubsystem 和 MySaveGame 的依赖包含！
+
 
 // ==============================================================================
 // 核心生命周期与初始化 (Core Lifecycle & Initialization)
@@ -294,6 +297,44 @@ void USkillPointSubsystem::RemoveCharacterFromSquad(FName CharacterID)
 {
     // 哈希表原生的 Remove 极速擦除，内存干干净净
     SquadSPMap.Remove(CharacterID);
+}
+
+#pragma endregion
+
+
+// ==============================================================================
+// 存档接口契约 (ISavableInterface Implementation)
+// ==============================================================================
+#pragma region
+
+FName USkillPointSubsystem::GetModuleName() const
+{
+    // 这是本系统的全服唯一身份证号，大管家就是靠这个名字去发货/收货的
+    return TEXT("SkillPointSystem");
+}
+
+FString USkillPointSubsystem::ExtractUniversalData()
+{
+    // 1. 调用原来的剥离逻辑，拿到纯净结构体
+    FSkillPointSavePackage Package;
+    Package.SPDataMap = ExtractSaveData();
+
+    // 2. 核心魔法：将结构体压扁成纯文本的 JSON 字符串
+    FString JsonString;
+    FJsonObjectConverter::UStructToJsonObjectString(FSkillPointSavePackage::StaticStruct(), &Package, JsonString, 0, 0);
+
+    return JsonString;
+}
+
+void USkillPointSubsystem::InjectUniversalData(const FString& InJSONString)
+{
+    FSkillPointSavePackage Package;
+    // 1. 核心魔法：将收到的 JSON 字符串，重新充气鼓起来变回结构体
+    if (FJsonObjectConverter::JsonObjectStringToUStruct(InJSONString, &Package, 0, 0))
+    {
+        // 2. 调用原来的注入逻辑，激活业务时间轴
+        InjectSaveData(Package.SPDataMap);
+    }
 }
 
 #pragma endregion

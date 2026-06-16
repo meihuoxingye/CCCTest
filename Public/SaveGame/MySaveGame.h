@@ -80,11 +80,8 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Global")
 	FGlobalSaveData GlobalDataBlock;
 
-	// 小队游牧档案库：以角色 ID 为 Key，存放每个角色被剥离了业务逻辑的纯净数值
-	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Squad")
-	TMap<FName, FCharacterSaveData> SquadMasterArchive;
-
-	// 世界固定资产档案库：以关卡 ID 为 Key，存放每个地图的机关/门状态
-	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|World")
-	TMap<FName, FLevelSaveData> WorldMasterArchive;
+	// 【终极万能集装箱】：Key 是子系统的名字，Value 是该系统自己打包好的序列化字符串(JSON)
+	// 只要存成了字符串，大管家就再也不需要认识任何业务系统的头文件了！
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Universal")
+	TMap<FName, FString> UniversalArchives;
 };

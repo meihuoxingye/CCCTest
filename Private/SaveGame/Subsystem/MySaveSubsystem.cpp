@@ -3,12 +3,13 @@
 #include "SaveGame/Subsystem/MySaveSubsystem.h"
 #include "SaveGame/MySaveGame.h"
 // 【主动引入业务类】：大管家负责向下发号施令，要求各业务线提取或注入数据
-#include "SkillSystem/SkillPointSubsystem.h" 
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "HAL/PlatformFileManager.h"
 #include "Misc/Paths.h"
+// 记得在顶部引入我们刚写的接口
+#include "SaveGame/MySavableInterface.h"
 
 // ==============================================================================
 // 核心接口 (Core Interfaces)
@@ -66,22 +67,27 @@ void UMySaveSubsystem::PerformAsyncSave(const FString& SlotName)
 			SaveObj->GlobalDataBlock.PlayerTransform = PlayerChar->GetActorTransform();
 		}
 
-		// 【中介调度】：主动向各业务系统索要纯净的数据切片，打包进大卡车
-		// 将来优化方向：使用接口，最适合收集数据
-		if (USkillPointSubsystem* SPSubsystem = World->GetSubsystem<USkillPointSubsystem>())
+		// =====================================================================
+		// 【极致解耦】：接口化拉取！动态收集所有挂载了 ISavableInterface 的子系统
+		// =====================================================================
+
+		// 让引擎把当前游戏世界里【所有】的 WorldSubsystem 一次性全拉出来列队
+		const TArray<UWorldSubsystem*>& AllSubsystems = World->GetSubsystemArray<UWorldSubsystem>();
+
+		// 挨个查岗
+		for (UWorldSubsystem* Subsystem : AllSubsystems)
 		{
-			SaveObj->SquadMasterArchive = SPSubsystem->ExtractSaveData();
+			// 如果这个子系统贴了“可存档”的契约标签（实现了接口）
+			if (IMySavableInterface* SavableModule = Cast<IMySavableInterface>(Subsystem))
+			{
+				// 无脑向它索要名字和 JSON 字符串，一把塞进万能集装箱！
+				// 此处完美符合开闭原则：未来加100个新系统，这里的代码一行都不用改！
+				SaveObj->UniversalArchives.Add(SavableModule->GetModuleName(), SavableModule->ExtractUniversalData());
+			}
 		}
 	}
 
-	// 5. 敲响大喇叭，把 SaveObj 传给全图！
-	// 此时，UI、背包、战斗系统听到喇叭，会瞬间把他们的物资、血量全塞进这个 SaveObj 里。
-	// 这行代码执行完后，SaveObj 已经被各路系统塞得满满当当了！
-
-	// 将来优化方向：使用接口，最适合收集数据
-	OnGameSaving.Broadcast(SaveObj);
-
-	// 6. 绑定硬盘写入完成的回调，开启多线程异步存盘，不卡主线程
+	// 5. 绑定硬盘写入完成的回调，开启多线程异步存盘，不卡主线程
 	// 写成局部委托，就是为了实现“阅后即焚”，不用担心在 Deinitialize 或销毁时忘记调用 .Unbind()
 	FAsyncSaveGameToSlotDelegate SaveDelegate;
 	// 为什么用 BindUObject 而不是直接传函数指针？
@@ -135,10 +141,24 @@ bool UMySaveSubsystem::LoadGameFromSlot(const FString& SlotName)
 		PlayerChar->SetActorTransform(SaveObj->GlobalDataBlock.PlayerTransform, false, nullptr, ETeleportType::TeleportPhysics);
 	}
 
-	// 【中介调度】：主动将大卡车里的纯净数据切片，强行塞给对应的业务系统
-	if (USkillPointSubsystem* SPSubsystem = World->GetSubsystem<USkillPointSubsystem>())
+	// =====================================================================
+	// 【极致解耦】：接口化注入！把包裹按名字分发给对应的子系统
+	// =====================================================================
+	const TArray<UWorldSubsystem*>& AllSubsystems = World->GetSubsystemArray<UWorldSubsystem>();
+	for (UWorldSubsystem* Subsystem : AllSubsystems)
 	{
-		SPSubsystem->InjectSaveData(SaveObj->SquadMasterArchive);
+		// 如果是个可存档系统
+		if (IMySavableInterface* SavableModule = Cast<IMySavableInterface>(Subsystem))
+		{
+			// 问出它的名字
+			FName ModuleName = SavableModule->GetModuleName();
+			// 在万能集装箱里找找，有没有属于它的 JSON 字符串包裹？
+			if (const FString* FoundJsonData = SaveObj->UniversalArchives.Find(ModuleName))
+			{
+				// 如果有，把字符串扔给它，让它自己去解析还原
+				SavableModule->InjectUniversalData(*FoundJsonData);
+			}
+		}
 	}
 
 	// 4. 【恢复钩子】：敲响大喇叭，把刚从硬盘里拿出来的、装满旧数据的 SaveObj 传给全图。

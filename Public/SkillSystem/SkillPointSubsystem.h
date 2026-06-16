@@ -14,6 +14,16 @@ DECLARE_MULTICAST_DELEGATE_TwoParams(FOnSPChangedSignature, FName /*CharacterID*
 /**
  * */
 
+ // 【新增】：专门用于序列化 JSON 的数据包裹
+USTRUCT()
+struct FSkillPointSavePackage
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TMap<FName, FCharacterSaveData> SPDataMap;
+};
+
  // 角色技能点数据结构体，包含当前 SP、上限、恢复速率等信息
 USTRUCT(BlueprintType)
 struct FCharacterSPData
@@ -46,7 +56,7 @@ struct FCharacterSPData
 
 
 UCLASS()
-class CCC_API USkillPointSubsystem : public UWorldSubsystem
+class CCC_API USkillPointSubsystem : public UWorldSubsystem, public IMySavableInterface
 {
 	GENERATED_BODY()
 
@@ -154,4 +164,12 @@ public:
 	UPROPERTY(BlueprintReadWrite, Category = "Squad")
 	TMap<FName, FCharacterSPData> SquadSPMap;
 
+
+	// ==============================================================================
+	// 存档接口契约 (ISavableInterface Implementation)
+	// ==============================================================================
+public:
+	virtual FName GetModuleName() const override;
+	virtual FString ExtractUniversalData() override;
+	virtual void InjectUniversalData(const FString& InJSONString) override;
 };
