@@ -30,12 +30,15 @@ FLevelSaveData::FLevelSaveData()
 #pragma endregion
 
 // ==============================================================================
-// 3. 游戏全局数据块 (比如时间、金币、任务进度)
+// 3. 游戏全局数据块 (系统锚点与全局状态)
 // ==============================================================================
 #pragma region
 
 FGlobalSaveData::FGlobalSaveData()
 {
+	// FTransform 默认提供单位矩阵 (0,0,0) 位置与 (1,1,1) 缩放
+	SavedLevelName = NAME_None;
+	EliminatedActorIDs.Empty();
 	TotalGold = 0;
 	CurrentMainQuestID = NAME_None;
 }

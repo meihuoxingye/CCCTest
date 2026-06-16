@@ -2,6 +2,8 @@
 
 #include "SaveGame/Subsystem/MySaveSubsystem.h"
 #include "SaveGame/MySaveGame.h"
+// 【主动引入业务类】：大管家负责向下发号施令，要求各业务线提取或注入数据
+#include "SkillSystem/SkillPointSubsystem.h" 
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
@@ -16,10 +18,11 @@
 void UMySaveSubsystem::PreloadRegistry()
 {
 	// 指定内部存档槽位名称。
-	// 虚幻底层 ISaveGameSystem 会以该名称为基准，自动追加 .sav 后缀来操作物理硬盘文件。
+	// 虚幻底层 ISaveGameSystem 会以该名称为基准，自动追加 .sav 后缀来读取物理硬盘文件。
 	const FString RegistrySlot = TEXT("GlobalSaveRegistry");
 
 	// 实例化一个局部委托对象
+	// 写成局部委托，就是为了实现“阅后即焚”，不用担心在 Deinitialize 或销毁时忘记调用 .Unbind()
 	FAsyncLoadGameFromSlotDelegate LoadedDelegate;
 	// 绑定回调委托：当异步识别完成时，去执行 OnRegistryLoaded
 	LoadedDelegate.BindUObject(this, &UMySaveSubsystem::OnRegistryLoaded);
@@ -50,11 +53,20 @@ void UMySaveSubsystem::PerformAsyncSave(const FString& SlotName)
 	// 防御性检查：确保当前世界上下文合法，防止在切换关卡等极端情况下崩溃
 	if (World)
 	{
+		// 记录系统锚点数据到纯净全局包裹中
+		SaveObj->GlobalDataBlock.SavedLevelName = CurrentLevelName;
+
 		// 安全获取当前本地玩家（0号玩家）的角色指针
 		if (ACharacter* PlayerChar = UGameplayStatics::GetPlayerCharacter(World, 0))
 		{
-			// 将玩家此刻的绝对物理状态（位置、旋转、缩放）快照并记录到存档对象中
-			SaveObj->PlayerTransform = PlayerChar->GetActorTransform();
+			// 将玩家此刻的绝对物理状态（位置、旋转、缩放）快照并记录到存档全局数据块中
+			SaveObj->GlobalDataBlock.PlayerTransform = PlayerChar->GetActorTransform();
+		}
+
+		// 【中介调度】：主动向各业务系统索要纯净的数据切片，打包进大卡车
+		if (USkillPointSubsystem* SPSubsystem = World->GetSubsystem<USkillPointSubsystem>())
+		{
+			SaveObj->SquadMasterArchive = SPSubsystem->ExtractSaveData();
 		}
 	}
 
@@ -108,7 +120,14 @@ bool UMySaveSubsystem::LoadGameFromSlot(const FString& SlotName)
 	{
 		// 【避坑指南】：使用 ETeleportType::TeleportPhysics 是极其专业的写法。
 		// 当瞬间改变角色位置时，如果不加这个枚举，角色身上的披风布料、碰撞体会因为瞬间极速移动产生逆天惯性，导致模型爆炸或者被弹飞。
-		PlayerChar->SetActorTransform(SaveObj->PlayerTransform, false, nullptr, ETeleportType::TeleportPhysics);
+		// 注意这里改为了从纯净包裹 GlobalDataBlock 中提取坐标
+		PlayerChar->SetActorTransform(SaveObj->GlobalDataBlock.PlayerTransform, false, nullptr, ETeleportType::TeleportPhysics);
+	}
+
+	// 【中介调度】：主动将大卡车里的纯净数据切片，强行塞给对应的业务系统
+	if (USkillPointSubsystem* SPSubsystem = World->GetSubsystem<USkillPointSubsystem>())
+	{
+		SPSubsystem->InjectSaveData(SaveObj->SquadMasterArchive);
 	}
 
 	// 4. 【恢复钩子】：敲响大喇叭，把刚从硬盘里拿出来的、装满旧数据的 SaveObj 传给全图。

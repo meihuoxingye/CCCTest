@@ -4,7 +4,8 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/SaveGame.h"
-#include "SkillSystem/SkillPointSubsystem.h" 
+// 【绝对解耦】：仅包含纯净的图纸，不包含任何业务类
+#include "SaveGame/MySaveDataTypes.h" 
 #include "MySaveGame.generated.h"
 
 // ==============================================================================
@@ -36,13 +37,11 @@ struct FSaveSlotMetaData
 	FName LevelName;
 };
 
-
 // ==============================================================================
 // 全局存档注册表 (Global Save Registry)
 // ==============================================================================
 
-/** 
- * 继承 USaveGame 的数据类一
+/** * 继承 USaveGame 的数据类一
  * 永远存放在固定槽位 "GlobalSaveRegistry" 中的小型清单文件
  */
 UCLASS()
@@ -63,37 +62,29 @@ public:
 	int32 UnlockedPages = 3;
 };
 
-
 // ==============================================================================
 // 核心存档数据容器 (Core Save Game Container)
 // ==============================================================================
 
-/** 
- * 继承 USaveGame 的数据类二
+/** * 继承 USaveGame 的数据类二
  * 包含所有需要持久化的重量级游戏数据，使用异步 I/O 写入
+ * 铁律：本类中禁止声明任何独立的基础变量，只允许装载 MySaveDataTypes 中定义的数据块！
  */
-
 UCLASS()
 class CCC_API UMySaveGame : public USaveGame
 {
 	GENERATED_BODY()
 
 public:
-	// 保存玩家在 3D 世界中的精确坐标、旋转和缩放。
-	// 因为使用了 FTransform（而非 FVector），角色复活/读档时，面朝的方向也会被完美还原。
-	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Player")
-	FTransform PlayerTransform;
+	// 唯一全局包裹：包含玩家位置、关卡名、金币、已击杀怪物等全服唯一数据
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Global")
+	FGlobalSaveData GlobalDataBlock;
 
-	// 跨系统解耦数据对接：把你在 SP 子系统中计算的队伍各角色技能点状态，原封不动地“拓印”下来。
-	// 读档时，再将这个 Map 一脚踢回给 SP 子系统，实现数值的无缝恢复。
+	// 小队游牧档案库：以角色 ID 为 Key，存放每个角色被剥离了业务逻辑的纯净数值
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Squad")
-	TMap<FName, FCharacterSPData> SavedSquadSPMap;
+	TMap<FName, FCharacterSaveData> SquadMasterArchive;
 
-	// 暂时没用到
-	// 记录已被击杀的精英怪或已拾取的唯一道具的 GUID
-	// 【现代独立游戏标准的“生死簿”】：
-	// 在你的游戏世界里，切关卡或读档重生时，所有怪物/宝箱在出生前，都要来向这个集合查阅：“我死过了吗？”
-	// 如果怪物发现自己的 GUID 已经被登记在案，就会执行自行销毁（Destroy），从而完美防止精英怪重复刷血或宝箱被无限开。
+	// 世界固定资产档案库：以关卡 ID 为 Key，存放每个地图的机关/门状态
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|World")
-	TSet<FGuid> EliminatedActorIDs;
+	TMap<FName, FLevelSaveData> WorldMasterArchive;
 };

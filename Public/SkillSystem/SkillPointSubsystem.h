@@ -4,6 +4,8 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
+// 【引入纯净块】：只认数据格式，不认系统，实现绝对解耦
+#include "SaveGame/MySaveDataTypes.h" 
 #include "SkillPointSubsystem.generated.h"
 
 // 删掉 DYNAMIC，使用原生多播委托
@@ -116,12 +118,15 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Squad|SaveSystem")
 	void PostLoadSync();
 
-private:
-	// 监听到存档大管家的发车信号，主动把数据放进车里
-	void HandleGameSaving(class UMySaveGame* SaveObj);
+	// 【注入动作】：大管家读档时调用，强行注入纯净数据（替代原有的 HandleGameLoading）
+	// 读档大管家卸货时，将剥离了业务逻辑的基础数字一脚踢给本系统进行重新组装
+	UFUNCTION(BlueprintCallable, Category = "Squad|SaveSystem")
+	void InjectSaveData(const TMap<FName, FCharacterSaveData>& InArchive);
 
-	// 监听到读档大管家的卸货信号，主动从车里拿走属于自己的数据
-	void HandleGameLoading(class UMySaveGame* SaveObj);
+	// 【提取动作】：大管家存档时调用，剥离业务逻辑生成纯净切片（替代原有的 HandleGameSaving）
+	// 存档大管家发车时，向本系统索要一份用于写盘的纯净基础数据
+	UFUNCTION(BlueprintCallable, Category = "Squad|SaveSystem")
+	TMap<FName, FCharacterSaveData> ExtractSaveData();
 
 
 	// ==============================================================================

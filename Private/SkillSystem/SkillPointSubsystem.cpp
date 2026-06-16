@@ -1,15 +1,10 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-
 #include "SkillSystem/SkillPointSubsystem.h"
 // 识别 UWorld 指针
 #include "Engine/World.h"
-
 #include "Engine/GameInstance.h"
-// 【主动依赖】：底层系统去依赖高层的统筹数据容器，这是符合解耦规范的
-#include "SaveGame/Subsystem/MySaveSubsystem.h"
-#include "SaveGame/MySaveGame.h"
-
+// 【完美解耦】：我们已经彻底移除了对 SaveSubsystem 和 MySaveGame 的依赖包含！
 
 // ==============================================================================
 // 核心生命周期与初始化 (Core Lifecycle & Initialization)
@@ -26,35 +21,13 @@ void USkillPointSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     WarriorData.LastSyncGameTime = 0.0;
     SquadSPMap.Add(TEXT("Hero_Warrior"), WarriorData);
 
-    // 2. 主动插上网线，监听全局存档总线
-    if (UWorld* World = GetWorld())
-    {
-        if (UGameInstance* GI = World->GetGameInstance())
-        {
-            if (UMySaveSubsystem* SaveSub = GI->GetSubsystem<UMySaveSubsystem>())
-            {
-                SaveSub->OnGameSaving.AddUObject(this, &USkillPointSubsystem::HandleGameSaving);
-                SaveSub->OnGameLoading.AddUObject(this, &USkillPointSubsystem::HandleGameLoading);
-            }
-        }
-    }
+    // 【架构变更】：采用中介者模式后，子系统无需再主动插网线去监听存档大喇叭，由大管家统一调度
 }
 
 void USkillPointSubsystem::Deinitialize()
 {
     // 内存安全兜底：WorldSubsystem 生命周期（单地图）短于 GameInstance（全游戏）。
-    // 在切地图时自身销毁前，必须主动拔掉网线，防止大管家给死人发广播导致崩溃。
-    if (UWorld* World = GetWorld())
-    {
-        if (UGameInstance* GI = World->GetGameInstance())
-        {
-            if (UMySaveSubsystem* SaveSub = GI->GetSubsystem<UMySaveSubsystem>())
-            {
-                SaveSub->OnGameSaving.RemoveAll(this);
-                SaveSub->OnGameLoading.RemoveAll(this);
-            }
-        }
-    }
+    // 在切地图时自身销毁前，如有其他原生委托，仍需清理。
 
     Super::Deinitialize();
 }
@@ -140,7 +113,6 @@ bool USkillPointSubsystem::ConsumeCharacterSP(FName CharacterID, float Amount)
         DataPtr->LastSyncGameTime = GetWorld()->GetTimeSeconds();
 
         // 【新增广播】：通知 UI，技能点被扣了，必须立刻呼叫 UI 蓝图重新拉取最新的快照进行重绘
-        // ==========================================
         OnSPChanged.Broadcast(CharacterID, GetCharacterSPPercent(CharacterID));
 
         return true;
@@ -224,27 +196,51 @@ void USkillPointSubsystem::PostLoadSync()
     }
 }
 
-void USkillPointSubsystem::HandleGameSaving(UMySaveGame* SaveObj)
+void USkillPointSubsystem::InjectSaveData(const TMap<FName, FCharacterSaveData>& InArchive)
 {
-    // 绝对安全保护
-    if (!SaveObj) return;
+    // 遍历大管家递过来的纯净数据箱，将其按要求重新组装为复杂的业务结构体
+    for (const auto& Pair : InArchive)
+    {
+        FName CharacterID = Pair.Key;
+        const FCharacterSaveData& RawData = Pair.Value;
 
+        // FindOrAdd: 如果字典里没找到这个人，就开辟新内存；找到了就直接引用。
+        FCharacterSPData& InternalData = SquadSPMap.FindOrAdd(CharacterID);
+
+        // 【核心转换】：把纯净的 int32 强转回 float，装入活着的业务系统
+        InternalData.SavedSP = static_cast<float>(RawData.CurrentSP);
+        InternalData.MaxSP = static_cast<float>(RawData.MaxSP);
+    }
+
+    // 数据塞入完成后，自动唤醒内部计算引擎（触发原有的解冻与时间轴对齐操作）
+    PostLoadSync();
+}
+
+TMap<FName, FCharacterSaveData> USkillPointSubsystem::ExtractSaveData()
+{
     // 1. 整理自身内部数据（触发原有的冻结与快照操作）
     PrepareForSave();
 
-    // 2. 把准备好的数据，物理搬运到存档盒子里
-    SaveObj->SavedSquadSPMap = this->SquadSPMap;
-}
+    TMap<FName, FCharacterSaveData> OutArchive;
 
-void USkillPointSubsystem::HandleGameLoading(UMySaveGame* SaveObj)
-{
-    if (!SaveObj) return;
+    // 【3A级性能优化】：一次性全部分配内存，彻底消除循环 Add 时的动态扩容与内存重分配开销
+    OutArchive.Reserve(SquadSPMap.Num());
 
-    // 1. 从存档盒子里拿回属于自己的那一块数据
-    this->SquadSPMap = SaveObj->SavedSquadSPMap;
+    for (const auto& Pair : SquadSPMap)
+    {
+        FName CharacterID = Pair.Key;
+        const FCharacterSPData& InternalData = Pair.Value;
 
-    // 2. 唤醒内部计算引擎（触发原有的解冻与时间轴对齐操作）
-    PostLoadSync();
+        FCharacterSaveData RawData;
+        // 【核心转换】：剥离时间轴等业务逻辑，仅抽取最基础的数字存盘
+        RawData.CurrentSP = FMath::FloorToInt(InternalData.SavedSP);
+        RawData.MaxSP = FMath::FloorToInt(InternalData.MaxSP);
+
+        // 极致速度的 O(1) 装箱打包
+        OutArchive.Add(CharacterID, RawData);
+    }
+
+    return OutArchive;
 }
 
 #pragma endregion
@@ -287,12 +283,10 @@ void USkillPointSubsystem::UpdateCharacterConfig(FName CharacterID, float NewMax
     DataPtr->LastSyncGameTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
 
     // 过去的账目结清后，现在可以安全覆盖新上限和新恢复速度了！
-    // 接下来流逝的时间差，将完全安全地按照新的速度执行，绝不污染过去的历史。
     DataPtr->MaxSP = NewMaxSP;
     DataPtr->RegenRate = NewRegenRate;
 
-    // 【新增广播】：通知 UI，技能点上限改变，必须立刻呼叫 UI 蓝图重新拉取最新的快照进行重绘
-    // ==========================================
+    // 通知 UI 更新
     OnSPChanged.Broadcast(CharacterID, GetCharacterSPPercent(CharacterID));
 }
 
