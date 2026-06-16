@@ -6,7 +6,10 @@
 #include "Subsystems/WorldSubsystem.h"
 // 【引入纯净块】：只认数据格式，不认系统，实现绝对解耦
 #include "SaveGame/MySaveDataTypes.h" 
+// 【修复】：必须要让本系统认识契约长什么样！(注意一定要加在 .generated.h 上面)
+#include "SaveGame/MySavableInterface.h"
 #include "SkillPointSubsystem.generated.h"
+
 
 // 删掉 DYNAMIC，使用原生多播委托
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnSPChangedSignature, FName /*CharacterID*/, float /*NewSPPercent*/);

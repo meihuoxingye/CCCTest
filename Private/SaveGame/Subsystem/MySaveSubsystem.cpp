@@ -10,6 +10,8 @@
 #include "Misc/Paths.h"
 // 记得在顶部引入我们刚写的接口
 #include "SaveGame/MySavableInterface.h"
+// 【新增】：虚幻引擎底层极速对象遍历器
+#include "UObject/UObjectIterator.h"
 
 // ==============================================================================
 // 核心接口 (Core Interfaces)
@@ -71,18 +73,19 @@ void UMySaveSubsystem::PerformAsyncSave(const FString& SlotName)
 		// 【极致解耦】：接口化拉取！动态收集所有挂载了 ISavableInterface 的子系统
 		// =====================================================================
 
-		// 让引擎把当前游戏世界里【所有】的 WorldSubsystem 一次性全拉出来列队
-		const TArray<UWorldSubsystem*>& AllSubsystems = World->GetSubsystemArray<UWorldSubsystem>();
-
-		// 挨个查岗
-		for (UWorldSubsystem* Subsystem : AllSubsystems)
+		// UWorld 底层不对外公开数组，我们使用引擎级对象迭代器极速捞取：
+		for (TObjectIterator<UWorldSubsystem> It; It; ++It)
 		{
-			// 如果这个子系统贴了“可存档”的契约标签（实现了接口）
-			if (IMySavableInterface* SavableModule = Cast<IMySavableInterface>(Subsystem))
+			UWorldSubsystem* Subsystem = *It;
+			// 绝对安全锁：只处理存活在“当前真实游戏世界”的子系统（排除掉编辑器世界的实例）
+			if (Subsystem && Subsystem->GetWorld() == World)
 			{
-				// 无脑向它索要名字和 JSON 字符串，一把塞进万能集装箱！
-				// 此处完美符合开闭原则：未来加100个新系统，这里的代码一行都不用改！
-				SaveObj->UniversalArchives.Add(SavableModule->GetModuleName(), SavableModule->ExtractUniversalData());
+				// 如果这个子系统贴了“可存档”的契约标签（实现了接口）
+				if (IMySavableInterface* SavableModule = Cast<IMySavableInterface>(Subsystem))
+				{
+					// 无脑向它索要名字和 JSON 字符串，一把塞进万能集装箱！
+					SaveObj->UniversalArchives.Add(SavableModule->GetModuleName(), SavableModule->ExtractUniversalData());
+				}
 			}
 		}
 	}
@@ -144,19 +147,23 @@ bool UMySaveSubsystem::LoadGameFromSlot(const FString& SlotName)
 	// =====================================================================
 	// 【极致解耦】：接口化注入！把包裹按名字分发给对应的子系统
 	// =====================================================================
-	const TArray<UWorldSubsystem*>& AllSubsystems = World->GetSubsystemArray<UWorldSubsystem>();
-	for (UWorldSubsystem* Subsystem : AllSubsystems)
+	for (TObjectIterator<UWorldSubsystem> It; It; ++It)
 	{
-		// 如果是个可存档系统
-		if (IMySavableInterface* SavableModule = Cast<IMySavableInterface>(Subsystem))
+		UWorldSubsystem* Subsystem = *It;
+		// 绝对安全锁：确认是当前世界的子系统
+		if (Subsystem && Subsystem->GetWorld() == World)
 		{
-			// 问出它的名字
-			FName ModuleName = SavableModule->GetModuleName();
-			// 在万能集装箱里找找，有没有属于它的 JSON 字符串包裹？
-			if (const FString* FoundJsonData = SaveObj->UniversalArchives.Find(ModuleName))
+			// 如果是个可存档系统
+			if (IMySavableInterface* SavableModule = Cast<IMySavableInterface>(Subsystem))
 			{
-				// 如果有，把字符串扔给它，让它自己去解析还原
-				SavableModule->InjectUniversalData(*FoundJsonData);
+				// 问出它的名字
+				FName ModuleName = SavableModule->GetModuleName();
+				// 在万能集装箱里找找，有没有属于它的 JSON 字符串包裹？
+				if (const FString* FoundJsonData = SaveObj->UniversalArchives.Find(ModuleName))
+				{
+					// 如果有，把字符串扔给它，让它自己去解析还原
+					SavableModule->InjectUniversalData(*FoundJsonData);
+				}
 			}
 		}
 	}
