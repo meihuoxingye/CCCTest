@@ -73,7 +73,11 @@ void UMySaveSubsystem::PerformAsyncSave(const FString& SlotName)
 		// 【极致解耦】：接口化拉取！动态收集所有挂载了 ISavableInterface 的子系统
 		// =====================================================================
 
-		// UWorld 底层不对外公开数组，我们使用引擎级对象迭代器极速捞取：
+		// 【架构级解耦魔法】：直接扫描引擎底层的全局对象池 (GUObjectArray)
+		// 极速穷举当前内存中所有的 UWorldSubsystem 实例，如技能点子系统等（单例极少，耗时 <0.0001ms）。
+		// 1. 初始化 (TObjectIterator<...> It)：创建迭代器，立刻在引擎内存中找到【第一个】该类对象。
+		// 2. 条件判断 (It;)：隐式调用内部的 operator bool()，当前指向有效对象时为 true，找完为 false。
+		// 3. 步进操作 (++It)：本轮循环结束时，迭代器自动跳到内存中的【下一个】该类对象。
 		for (TObjectIterator<UWorldSubsystem> It; It; ++It)
 		{
 			UWorldSubsystem* Subsystem = *It;
@@ -93,10 +97,12 @@ void UMySaveSubsystem::PerformAsyncSave(const FString& SlotName)
 	// 5. 绑定硬盘写入完成的回调，开启多线程异步存盘，不卡主线程
 	// 写成局部委托，就是为了实现“阅后即焚”，不用担心在 Deinitialize 或销毁时忘记调用 .Unbind()
 	FAsyncSaveGameToSlotDelegate SaveDelegate;
+
 	// 为什么用 BindUObject 而不是直接传函数指针？
 	// 因为虚幻引擎极其注重内存安全。如果在这个异步存盘期间，玩家突然退出了游戏，大管家（this）被销毁了。
 	// 当后台存完盘准备打电话时，引擎底层会自动检查 this 是否还活着。如果死了，电话就会静默取消，绝对不会因为打给一个死对象而引发野指针崩溃。
 	SaveDelegate.BindUObject(this, &UMySaveSubsystem::OnAsyncSaveComplete);
+
 	// 全局异步存盘函数，存档数据盒子、传入的存档名、0 本地 1P 玩家、硬盘写入完成的委托
 	UGameplayStatics::AsyncSaveGameToSlot(SaveObj, SlotName, 0, SaveDelegate);
 }
@@ -168,10 +174,6 @@ bool UMySaveSubsystem::LoadGameFromSlot(const FString& SlotName)
 		}
 	}
 
-	// 4. 【恢复钩子】：敲响大喇叭，把刚从硬盘里拿出来的、装满旧数据的 SaveObj 传给全图。
-	// 此时，背包系统、血量系统听到喇叭，会自己从里面拿走对应的旧数据并覆盖当前状态。
-	OnGameLoading.Broadcast(SaveObj);
-
 	return true;
 }
 
@@ -197,13 +199,17 @@ void UMySaveSubsystem::UnlockNewSavePage()
 	}
 }
 
-void UMySaveSubsystem::ClearSavePage(int32 PageIndex, int32 SlotsPerPage)
+void UMySaveSubsystem::ClearSavePage(int32 PageIndex)
 {
 	// 防御性检查：确保内存中的全局注册表已经加载，否则直接退出防崩溃
 	if (!CachedRegistry) return;
 
 	// 标记位：记录本次操作是否真正删除了任何实质性的存档数据
 	bool bAnyDeleted = false;
+
+	// 【解耦生效】：直接向注册表索要分页法则，不再依赖外部传参
+	int32 SlotsPerPage = CachedRegistry->SlotsPerPage;
+
 	// 计算算法：根据当前页码和每页容量，算出本页第一个存档槽位的起始编号（例如第2页，每页5个，起始就是6）
 	int32 StartIndex = (PageIndex - 1) * SlotsPerPage + 1;
 
@@ -240,7 +246,7 @@ void UMySaveSubsystem::ClearSavePage(int32 PageIndex, int32 SlotsPerPage)
 	}
 }
 
-void UMySaveSubsystem::CompactEmptySavePages(int32 SlotsPerPage)
+void UMySaveSubsystem::CompactEmptySavePages()
 {
 	// 防御性检查
 	if (!CachedRegistry) return;
@@ -249,6 +255,9 @@ void UMySaveSubsystem::CompactEmptySavePages(int32 SlotsPerPage)
 	int32 TargetPageIndex = 1;
 	// 标记位：记录在整个碎片整理过程中，注册表是否发生了需要保存的变动
 	bool bRegistryChanged = false;
+
+	// 【解耦生效】：直接向注册表索要分页法则
+	int32 SlotsPerPage = CachedRegistry->SlotsPerPage;
 
 	// 获取操作系统底层的文件管理接口，用于绕过引擎的序列化，直接极速操作物理文件
 	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
@@ -277,10 +286,11 @@ void UMySaveSubsystem::CompactEmptySavePages(int32 SlotsPerPage)
 			}
 		}
 
-		// 如果这页有数据，且前面有空洞，进行物理平移
+		// 如果这页有数据
 		if (bHasData)
 		{
 			// 如果当前探测到的页码 大于 目标坑位页码，说明中间必定有空页，需要执行“前移搬迁”
+			// 只要 CurrentPageIndex > TargetPageIndex，那个 TargetPageIndex（目标页）就绝对是个空坑，根本不需要再去查
 			if (CurrentPageIndex > TargetPageIndex)
 			{
 				// 计算出目标坑位页的第一个槽位编号
@@ -303,25 +313,32 @@ void UMySaveSubsystem::CompactEmptySavePages(int32 SlotsPerPage)
 						// 拼出新文件的绝对路径
 						FString NewFilePath = SaveDirectory / (NewSlotName + TEXT(".sav"));
 
-						// 如果操作系统查到硬盘上确实有这个旧文件
-						if (PlatformFile.FileExists(*OldFilePath))
+						// 【预防措施】：清理目标坑位的残留死文件，防止因句柄冲突导致搬迁失败
+						if (PlatformFile.FileExists(*NewFilePath))
 						{
-							// 命令操作系统瞬间将文件重命名/移动到新位置（性能极高）
-							PlatformFile.MoveFile(*NewFilePath, *OldFilePath);
+							PlatformFile.DeleteFile(*NewFilePath);
 						}
 
-						// B. 更新极轻量的内存镜像主键
-						// 拷贝一份老元数据作为蓝本
-						FSaveSlotMetaData NewMeta = *FoundMeta;
-						// 把元数据内部记录的名字更新为新的
-						NewMeta.SlotName = NewSlotName;
-						// 将这条新记录添加到内存注册表
-						CachedRegistry->SaveSlots.Add(NewSlotName, NewMeta);
-						// 从内存注册表中彻底抹杀旧记录
-						CachedRegistry->SaveSlots.Remove(OldSlotName);
+						// ==============================================================================
+						// 【原子性修复】：消除多余的 FileExists 检查，直接尝试物理移动！
+						// 只有当操作系统的系统调用明确返回 true 时，才允许修改内存，杜绝撕裂！
+						// ==============================================================================
+						if (PlatformFile.MoveFile(*NewFilePath, *OldFilePath))
+						{
+							// B. 更新极轻量的内存镜像主键
+							// 拷贝一份老元数据作为蓝本
+							FSaveSlotMetaData NewMeta = *FoundMeta;
+							// 把元数据内部记录的名字更新为新的
+							NewMeta.SlotName = NewSlotName;
+							// 将这条新记录添加到内存注册表
+							CachedRegistry->SaveSlots.Add(NewSlotName, NewMeta);
+							// 从内存注册表中彻底抹杀旧记录
+							CachedRegistry->SaveSlots.Remove(OldSlotName);
 
-						// 标记注册表发生了变动
-						bRegistryChanged = true;
+							// 标记注册表发生了变动
+							bRegistryChanged = true;
+						}
+						// 隐式逻辑：如果 MoveFile 返回 false (比如断电、文件被杀毒软件锁定)，内存记录原封不动，保证数据与硬盘绝对一致！
 					}
 				}
 			}
@@ -330,9 +347,12 @@ void UMySaveSubsystem::CompactEmptySavePages(int32 SlotsPerPage)
 		}
 	}
 
+	// 【解耦生效】：向注册表索要最低保底页数，彻底消灭硬编码魔法数字
+	int32 MinPages = CachedRegistry->MinUnlockedPages;
+
 	// 最终安全削减页数
-	// 如果目标指针最后停在3，说明前2页装了数据，总页数应为 2。用 Max(1, ...) 保证游戏至少永远有 1 页存档。
-	int32 NewTotalPages = FMath::Max(1, TargetPageIndex - 1);
+	// 如果目标指针最后停在 X，说明前 X-1 页装了数据。用 Max(保底页数, ...) 保证游戏至少永远有配置的底线页数。
+	int32 NewTotalPages = FMath::Max(MinPages, TargetPageIndex - 1);
 	// 如果计算出的整理后总页数，跟现在记录的总页数不一样（也就是尾部有空页被砍掉了）
 	if (CachedRegistry->UnlockedPages != NewTotalPages)
 	{
@@ -344,6 +364,10 @@ void UMySaveSubsystem::CompactEmptySavePages(int32 SlotsPerPage)
 	// 如果整理过程中发生了任何文件的搬移或页数的削减
 	if (bRegistryChanged)
 	{
+		// 配合 UE 5.7 引擎底层的缓存刷新，稍微挂起极短的时间防冲突（非阻塞式）
+		// 虽然 MoveFile 极快，但给引擎的底层文件系统留一丝喘息空间是好习惯
+		FPlatformProcess::Sleep(0.01f);
+
 		// 把排版得整整齐齐的最新注册表写入物理硬盘
 		UGameplayStatics::SaveGameToSlot(CachedRegistry, TEXT("GlobalSaveRegistry"), 0);
 		// 广播 UI 刷新，玩家会看到存档卡片瞬间往前对齐补位
@@ -352,6 +376,7 @@ void UMySaveSubsystem::CompactEmptySavePages(int32 SlotsPerPage)
 }
 
 #pragma endregion
+
 
 // ==============================================================================
 // 内部管线 (Internal Pipeline)

@@ -131,13 +131,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Squad|SaveSystem")
 	void PostLoadSync();
 
-	// 【注入动作】：大管家读档时调用，强行注入纯净数据（替代原有的 HandleGameLoading）
-	// 读档大管家卸货时，将剥离了业务逻辑的基础数字一脚踢给本系统进行重新组装
+	// 【改为】内部辅助动作：接收 JSON 解析后的纯净结构体并唤醒业务
 	UFUNCTION(BlueprintCallable, Category = "Squad|SaveSystem")
 	void InjectSaveData(const TMap<FName, FCharacterSaveData>& InArchive);
 
-	// 【提取动作】：大管家存档时调用，剥离业务逻辑生成纯净切片（替代原有的 HandleGameSaving）
-	// 存档大管家发车时，向本系统索要一份用于写盘的纯净基础数据
+	// 【改为】内部辅助动作：剥离业务逻辑生成纯净切片，供 JSON 打包器调用
 	UFUNCTION(BlueprintCallable, Category = "Squad|SaveSystem")
 	TMap<FName, FCharacterSaveData> ExtractSaveData();
 

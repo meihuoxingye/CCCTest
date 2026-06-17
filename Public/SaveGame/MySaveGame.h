@@ -8,40 +8,12 @@
 #include "SaveGame/MySaveDataTypes.h" 
 #include "MySaveGame.generated.h"
 
-// ==============================================================================
-// 存档元数据 (Save Slot Metadata)
-// ==============================================================================
-
-/** * 极轻量级数据结构，专门用于在 UI 列表中快速展示，无需加载真实物理世界数据
- * * 为什么要单独创建一个数据文件：
- * 虚幻的底层序列化系统（ISaveGameSystem）极其死板。当你调用 AsyncSaveGameToSlot 或 AsyncLoadGameFromSlot 去读写硬盘时
- * 引擎只认继承自 USaveGame 的类对象
- */
-USTRUCT(BlueprintType)
-struct FSaveSlotMetaData
-{
-	GENERATED_BODY()
-
-	// 档位唯一标识符（即保存在物理硬盘上的 .sav 文件名，如 "Save_2026..."）
-	// UI 点击某个存档卡片准备读取时，就是拿着这个名字去求子系统的。
-	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Meta")
-	FString SlotName;
-
-	// 存档建立的绝对时间戳。
-	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Meta")
-	FDateTime SaveTime;
-
-	// 玩家存盘时所在的关卡名。
-	// 可直接喂给 UI 上的 TextBlock 用于显示“当前章节/区域”，或者供读取统筹器进行无缝切图。
-	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Meta")
-	FName LevelName;
-};
 
 // ==============================================================================
 // 全局存档注册表 (Global Save Registry)
 // ==============================================================================
 
-/** * 继承 USaveGame 的数据类一
+/** * 继承 USaveGame 的 UMySaveRegistry 的数据类一
  * 永远存放在固定槽位 "GlobalSaveRegistry" 中的小型清单文件
  */
 UCLASS()
@@ -50,8 +22,8 @@ class CCC_API UMySaveRegistry : public USaveGame
 	GENERATED_BODY()
 
 public:
-	// 记录所有已存在的存档位及其元数据；
-	// Key 为物理档位名，Value 为对应的极轻量 UI 展示数据（只包含时间和名称，不包含角色属性、位置）。
+	// 记录所有已存在的存档位及其元数据，继承 USaveGame 的 UMySaveRegistry (常驻内存，极小文件)；
+	// Key 为物理档位名，Value 为对应的极轻量 UI 展示数据 FSaveSlotMetaData（自定义数据结构，只包含时间和名称，不包含角色属性、位置）。
 	// 【架构核武】：这不仅是数据的清单，它更是对玩家物理硬盘的“防暴力遍历锁”。
 	// 虚幻引擎底层去遍历硬盘文件开销极大，有了这个固定的全局词典，永远只读它一次就能掌握所有存档状况。
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Registry")
@@ -60,13 +32,21 @@ public:
 	// 物理写盘记录：玩家当前解锁了几页存档 (初始给3页)
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Registry")
 	int32 UnlockedPages = 3;
+
+	// 【架构加固】：将每页容量收归底层物理数据字典管理，彻底与 UI 解耦
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Registry")
+	int32 SlotsPerPage = 5;
+
+	// 【架构加固】：将最低保底页数收归管理，彻底消灭底层硬编码
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Registry")
+	int32 MinUnlockedPages = 3;
 };
 
 // ==============================================================================
 // 核心存档数据容器 (Core Save Game Container)
 // ==============================================================================
 
-/** * 继承 USaveGame 的数据类二
+/** * USaveGame 的数据类二
  * 包含所有需要持久化的重量级游戏数据，使用异步 I/O 写入
  * 铁律：本类中禁止声明任何独立的基础变量，只允许装载 MySaveDataTypes 中定义的数据块！
  */
@@ -76,12 +56,14 @@ class CCC_API UMySaveGame : public USaveGame
 	GENERATED_BODY()
 
 public:
-	// 唯一全局包裹：包含玩家位置、关卡名、金币、已击杀怪物等全服唯一数据
+	// UMySaveGame (实体大卡车，巨大文件)；FGlobalSaveData 自定义数据结构；
+	// 记录绝对物理状态（玩家坐标、当前关卡名）。这些是底层的“硬基建”数据，由 UMySaveSubsystem 亲自保管。
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Global")
 	FGlobalSaveData GlobalDataBlock;
 
-	// 【终极万能集装箱】：Key 是子系统的名字，Value 是该系统自己打包好的序列化字符串(JSON)
-	// 只要存成了字符串，大管家就再也不需要认识任何业务系统的头文件了！
+	// UMySaveGame (实体大卡车，巨大文件)
+	// 各个业务部门（技能点、背包）把自己的数据打包成无逻辑的纸箱子（JSON 字符串）扔在这里。
+	// 只要存成了字符串，大管家 UMySaveSubsystem 就再也不需要认识任何业务系统的头文件了！
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Universal")
 	TMap<FName, FString> UniversalArchives;
 };

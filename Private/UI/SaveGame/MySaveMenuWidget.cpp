@@ -226,7 +226,7 @@ void UMySaveMenuWidget::OnClearPageClicked()
 	if (UMySaveSubsystem* SaveSub = GetGameInstance()->GetSubsystem<UMySaveSubsystem>())
 	{
 		// 仅仅清空数据，页码不会变，所以不需要重置 CurrentPage
-		SaveSub->ClearSavePage(CurrentPage, SlotsPerPage);
+		SaveSub->ClearSavePage(CurrentPage);
 	}
 }
 
@@ -235,7 +235,7 @@ void UMySaveMenuWidget::OnCompactPagesClicked()
 	if (UMySaveSubsystem* SaveSub = GetGameInstance()->GetSubsystem<UMySaveSubsystem>())
 	{
 		// 执行高强度的底层 I/O 整理
-		SaveSub->CompactEmptySavePages(SlotsPerPage);
+		SaveSub->CompactEmptySavePages();
 
 		// 如果因为碎片整理导致总页数变少，且玩家刚好处于被砍掉的页数上，自动将视角拉回最后一页
 		if (CurrentPage > SaveSub->CachedRegistry->UnlockedPages)

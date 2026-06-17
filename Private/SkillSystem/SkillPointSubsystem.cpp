@@ -3,7 +3,6 @@
 #include "SkillSystem/SkillPointSubsystem.h"
 // 识别 UWorld 指针
 #include "Engine/World.h"
-#include "Engine/GameInstance.h"
 // 在顶部引入：
 #include "JsonObjectConverter.h"
 // 【完美解耦】：我们已经彻底移除了对 SaveSubsystem 和 MySaveGame 的依赖包含！
@@ -195,6 +194,11 @@ void USkillPointSubsystem::PostLoadSync()
             // 从冻结到解冻，无论是 SetCharacterRegenFrozen 还是读档，都会调用这一行来对齐时间轴
             DataPtr->LastSyncGameTime = GetWorld()->GetTimeSeconds();
             DataPtr->bIsRegenFrozen = false;
+
+            // ==============================================================================
+            // 【核心修复】：读档注水完成后，主动敲响本系统的专属喇叭，强制 UI 立刻重绘进度条！
+            // ==============================================================================
+            OnSPChanged.Broadcast(Key, GetCharacterSPPercent(Key));
         }
     }
 }

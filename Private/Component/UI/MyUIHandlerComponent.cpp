@@ -285,6 +285,22 @@ void UMyUIHandlerComponent::ToggleSaveMenuWidget(bool bShouldOpen)
 		SaveMenuInstance->SetVisibility(ESlateVisibility::Visible);
 		// 发送点火信号，UI 基类全自动推流、入栈
 		SaveMenuInstance->OnWidgetActivated();
+
+		// ==============================================================================
+		// 【核武级修复】：彻底清除“幽灵输入/按键粘滞” (Fix Input Ghosting)
+		// ==============================================================================
+		if (CachedPC)
+		{
+			// 1. 强令底层的 PlayerController 清空所有物理按键的“按下”状态
+			// 这会强行给增强输入系统发送 Cancel/Completed 信号，斩断正在执行的移动动作
+			CachedPC->FlushPressedKeys();
+
+			// 2. （绝对兜底）清空角色当前帧残余的移动方向向量，实现瞬间急刹车
+			if (APawn* MyPawn = CachedPC->GetPawn())
+			{
+				MyPawn->ConsumeMovementInputVector();
+			}
+		}
 	}
 	else
 	{

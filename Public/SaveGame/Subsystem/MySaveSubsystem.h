@@ -17,14 +17,6 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSaveFinishedSignature, bool, bSuc
 // 蓝图可用的多播委托：当存档列表发生增删改（比如删档、扩容页数）时，通知 UI 刷新列表
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnSaveRegistryChangedSignature);
 
-// C++ 专属多播大喇叭（架构精髓）：
-// 存档瞬间向全图广播，把新建的 SaveObj 传出去。
-// 让背包系统、任务系统自己把数据“塞”进 SaveObj 里，实现 SaveSubsystem 与业务逻辑的绝对解耦！
-DECLARE_MULTICAST_DELEGATE_OneParam(FOnGameSavingSignature, UMySaveGame* /*SaveObj*/);
-
-// C++ 专属多播大喇叭（读档钩子）：
-// 读档成功后，把装满数据的 SaveObj 传给全图。各系统自己把数据“拿”出来恢复状态。
-DECLARE_MULTICAST_DELEGATE_OneParam(FOnGameLoadingSignature, UMySaveGame* /*SaveObj*/);
 
 // ==============================================================================
 // 全局存档统筹子系统 (Global Save Subsystem)
@@ -49,12 +41,6 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "SaveSystem|Events")
 	FOnSaveRegistryChangedSignature OnSaveRegistryChanged;
 
-	// C++ 内部总线：写入数据钩子
-	FOnGameSavingSignature OnGameSaving;
-
-	// C++ 内部总线：读取数据钩子
-	FOnGameLoadingSignature OnGameLoading;
-
 	// 在物理硬盘上后台异步识别并提取名为“GlobalSaveRegistry”的存档文件；
 	// AMyGameModeBase::StartPlay() 游戏开始 2 秒后调用
 	void PreloadRegistry();
@@ -76,17 +62,22 @@ public:
 	// 分页系统 (Pagination System)
 	// ==============================================================================
 
-	// 核心功能：扩充档案页数并强制落盘
+	// 核心功能：扩充档案页数并强制落盘；
+	// 回调函数 UMySaveMenuWidget::OnAddPageClicked() 调用
 	UFUNCTION(BlueprintCallable, Category = "SaveSystem|Execution")
 	void UnlockNewSavePage();
 
 	// 核心功能：清空指定页的所有物理存档，但绝对不削减页数上限
+	// PageIndex (目标页码)；SlotsPerPage (每页容量)
+	// 回调函数 UMySaveMenuWidget::OnClearPageClicked() 调用
 	UFUNCTION(BlueprintCallable, Category = "SaveSystem|Execution")
-	void ClearSavePage(int32 PageIndex, int32 SlotsPerPage);
+	void ClearSavePage(int32 PageIndex);
 
 	// 核心功能：存档碎片整理（一键物理压缩所有空页，并自动将后续存档前移补齐）
+	// SlotsPerPage (每页容量)
+	// 回调函数 UMySaveMenuWidget::OnCompactPagesClicked() 调用
 	UFUNCTION(BlueprintCallable, Category = "SaveSystem|Execution")
-	void CompactEmptySavePages(int32 SlotsPerPage);
+	void CompactEmptySavePages();
 
 	// ==============================================================================
 	// 内部数据缓存 (Internal Data Cache)
@@ -108,8 +99,10 @@ private:
 	void OnRegistryLoaded(const FString& SlotName, const int32 UserIndex, USaveGame* LoadedGame);
 
 	// 内部工具：每次存盘时，更新内存镜像，并把最新的“目录”写进物理硬盘
+	// UMySaveSubsystem::PerformAsyncSave 中调用
 	void UpdateSaveRegistry(const FString& SlotName, FName CurrentLevelName);
 
-	// 内部回调：底层 AsyncSaveGameToSlot 执行完毕后触发，用于向 UI 宣告结果
+	// 内部回调：底层 AsyncSaveGameToSlot 硬盘写入执行完毕后触发，用于向 UI 宣告结果
+	// UMySaveSubsystem::PerformAsyncSave 中调用
 	void OnAsyncSaveComplete(const FString& SlotName, const int32 UserIndex, bool bSuccess);
 };

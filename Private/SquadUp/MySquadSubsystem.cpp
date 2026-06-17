@@ -4,9 +4,6 @@
 #include "SquadUp/MySquadSubsystem.h"
 #include "Character/BaseCharacter.h"
 #include "Character/CharacterAttributeDataAsset.h"
-#include "Kismet/GameplayStatics.h"
-
-#include "SquadUp/SquadTypes.h"
 
 
 // --- 必须加上这一行，它是日志频道的本体 ---
@@ -26,7 +23,8 @@ void UMySquadSubsystem::Tick(float DeltaTime)
     if (GroupingTimer >= 0.5f)
     {
         UpdateGroupingLogic();
-        GroupingTimer = 0.f;
+        // 永远使用减法！把多出来的 0.05f 继承到下一个周期里，保证宏观时间轴的绝对精准！
+        GroupingTimer -= 0.5f;
     }
 }
 

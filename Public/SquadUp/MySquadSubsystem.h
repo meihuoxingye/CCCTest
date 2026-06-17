@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
+#include "SquadUp/SquadTypes.h"
 #include "MySquadSubsystem.generated.h"
 
 
@@ -81,16 +82,17 @@ private:
 private:
 	// 待组队池
 	// 使用弱指针，当角色被销毁了，弱指针会自动意识到“目标已消失”
-	UPROPERTY()
+	// 弱指针的本意就是“不要让垃圾回收(GC)管我”，加上 UPROPERTY 强行让引擎去查它，逻辑完全矛盾！
 	TArray<TWeakObjectPtr<class ABaseCharacter>> Candidates;
 
 	// 已形成的小组
 	UPROPERTY()
 	TArray<struct FSquadGroup> ActiveGroups;
 
-	// 从待组队池里捞出的人
-	// 设为成员变量，为了跨 Tick 内存复用
-	UPROPERTY()
+	// 从待组队池里捞出的人；
+	// 设为成员变量，为了跨 Tick 内存复用；
+	// 这是一个“单帧内的临时计算池”，如果在它头上加 UPROPERTY()，
+	// 虚幻引擎的 GC 垃圾回收器会定期去扫描这块内存！为了省下的开销根本比不上“GC 扫描”的巨大开销
 	TArray<class ABaseCharacter*> FoundBuffer;
 
 protected:

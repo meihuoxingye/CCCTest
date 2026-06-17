@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+/// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -7,8 +7,47 @@
 #include "MySaveDataTypes.generated.h"
 
 // ==============================================================================
+// 0. 存档元数据 (Save Slot Metadata)
+// ==============================================================================
+
+/** * 极轻量级数据结构，专门用于在 UI 列表中快速展示，无需加载真实物理世界数据
+ * * 【归属关系】：
+ * - 宿主：UMySaveRegistry (登记本)
+ * - 存储形式：作为 SaveSlots 字典的 Value 存在。
+ * - 物理落盘：仅存在于极小的 GlobalSaveRegistry.sav 文件中，绝对不会进入真实存档文件。
+ * * 为什么要单独创建一个数据文件：
+ * 虚幻的底层序列化系统（ISaveGameSystem）极其死板。当你调用 AsyncSaveGameToSlot 或 AsyncLoadGameFromSlot 去读写硬盘时
+ * 引擎只认继承自 USaveGame 的类对象
+ */
+USTRUCT(BlueprintType)
+struct CCC_API FSaveSlotMetaData
+{
+	GENERATED_BODY()
+
+	// 档位唯一标识符（即保存在物理硬盘上的 .sav 文件名，如 "Save_2026..."）
+	// UI 点击某个存档卡片准备读取时，就是拿着这个名字去求子系统的。
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Meta")
+	FString SlotName;
+
+	// 存档建立的绝对时间戳。
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Meta")
+	FDateTime SaveTime;
+
+	// 玩家存盘时所在的关卡名。
+	// 可直接喂给 UI 上的 TextBlock 用于显示“当前章节/区域”，或者供读取统筹器进行无缝切图。
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Meta")
+	FName LevelName;
+};
+
+// ==============================================================================
 // 1. 角色专用数据块 (游牧数据)
 // ==============================================================================
+
+/** * 【归属关系】：
+ * - 宿主：具体的业务部门（例如：技能点子系统 USkillPointSubsystem）。
+ * - 存储形式：业务部门会用 JSON 榨汁机，把这个结构体压扁成纯文本的 FString 字符串。
+ * - 物理落盘：被大管家当作无差别黑盒货物，扔进大卡车 (UMySaveGame) 的万能集装箱 (UniversalArchives) 里存盘。大管家不认识此数据。
+ */
 USTRUCT(BlueprintType)
 struct CCC_API FCharacterSaveData
 {
@@ -32,6 +71,12 @@ public:
 // ==============================================================================
 // 2. 地图专用数据块 (固定资产数据)
 // ==============================================================================
+
+/** * 【归属关系】：
+ * - 宿主：地图状态管理子系统或各种关卡管理器。
+ * - 存储形式：同上，被业务部门自己压扁成 JSON 格式的 FString 字符串。
+ * - 物理落盘：混在万能集装箱 (UniversalArchives) 里存盘，与其他业务数据物理隔离。
+ */
 USTRUCT(BlueprintType)
 struct CCC_API FLevelSaveData
 {
@@ -52,6 +97,12 @@ public:
 // ==============================================================================
 // 3. 游戏全局数据块 (比如时间、金币、任务进度)
 // ==============================================================================
+
+/** * 【归属关系】：
+ * - 宿主：存档大管家（UMySaveSubsystem）亲自持有。
+ * - 存储形式：作为大卡车 (UMySaveGame) 的核心 VIP 变量 GlobalDataBlock 原生存在，不经过 JSON 转换。
+ * - 物理落盘：因为包含最底层的世界锚点（坐标、关卡），由大管家亲自收集数据并直接写入大卡车里。
+ */
 USTRUCT(BlueprintType)
 struct CCC_API FGlobalSaveData
 {
@@ -78,9 +129,13 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite)
 	TSet<FGuid> EliminatedActorIDs;
 
+	// 暂时没用
+	// 总金币 / 货币
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite)
 	int32 TotalGold;
 
+	// 暂时没用
+	// 当前主线任务 ID
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite)
 	FName CurrentMainQuestID;
 };
