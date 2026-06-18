@@ -29,9 +29,6 @@ public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
 
-	// 【虚幻5.8】：处理本地玩家控制权与输入注册的绝佳时机
-	virtual void PawnClientRestart() override;
-
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
@@ -75,6 +72,9 @@ private:
 public:
 	// Called to bind functionality to input
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+
+	// 暴露接口，让大管家来拿我的输入配置
+	FORCEINLINE class UInputMappingContext* GetDefaultMappingContext() const { return DefaultMappingContext; }
 
 private:
 	// ===================== 【增强输入动作 (原属于控制器)】 =====================

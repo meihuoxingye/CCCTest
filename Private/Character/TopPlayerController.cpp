@@ -39,12 +39,6 @@ void ATopPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// 激活增强输入本地子系统
-	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
-	{
-		Subsystem->AddMappingContext(TopContext, 0);
-	}
-
 	// 显示鼠标
 	bShowMouseCursor = true;
 	// 设置鼠标样式,EMouseCursor类型的枚举
@@ -72,6 +66,16 @@ void ATopPlayerController::BeginPlay()
 void ATopPlayerController::SetupInputComponent()
 {
 	Super::SetupInputComponent();
+
+	// 虚幻5.8：【最安全的全局底层搭桥地点】
+	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
+	{
+		Subsystem->ClearAllMappings();
+		if (TopContext)
+		{
+			Subsystem->AddMappingContext(TopContext, 0);
+		}
+	}
 
 	// 将普通的 InputComponent 强转为 UE5 新一代的 EnhancedInputComponent
 	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(InputComponent))
@@ -190,6 +194,20 @@ void ATopPlayerController::SwitchToSpecificCharacter(ATopCharacter* TargetCharac
 		FSlateApplication::Get().SetAllUserFocusToGameViewport();
 		return;
 	}
+
+	// ==========================================================
+	// 虚幻5.8：【过河拆桥：灵魂离开旧肉体前，先把它身上的 WASD 卸载掉】
+	if (CachedMyCharacter)
+	{
+		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
+		{
+			if (UInputMappingContext* OldContext = CachedMyCharacter->GetDefaultMappingContext())
+			{
+				Subsystem->RemoveMappingContext(OldContext);
+			}
+		}
+	}
+	// ==========================================================
 
 	// 移交控制权：调用虚幻引擎底层的灵魂附身
 	// 此操作会自动依次触发旧角色的 OnUnPossess 和新角色的 OnPossess
