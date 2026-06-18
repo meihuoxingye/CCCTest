@@ -5,12 +5,15 @@
 
 // 包含虚幻核心最小化依赖
 #include "CoreMinimal.h"
-// 包含 UserWidget 基类，这是所有 UMG UI 蓝图的 C++ 底层基类
-#include "Blueprint/UserWidget.h"
-
+// 【替换为 CommonUI】：包含 CommonActivatableWidget 基类
+#include "CommonActivatableWidget.h"
 // 【必须在最后一行】
 // 包含 Unreal Header Tool 生成的反射代码文件
 #include "MyActivatableWidgetBase.generated.h"
+
+// IWYU 前置声明
+class UInputAction;
+struct FKey;
 
 // ==============================================================================
 // 事件广播 (Event Broadcasting)
@@ -44,8 +47,9 @@ enum class EUIState : uint8
  // 声明此类为抽象类 (Abstract，无法直接实例化) 并且允许被蓝图继承创建子类 (Blueprintable)
  // 使用时设置其为蓝图基类即可
 UCLASS(Abstract, Blueprintable)
-// 继承自 UUserWidget，带有项目模块的 API 导出宏 (CCC_API)
-class CCC_API UMyActivatableWidgetBase : public UUserWidget
+// 继承自 UCommonActivatableWidget，带有项目模块的 API 导出宏 (CCC_API)
+// 【UE 5.8 特性】：UWidget 基类现已原生集成 INotifyFieldValueChanged，无需手动多重继承！
+class CCC_API UMyActivatableWidgetBase : public UCommonActivatableWidget
 {
 	// 生成引擎要求的反射支持模板代码
 	GENERATED_BODY()
@@ -75,8 +79,13 @@ protected:
 	// 【底层计算】：由 NativeTick 每帧自动累加或递减。单帧变化步长 = 本帧物理时间差 (DeltaTime) / 动画总耗时 (Duration)。
 	// 【架构意义】：将物理秒数强制“归一化”为 0~1 的比例，使后续的缓动曲线公式与蓝图表现彻底脱离具体时长的耦合。
 	// 在 UMG 编辑器可拖动滑块实时预览。限制范围在 0.0 到 1.0 之间，避免越界溢出导致后续动画计算错误。
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Transition|State", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, FieldNotify, Setter, Getter, Category = "UI|Transition|State", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float TransitionProgress = 0.0f;
+
+	// MVVM 驱动专属 Setter/Getter
+	UFUNCTION(BlueprintCallable, Category = "UI|Transition|State")
+	void SetTransitionProgress(float InProgress);
+	float GetTransitionProgress() const { return TransitionProgress; }
 
 	// 出场专属耗时（秒）。通常较长，用于展示张力极强的飞入动画
 	// 设置最小限制为 0.01 秒，从源头防止后续 DeltaTime 除零引发崩溃
@@ -201,6 +210,11 @@ protected:
 	// 【新增】：焦点丢失回调，防止 Alt-Tab 切屏后 UI 彻底失焦卡死
 	// 触发时机：在当前 UI 曾经拥有“输入焦点”的前提下，焦点被任何外部力量强行剥夺的瞬间
 	virtual void NativeOnFocusLost(const FFocusEvent& InFocusEvent) override;
+
+	// 【新增】：CommonUI 激活挂载点
+	virtual void NativeOnActivated() override;
+	virtual void NativeOnDeactivated() override;
+	virtual TOptional<FUIInputConfig> GetDesiredInputConfig() const override;
 
 	// ==============================================================================
 	// 响应式输入路由 (Input Routing)

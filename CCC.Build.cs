@@ -15,7 +15,7 @@ public class CCC : ModuleRules
         // 配合 VS 2026，这允许你在 C++ 中使用最新的语言特性
         CppStandard = CppStandardVersion.Cpp23;
 
-        PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "AIModule", "NavigationSystem", "UMG", "Slate", "SlateCore", "ModelViewViewModel", "Json", "JsonUtilities" });
+        PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "AIModule", "NavigationSystem", "UMG", "Slate", "SlateCore", "ModelViewViewModel", "Json", "JsonUtilities", "CommonUI", "CommonInput"});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });
 

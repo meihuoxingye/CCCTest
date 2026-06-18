@@ -18,6 +18,9 @@
 #include "EnhancedActionKeyMapping.h" 
 // 用于安全访问组件树
 #include "Blueprint/WidgetTree.h" 
+// MVVM 与 CommonUI IWYU 补充
+#include "CommonInputModeTypes.h"
+// 在 UE 5.8 中，不再需要引入 MVVMViewModelBase.h，因为底层 Widget 已原生支持
 
 // ==============================================================================
 // 状态驱动接口 (State Drivers)
@@ -25,14 +28,24 @@
 #pragma region
 
 // 【激活接口】：由外部调用，触发 UI 展开逻辑，展开过程中只执行一次。
-// 【C++ 底层保底逻辑 (_Implementation)】：
-// 1. 状态拦截：若已在展开中则直接忽略，防止玩家狂按快捷键导致动画重置。
-// 2. 数据归零：重置进度 TransitionProgress 为 0.0，设为可见，切入 Opening 状态。
-// 3. 拦截网入栈：主动寻址 UMyUIManagerSubsystem 并将自身 Push 入栈，瞬间接管全局输入焦点。
-// 4. 终极防闪烁：执行 ForceLayoutPrepass() 强迫引擎在蓝图渲染前提前算好 Slate 尺寸。
-// 5. 点火起飞：计算首帧缓动进度，触发 UpdateOpeningEffect 钩子，唤醒蓝图动画。
+// 【兼容保留】：通过调用 ActivateWidget 将权力移交给 CommonUI 状态机
 void UMyActivatableWidgetBase::OnWidgetActivated_Implementation()
 {
+	ActivateWidget();
+}
+
+// 【激活接口】：由外部调用，触发 UI 收起逻辑，收起过程中只执行一次。
+// 【兼容保留】：通过调用 DeactivateWidget 将权力移交给 CommonUI 状态机
+void UMyActivatableWidgetBase::OnWidgetDeactivated_Implementation()
+{
+	DeactivateWidget();
+}
+
+// 【原生状态机钩子】：引擎底层激活时触发，完美接管原本在 OnWidgetActivated 中的核心防线
+void UMyActivatableWidgetBase::NativeOnActivated()
+{
+	Super::NativeOnActivated();
+
 	// 防御 1 - 设计时拦截。防止 UMG 编辑器在预览/编译时运行逻辑，这是 90% 编辑器崩溃的原因。
 	if (IsDesignTime()) return;
 
@@ -46,8 +59,8 @@ void UMyActivatableWidgetBase::OnWidgetActivated_Implementation()
 	// 如果当前是折叠不可见状态，或者进度已经归零（完全关闭状态）
 	if (GetVisibility() == ESlateVisibility::Collapsed || TransitionProgress <= 0.0f)
 	{
-		// 重置进度到 0.0，准备重新播放入场动画
-		TransitionProgress = 0.0f;
+		// 重置进度到 0.0，准备重新播放入场动画 (MVVM 方式)
+		SetTransitionProgress(0.0f);
 	}
 
 	// 将 UI 的根节点（WBP_TacticalMenu）设为可见，从而使整个UI可见，使其开始渲染并接受交互
@@ -112,14 +125,11 @@ void UMyActivatableWidgetBase::OnWidgetActivated_Implementation()
 	UpdateOpeningEffect(TransitionProgress, EasedProgress);
 }
 
-// 【激活接口】：由外部调用，触发 UI 收起逻辑，收起过程中只执行一次。
-// 【C++ 底层保底逻辑 (_Implementation)】：
-// 1. 状态拦截：若已在收起中，或已经处于隐藏折叠状态，则直接返回。
-// 2. 状态切换：将状态机切入 Closing 状态，由 NativeTick 纯数学引擎接管后续的退场动画推演。
-// 3. 幽灵点击护盾（极其关键）：此时绝不调用 PopUI 出栈！必须让 UI 留在拦截栈里挡子弹，
-// 4. 直到 NativeTick 判定退场动画彻底播完、UI 彻底看不见时，才安全地执行出栈逻辑。
-void UMyActivatableWidgetBase::OnWidgetDeactivated_Implementation()
+// 【原生状态机钩子】：引擎底层失活时触发，完美接管原本在 OnWidgetDeactivated 中的核心防线
+void UMyActivatableWidgetBase::NativeOnDeactivated()
 {
+	Super::NativeOnDeactivated();
+
 	// 增加可见性检查与设计时拦截，防止对象已销毁时依然触发逻辑
 	// 如果已经在关闭过程中，或者是折叠不可见状态，则无需重复执行反激活
 	if (IsDesignTime() || CurrentState == EUIState::Closing || GetVisibility() == ESlateVisibility::Collapsed) return;
@@ -129,6 +139,7 @@ void UMyActivatableWidgetBase::OnWidgetDeactivated_Implementation()
 
 	// 注意：这里绝不调用 PopUI！留在拦截栈中抗点击穿透，交由 Tick 动画结束时出栈。
 }
+
 #pragma endregion
 
 // ==============================================================================
@@ -146,12 +157,9 @@ void UMyActivatableWidgetBase::NativeOnInitialized()
 	// 将 UI 的初始状态设置为待机（Idle）
 	CurrentState = EUIState::Idle;
 
-	// 【修改】：只有当策划勾选了“需要抢夺焦点”时，才在后台创建 UI 实例时底层赋予该 UI 获取焦点的资格
-	// 有资格不代表一定会抢到焦点，只有在 UI 展开逻辑 OnWidgetActivated_Implementation 调用 SetFocus() 时才会抢夺焦点
-	if (bAutoStealFocusWhenActivated)
-	{
-		SetIsFocusable(true);
-	}
+	// 【修复】：消除直接赋值的弃用警告，统一使用 5.8 标准 Setter
+	SetIsFocusable(true);
+	bSupportsActivationFocus = bAutoStealFocusWhenActivated;
 }
 
 void UMyActivatableWidgetBase::NativeConstruct()
@@ -223,18 +231,23 @@ void UMyActivatableWidgetBase::NativeTick(const FGeometry& MyGeometry, float InD
 	const float InvDuration = 1.0f / FMath::Max(0.001f, CurrentDuration);
 	const float Step = InDeltaTime * InvDuration;
 
+	float NewProgress = TransitionProgress;
+
 	// 如果正在播放入场动画
 	if (CurrentState == EUIState::Opening)
 	{
 		// 累加进度，最高不超过 1.0f
-		TransitionProgress = FMath::Min(TransitionProgress + Step, 1.0f);
+		NewProgress = FMath::Min(TransitionProgress + Step, 1.0f);
 	}
 	// 如果正在播放退场动画
 	else if (CurrentState == EUIState::Closing)
 	{
 		// 递减进度，最低不低于 0.0f
-		TransitionProgress = FMath::Max(TransitionProgress - Step, 0.0f);
+		NewProgress = FMath::Max(TransitionProgress - Step, 0.0f);
 	}
+
+	// 【MVVM 核心更新】：更新进度的同时，触发蓝图动画 UI 的自动刷新
+	SetTransitionProgress(NewProgress);
 
 	// 再次判断状态，用于应用动画效果及判定动画是否结束
 	if (CurrentState == EUIState::Opening)
@@ -408,7 +421,6 @@ void UMyActivatableWidgetBase::RefreshInputPassthroughCache()
 			// 这样做的好处是 O(N) 只取决于你的白名单长度（通常是个位数），而不是游戏总键位数（成百上千）。
 			for (UInputAction* Action : PassthroughActions)
 			{
-				// 【删减】：if (Action)
 				// 【新增/防御】：防止蓝图配置中存在空引用导致查询崩溃，使用 IsValid 防止资源在异步加载时的空引用
 				if (IsValid(Action))
 				{
@@ -443,4 +455,39 @@ bool UMyActivatableWidgetBase::IsPassthroughAction(const FKey& InKey) const
 	// 【布尔决断】：查中则返回 true（引导上层 Unhandled 放行）；未中则返回 false（引导上层 Super 拦截）。
 	return CachedPassthroughKeys.Contains(InKey);
 }
+#pragma endregion
+
+// ==============================================================================
+// CommonUI 焦点系统 (CommonUI Focus System)
+// ==============================================================================
+#pragma region
+
+TOptional<FUIInputConfig> UMyActivatableWidgetBase::GetDesiredInputConfig() const
+{
+	// CommonUI 会根据你设置的这个布尔值，自动决定是否在底层封杀 WASD 移动
+	if (bAutoStealFocusWhenActivated)
+	{
+		return FUIInputConfig(ECommonInputMode::Menu, EMouseCaptureMode::CapturePermanently);
+	}
+	return FUIInputConfig(ECommonInputMode::Game, EMouseCaptureMode::CapturePermanently);
+}
+
+#pragma endregion
+
+// ==============================================================================
+// MVVM 状态驱动 (MVVM State Driven)
+// ==============================================================================
+#pragma region
+
+void UMyActivatableWidgetBase::SetTransitionProgress(float InProgress)
+{
+	// 性能防线：只有当数值发生真实的物理变化时，才触发底层广播，杜绝每帧无效 UI 刷新
+	if (TransitionProgress != InProgress)
+	{
+		TransitionProgress = InProgress;
+		// 5.8 原生语法：调用基类 UWidget 自带的 BroadcastFieldValueChanged 进行全自动 MVVM 派发
+		BroadcastFieldValueChanged(FFieldNotificationId(GET_MEMBER_NAME_CHECKED(UMyActivatableWidgetBase, TransitionProgress)));
+	}
+}
+
 #pragma endregion
