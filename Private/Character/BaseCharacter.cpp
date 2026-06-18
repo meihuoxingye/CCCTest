@@ -26,6 +26,8 @@
 // 组队子系统
 #include "SquadUp/MySquadSubsystem.h"
 
+#include "Engine/World.h" // <-- 5.8 修复：必须显式包含 UWorld 的定义以使用 GetWorld()->
+
 
 // Sets default values
 ABaseCharacter::ABaseCharacter()

@@ -19,7 +19,7 @@ class UButton;
 // ==============================================================================
 
 // Abstract：标记为抽象类禁止直接实例化；Blueprintable：允许在编辑器中基于此类创建蓝图
-UCLASS(Abstract, Blueprintable)
+UCLASS(Blueprintable)
 class CCC_API UMySaveSlotWidget : public UUserWidget
 {
 	// 注入虚幻引擎反射系统的核心宏，自动生成底层的样板代码

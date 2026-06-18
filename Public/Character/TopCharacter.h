@@ -29,6 +29,9 @@ public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
 
+	// 【虚幻5.8】：处理本地玩家控制权与输入注册的绝佳时机
+	virtual void PawnClientRestart() override;
+
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
@@ -75,6 +78,10 @@ public:
 
 private:
 	// ===================== 【增强输入动作 (原属于控制器)】 =====================
+	// 【虚幻5.8】：输入映射上下文，搭起物理按键和 Action 之间的桥梁
+	UPROPERTY(EditAnywhere, Category = "Input")
+	TObjectPtr<class UInputMappingContext> DefaultMappingContext;
+
 	UPROPERTY(EditAnywhere, Category = "Input")
 	TObjectPtr<class UInputAction> MoveAction;
 	UPROPERTY(EditAnywhere, Category = "Input")

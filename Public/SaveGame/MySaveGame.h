@@ -40,6 +40,10 @@ public:
 	// 【架构加固】：将最低保底页数收归管理，彻底消灭底层硬编码
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Registry")
 	int32 MinUnlockedPages = 3;
+
+	// 【架构加固】：将最高页数上限收归管理，防止玩家无限拓荒撑爆内存
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Registry")
+	int32 MaxUnlockedPages = 50;
 };
 
 // ==============================================================================

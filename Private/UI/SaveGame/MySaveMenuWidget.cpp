@@ -10,6 +10,8 @@
 #include "TimerManager.h"
 #include "Engine/World.h"
 
+#include "Components/VerticalBoxSlot.h"
+
 
 // ==============================================================================
 // 核心生命周期与初始化 (Core Lifecycle & Initialization)
@@ -102,7 +104,17 @@ void UMySaveMenuWidget::InitializeSlotPool()
 	{
 		if (UMySaveSlotWidget* SlotWidget = CreateWidget<UMySaveSlotWidget>(GetOwningPlayer(), SlotWidgetClass))
 		{
-			Box_SaveSlots->AddChildToVerticalBox(SlotWidget);
+			// 【修改这里】：拿到 AddChildToVerticalBox 返回的插槽指针
+			UVerticalBoxSlot* VBoxSlot = Box_SaveSlots->AddChildToVerticalBox(SlotWidget);
+
+			// 安全校验并强行注入 UI 排版法则
+			if (VBoxSlot)
+			{
+				// 强制把 C++ 动态生成的卡片尺寸设为 Fill（填充），权重默认 1.0
+				// 蓝图无法设置插槽在 UI 中的状态，只能在这设置
+				VBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			}
+
 			SlotPool.Add(SlotWidget);
 		}
 	}

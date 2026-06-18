@@ -28,6 +28,12 @@
 
 #include "Components/SkeletalMeshComponent.h"
 
+// 虚幻5.8
+// 【新增】：增强输入子系统与本地玩家，用于注册 IMC 桥梁
+#include "EnhancedInputSubsystems.h"
+#include "Engine/LocalPlayer.h"
+
+
 // Sets default values
 ATopCharacter::ATopCharacter()
 {
@@ -54,6 +60,26 @@ ATopCharacter::ATopCharacter()
 void ATopCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+}
+
+void ATopCharacter::PawnClientRestart()
+{
+	Super::PawnClientRestart();
+
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
+		{
+			// 清除可能残留的旧输入状态（非常重要）
+			Subsystem->ClearAllMappings();
+
+			if (DefaultMappingContext)
+			{
+				// 这一步就是把 [W] 映射到 MoveAction 的桥梁搭起来
+				Subsystem->AddMappingContext(DefaultMappingContext, 0);
+			}
+		}
+	}
 }
 
 // Called when the game starts or when spawned

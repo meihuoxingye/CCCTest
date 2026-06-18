@@ -30,5 +30,4 @@ public:
 	// 只读常量引用，防止拷贝消耗内存
 	UFUNCTION(BlueprintCallable, Category = "Squad UI")
 	void UpdateSquadList(const TArray<class ATopCharacter*>& Members, class ATopCharacter* ActiveChar);
-
 };

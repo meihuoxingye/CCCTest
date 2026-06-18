@@ -186,8 +186,8 @@ bool UMySaveSubsystem::LoadGameFromSlot(const FString& SlotName)
 
 void UMySaveSubsystem::UnlockNewSavePage()
 {
-	// 绝对的安全性：必须小于 50 页
-	if (CachedRegistry && CachedRegistry->UnlockedPages < 50)
+	// 绝对的安全性：必须小于 MaxUnlockedPages（最大页数上限）
+	if (CachedRegistry && CachedRegistry->UnlockedPages < CachedRegistry->MaxUnlockedPages)
 	{
 		CachedRegistry->UnlockedPages++;
 
