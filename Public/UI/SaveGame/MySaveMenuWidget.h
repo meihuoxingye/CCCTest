@@ -48,6 +48,8 @@ protected:
 	// 解决点击闪退：重写焦点获取目标，打破 Slate 焦点死循环
 	virtual class UWidget* NativeGetDesiredFocusTarget() const override;
 
+	// 每次面板激活时触发
+	virtual void NativeOnActivated() override;
 
 	// ==============================================================================
 	// 绝对排版与分页系统 (Absolute Layout & Pagination)

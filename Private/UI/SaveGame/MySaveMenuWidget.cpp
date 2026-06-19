@@ -122,6 +122,11 @@ UWidget* UMySaveMenuWidget::NativeGetDesiredFocusTarget() const
 	return Super::NativeGetDesiredFocusTarget();
 }
 
+void UMySaveMenuWidget::NativeOnActivated()
+{
+	Super::NativeOnActivated();
+}
+
 #pragma endregion
 
 
@@ -320,12 +325,6 @@ void UMySaveMenuWidget::OnCompactPagesClicked()
 
 		// 【焦点残留 Bug 修复】：整理完数据后，必须立刻强行更新当前页列表，防止卡片数据漂移
 		BuildSaveSlotList();
-
-		// 强行把焦点锁回第一个槽位，消除 (Elimination) 玩家在使用手柄整理存档后，焦点莫名其妙消失的严重 Bug
-		if (SlotPool.IsValidIndex(0))
-		{
-			SlotPool[0]->SetFocus();
-		}
 	}
 }
 

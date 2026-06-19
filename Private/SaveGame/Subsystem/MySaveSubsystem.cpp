@@ -461,6 +461,8 @@ void UMySaveSubsystem::UpdateSaveRegistry(const FString& SlotName, FName Current
 	FSaveSlotMetaData Meta;
 	Meta.SlotName = SlotName;
 	Meta.SaveTime = FDateTime::Now(); // 记录当前系统时间
+	// 【核心魔法】：在赋值的瞬间，直接将时间拍扁成 24 小时制的纯净字符串！
+	Meta.FormattedSaveTime = Meta.SaveTime.ToString(TEXT("%Y-%m-%d %H:%M"));
 	Meta.LevelName = CurrentLevelName;
 
 	// 同步更新内存镜像：Map 结构相同 Key 会自动覆盖，完美处理“覆盖存档”的情况

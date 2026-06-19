@@ -33,6 +33,11 @@ struct CCC_API FSaveSlotMetaData
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Meta")
 	FDateTime SaveTime;
 
+	// 【新增】：专门喂给 UI 的“降维打击”纯净时间字符串（如 "2026-06-20 23:30"）
+	// UI 蓝图拿到这个变量后，什么节点都不用接，直接绑给 TextBlock！
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Meta")
+	FString FormattedSaveTime;
+
 	// 玩家存盘时所在的关卡名。
 	// 可直接喂给 UI 上的 TextBlock 用于显示“当前章节/区域”，或者供读取统筹器进行无缝切图。
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Meta")
