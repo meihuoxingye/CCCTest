@@ -485,8 +485,8 @@ void UMyActivatableWidgetBase::SetTransitionProgress(float InProgress)
 	if (TransitionProgress != InProgress)
 	{
 		TransitionProgress = InProgress;
-		// 5.8 原生语法：调用基类 UWidget 自带的 BroadcastFieldValueChanged 进行全自动 MVVM 派发
-		BroadcastFieldValueChanged(FFieldNotificationId(GET_MEMBER_NAME_CHECKED(UMyActivatableWidgetBase, TransitionProgress)));
+		// 【核心修复 2】：使用 UHT 生成的静态 FieldId，实现纯 O(1) 极速广播
+		BroadcastFieldValueChanged(UMyActivatableWidgetBase::FFieldNotificationClassDescriptor::TransitionProgress);
 	}
 }
 

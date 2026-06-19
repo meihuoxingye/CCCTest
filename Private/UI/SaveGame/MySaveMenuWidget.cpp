@@ -12,6 +12,10 @@
 
 #include "Components/VerticalBoxSlot.h"
 
+#include "UI/SaveGame/MySaveDataObj.h"
+
+#include "CommonInputBaseTypes.h"
+
 
 // ==============================================================================
 // 核心生命周期与初始化 (Core Lifecycle & Initialization)
@@ -87,6 +91,40 @@ void UMySaveMenuWidget::NativeDestruct()
 
 #pragma endregion
 
+
+// ==============================================================================
+// CommonUI 核心重写 (CommonUI Overrides)
+// ==============================================================================
+#pragma region
+
+TOptional<FUIInputConfig> UMySaveMenuWidget::GetDesiredInputConfig() const
+{
+	// 参数1: Menu(仅UI模式)  参数2: 不捕获鼠标  参数3: bHideCursor(是否隐藏鼠标) -> 绝对填 false!
+	// 这行代码将彻底粉碎 CommonUI 默认隐藏鼠标的霸王条款
+	return FUIInputConfig(ECommonInputMode::Menu, EMouseCaptureMode::NoCapture, false);
+}
+
+UWidget* UMySaveMenuWidget::NativeGetDesiredFocusTarget() const
+{
+	// 【终极破局】：直接把焦点甩给第一张“卡片整体”，而不是里面的“按钮”
+	// 因为你在蓝图里把卡片根节点设为了 Focusable=True，它绝对能接住焦点，死循环彻底被掐断！
+	if (SlotPool.IsValidIndex(0) && SlotPool[0])
+	{
+		return SlotPool[0];
+	}
+
+	// 兜底方案
+	if (Btn_NextPage && Btn_NextPage->GetVisibility() == ESlateVisibility::Visible)
+	{
+		return Btn_NextPage;
+	}
+
+	return Super::NativeGetDesiredFocusTarget();
+}
+
+#pragma endregion
+
+
 // ==============================================================================
 // 绝对排版与分页系统 (Absolute Layout & Pagination)
 // ==============================================================================
@@ -98,22 +136,29 @@ void UMySaveMenuWidget::InitializeSlotPool()
 
 	Box_SaveSlots->ClearChildren();
 	SlotPool.Empty();
+	ViewModelPool.Empty(); // 【新增】：清空数据池
 
-	// 1. 强行在堆内存中生成并渲染 5 个卡片
+	// 1. 强行在堆内存中生成并渲染 5 个卡片，并绑定 5 个专属 ViewModel
 	for (int32 i = 0; i < SlotsPerPage; ++i)
 	{
 		if (UMySaveSlotWidget* SlotWidget = CreateWidget<UMySaveSlotWidget>(GetOwningPlayer(), SlotWidgetClass))
 		{
-			// 【修改这里】：拿到 AddChildToVerticalBox 返回的插槽指针
+			// 拿到 AddChildToVerticalBox 返回的插槽指针
 			UVerticalBoxSlot* VBoxSlot = Box_SaveSlots->AddChildToVerticalBox(SlotWidget);
 
 			// 安全校验并强行注入 UI 排版法则
 			if (VBoxSlot)
 			{
 				// 强制把 C++ 动态生成的卡片尺寸设为 Fill（填充），权重默认 1.0
-				// 蓝图无法设置插槽在 UI 中的状态，只能在这设置
 				VBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 			}
+
+			// 【双对象池架构】：在内存中生成一个永久存活的数据总线
+			UMySaveDataObj* ViewModel = NewObject<UMySaveDataObj>(this);
+			ViewModelPool.Add(ViewModel);
+
+			// 将数据线插进卡片里
+			SlotWidget->SetSlotViewModel(ViewModel);
 
 			SlotPool.Add(SlotWidget);
 		}
@@ -147,7 +192,7 @@ void UMySaveMenuWidget::InitializeSlotPool()
 void UMySaveMenuWidget::BuildSaveSlotList()
 {
 	UMySaveSubsystem* SaveSub = GetGameInstance()->GetSubsystem<UMySaveSubsystem>();
-	if (!SaveSub || !SaveSub->CachedRegistry || SlotPool.Num() == 0) return;
+	if (!SaveSub || !SaveSub->CachedRegistry || SlotPool.Num() == 0 || ViewModelPool.Num() == 0) return;
 
 	int32 TotalPages = SaveSub->CachedRegistry->UnlockedPages;
 	if (CurrentPage > TotalPages) CurrentPage = TotalPages;
@@ -156,7 +201,7 @@ void UMySaveMenuWidget::BuildSaveSlotList()
 	// 算出当前页的第一张卡片编号 (如第1页是从第1个开始，第3页是从第11个开始)
 	int32 StartIndex = (CurrentPage - 1) * SlotsPerPage + 1;
 
-	// 【核心降维打击】：不再销毁和重建 UI，只是机械地拿着底层数据，给池子里的 5 个卡片重新注水
+	// 【核心降维打击】：不再销毁和重建 UI，只是机械地拿着底层数据，给双对象池中的数据池注水
 	for (int32 i = 0; i < SlotPool.Num(); ++i)
 	{
 		int32 SlotIndex = StartIndex + i;
@@ -165,8 +210,25 @@ void UMySaveMenuWidget::BuildSaveSlotList()
 		// O(1) 查表：从大管家的内存镜像中砸门
 		FSaveSlotMetaData* FoundMeta = SaveSub->CachedRegistry->SaveSlots.Find(CurrentSlotName);
 
-		// 直接呼叫卡片的 Init 函数，卡片内部会自动切成“空档”或“满档”显示
-		SlotPool[i]->InitSlotData(CurrentSlotName, FoundMeta);
+		// 取出专属 ViewModel 走纯数据同步
+		UMySaveDataObj* ViewModel = ViewModelPool[i];
+
+		// ViewModel 的 Setter 会利用 FFieldNotificationId 自动广播，完成局部刷新
+		ViewModel->SetSlotName(CurrentSlotName);
+
+		if (FoundMeta)
+		{
+			ViewModel->SetMetaData(*FoundMeta);
+			ViewModel->SetIsEmptySlot(false);
+		}
+		else
+		{
+			ViewModel->SetMetaData(FSaveSlotMetaData());
+			ViewModel->SetIsEmptySlot(true);
+		}
+
+		// 主动同步红节点确保兼容性
+		SlotPool[i]->SetSlotViewModel(ViewModel);
 	}
 
 	RefreshPaginationUI(TotalPages);
@@ -255,6 +317,15 @@ void UMySaveMenuWidget::OnCompactPagesClicked()
 			CurrentPage = SaveSub->CachedRegistry->UnlockedPages;
 		}
 		if (CurrentPage < 1) CurrentPage = 1;
+
+		// 【焦点残留 Bug 修复】：整理完数据后，必须立刻强行更新当前页列表，防止卡片数据漂移
+		BuildSaveSlotList();
+
+		// 强行把焦点锁回第一个槽位，消除 (Elimination) 玩家在使用手柄整理存档后，焦点莫名其妙消失的严重 Bug
+		if (SlotPool.IsValidIndex(0))
+		{
+			SlotPool[0]->SetFocus();
+		}
 	}
 }
 

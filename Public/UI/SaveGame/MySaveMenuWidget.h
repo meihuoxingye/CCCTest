@@ -36,6 +36,19 @@ protected:
 	// UI 的生命周期函数：销毁时调用（极其重要，用于解绑委托防止内存泄漏）
 	virtual void NativeDestruct() override;
 
+
+	// ==============================================================================
+	// CommonUI 核心重写 (CommonUI Overrides)
+	// ==============================================================================
+protected:
+
+	// 解决鼠标消失：重写输入配置，强制显示鼠标
+	virtual TOptional<struct FUIInputConfig> GetDesiredInputConfig() const override;
+
+	// 解决点击闪退：重写焦点获取目标，打破 Slate 焦点死循环
+	virtual class UWidget* NativeGetDesiredFocusTarget() const override;
+
+
 	// ==============================================================================
 	// 绝对排版与分页系统 (Absolute Layout & Pagination)
 	// ==============================================================================
@@ -72,15 +85,18 @@ protected:
 	TSubclassOf<UMySaveSlotWidget> SlotWidgetClass;
 
 private:
-
 	// 内存状态锁与物理写死限制
 	int32 CurrentPage = 1;
 	const int32 SlotsPerPage = 5;
 	const int32 MaxAllowedPages = 50;
 
-	// 【新增】：核心 UI 对象池，在内存中死死捏住这 5 个卡片的物理地址
+	// 【修改】：核心 UI 对象池，在内存中死死捏住这 5 个卡片的物理地址
 	UPROPERTY()
 	TArray<TObjectPtr<UMySaveSlotWidget>> SlotPool;
+
+	// 【新增】：核心 MVVM 数据池。与卡片组成双对象池 (Double-Pool)，杜绝运行时的重绘！
+	UPROPERTY()
+	TArray<TObjectPtr<class UMySaveDataObj>> ViewModelPool;
 
 	// 仅在 Construct 时调用一次，蓄满对象池并构建焦点铁壁
 	void InitializeSlotPool();

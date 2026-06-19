@@ -13,13 +13,14 @@
 
 // 前向声明，符合 IWYU 规范，加快编译速度
 class UButton;
+class UMySaveDataObj;
 
 // ==============================================================================
 // 存档槽位界面 (Save Slot Widget)
 // ==============================================================================
 
 // Abstract：标记为抽象类禁止直接实例化；Blueprintable：允许在编辑器中基于此类创建蓝图
-UCLASS(Blueprintable)
+UCLASS(Abstract, Blueprintable)
 class CCC_API UMySaveSlotWidget : public UUserWidget
 {
 	// 注入虚幻引擎反射系统的核心宏，自动生成底层的样板代码
@@ -35,29 +36,52 @@ protected:
 	// 重写父类的构造回调，在 UI 控件被实际创建并添加到屏幕的那一刻触发
 	virtual void NativeConstruct() override;
 
+	virtual void NativeDestruct() override;
+
+
+	// ==============================================================================
+	// MVVM 视图模型绑定 (ViewModel Binding)
+	// ==============================================================================
 public:
-	// 极致暴力的注水接口，替代 ListView 繁杂的虚拟化回掉
-	void InitSlotData(const FString& InSlotName, const FSaveSlotMetaData* MetaData);
+
+	// 供 UMG View Binding 面板绑定的核心数据源头！
+	UPROPERTY(BlueprintReadOnly, FieldNotify, Setter, Getter, Category = "SaveSystem|ViewModel")
+	UMySaveDataObj* SlotViewModel;
+
+	// 替代原有的 InitSlotData。大面板只负责传模型指针，数据全自动拆解同步
+	UFUNCTION(BlueprintCallable, Category = "SaveSystem|ViewModel")
+	void SetSlotViewModel(UMySaveDataObj* InViewModel);
+	UMySaveDataObj* GetSlotViewModel() const { return SlotViewModel; }
+
 
 	// ==============================================================================
 	// 控件绑定与交互逻辑 (Widget Binding & Interaction Logic)
 	// ==============================================================================
+public:
+
+	// 【新增】：提供一个绝对可靠的焦点锚点，打破死循环
+	// 代码里返回 Btn_Save 是为了确保手柄玩家在点开菜单的一瞬间，有一个合法的、能发光的、能按下去的按钮被自动选中。
+	class UMyCommonButtonBase* GetFocusAnchor() const { return Btn_Save; }
+
 protected:
 
 	// 核心宏：强制要求继承此 C++ 类的 UI 蓝图中，必须存在一个同名且同类型的控件，否则编译报错
 	// 使用虚幻 5 最新的对象指针 TObjectPtr 替代裸指针，声明“保存”按钮控件
-	UPROPERTY(meta = (BindWidget))
-	TObjectPtr<UButton> Btn_Save;
+	// 【核心修复】：必须添加 BlueprintReadOnly，授予 MVVM 运行时访问该控件指针的权限！
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+	TObjectPtr<class UMyCommonButtonBase> Btn_Save;
 
 	// 核心宏：强制蓝图绑定同名控件
 	// 声明“读取”按钮控件
-	UPROPERTY(meta = (BindWidget))
-	TObjectPtr<UButton> Btn_Load;
+	// 【核心修复】：必须添加 BlueprintReadOnly，授予 MVVM 运行时访问该控件指针的权限！
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+	TObjectPtr<class UMyCommonButtonBase> Btn_Load;
 
 	// 核心宏：强制蓝图绑定同名控件
 	// 声明“删除”按钮控件
-	UPROPERTY(meta = (BindWidget))
-	TObjectPtr<UButton> Btn_DeleteSlot;
+	// 【核心修复】：必须添加 BlueprintReadOnly，授予 MVVM 运行时访问该控件指针的权限！
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+	TObjectPtr<class UMyCommonButtonBase> Btn_DeleteSlot;
 
 	// 必须加上 UFUNCTION() 宏，这样此函数才能被注册到虚幻反射系统中，进而绑定到动态多播委托上
 	// 声明保存按钮的点击事件响应函数
@@ -78,12 +102,4 @@ protected:
 	// 蓝图事件：把元数据传给蓝图，bHasData 控制是显示“新建存档”还是显示读取/删除按钮
 	UFUNCTION(BlueprintImplementableEvent, Category = "SaveSystem|Slot")
 	void BP_OnSlotDataInitialized(const FSaveSlotMetaData& SlotMetaData, bool bHasData);
-
-	// ==============================================================================
-	// 内部数据缓存 (Internal Data Cache)
-	// ==============================================================================
-private:
-
-	// 缓存当前卡片绑定的物理存档槽位名称（例如 "SaveSlot_001"），UI 通过这串字符串作为主键向底层发号施令
-	FString CachedSlotName;
 };
