@@ -15,7 +15,7 @@ class CCC_API UMySaveDataObj : public UMVVMViewModelBase
 
 public:
 	// 携带从子系统内存镜像中取出的元数据
-	UPROPERTY(BlueprintReadOnly, FieldNotify, Setter, Getter, Category = "SaveData")
+	UPROPERTY(BlueprintReadOnly, FieldNotify, Setter, Category = "SaveData")
 	FSaveSlotMetaData MetaData;
 
 	// 缓存主键，利用 FieldNotify 支持局部精准刷新
