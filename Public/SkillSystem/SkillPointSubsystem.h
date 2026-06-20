@@ -173,4 +173,7 @@ public:
 	virtual FName GetModuleName() const override;
 	virtual FString ExtractUniversalData() override;
 	virtual void InjectUniversalData(const FString& InJSONString) override;
+
+	// 【新增】：补齐契约要求的数据应用函数
+	virtual void ApplyUniversalData() override;
 };

@@ -218,9 +218,6 @@ void USkillPointSubsystem::InjectSaveData(const TMap<FName, FCharacterSaveData>&
         InternalData.SavedSP = static_cast<float>(RawData.CurrentSP);
         InternalData.MaxSP = static_cast<float>(RawData.MaxSP);
     }
-
-    // 数据塞入完成后，自动唤醒内部计算引擎（触发原有的解冻与时间轴对齐操作）
-    PostLoadSync();
 }
 
 TMap<FName, FCharacterSaveData> USkillPointSubsystem::ExtractSaveData()
@@ -339,6 +336,12 @@ void USkillPointSubsystem::InjectUniversalData(const FString& InJSONString)
         // 2. 调用原来的注入逻辑，激活业务时间轴
         InjectSaveData(Package.SPDataMap);
     }
+}
+
+void USkillPointSubsystem::ApplyUniversalData()
+{
+    // 3. 第二步：数据塞入完成后,且 GameMode 宣告世界已绝对安全，正式唤醒内部计算引擎（触发原有的解冻与时间轴对齐操作）
+    PostLoadSync();
 }
 
 #pragma endregion
