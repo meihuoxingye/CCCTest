@@ -306,6 +306,26 @@ void UMyUIHandlerComponent::ToggleSaveMenuWidget(bool bShouldOpen)
 	{
 		// 触发收起信号，UI 基类全自动播放动画、出栈
 		SaveMenuInstance->OnWidgetDeactivated();
+
+		// =====================================================================
+		// 【终极修复：消除存档面板的双击 Bug】
+		// 1. 补上战术面板同款的“上帝之手”，强制剥夺 UI 的输入焦点
+		// =====================================================================
+		FSlateApplication::Get().SetAllUserFocusToGameViewport();
+
+		// =====================================================================
+		// 2. 强行冲刷底层的输入状态机
+		// 因为 MySaveMenuWidget 使用了 NoCapture，鼠标被引擎物理放生了。
+		// 必须重新向引擎下达你原本在 TopPlayerController 里写好的初始输入模式，
+		// 强迫引擎重新“抓住”鼠标，让单次点击立刻转化为开枪！
+		// =====================================================================
+		if (CachedPC)
+		{
+			FInputModeGameAndUI InputModeData;
+			InputModeData.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+			InputModeData.SetHideCursorDuringCapture(false);
+			CachedPC->SetInputMode(InputModeData);
+		}
 	}
 }
 

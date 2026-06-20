@@ -1,7 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "SaveGame/Subsystem/MySaveSubsystem.h"
-#include "SaveGame/MySaveGame.h"
+#include "SaveGame/MySaveContainer.h"
 // 【主动引入业务类】：大管家负责向下发号施令，要求各业务线提取或注入数据
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
@@ -12,8 +12,11 @@
 #include "SaveGame/MySavableInterface.h"
 // 【新增】：虚幻引擎底层极速对象遍历器
 #include "UObject/UObjectIterator.h"
-#include "GameFramework/CharacterMovementComponent.h" // 【新增】：递上运动组件的说明书
-#include "Async/Async.h" // 解决僵尸索引后台猎杀的异步支持
+// 【新增】：递上运动组件的说明书
+#include "GameFramework/CharacterMovementComponent.h" 
+// 解决僵尸索引后台猎杀的异步支持
+#include "Async/Async.h" 
+
 
 // ==============================================================================
 // 核心接口 (Core Interfaces)
@@ -39,10 +42,10 @@ void UMySaveSubsystem::PreloadRegistry()
 void UMySaveSubsystem::PerformAsyncSave(const FString& SlotName)
 {
 	// 1. 创建一个空白的“存档数据盒子”
-	// UMySaveGame::StaticClass()：获取 UMySaveGame 这个类的静态反射类型元数据
-	// 为什么用 CreateSaveGameObject 创建 UMySaveGame 对象而不用 new：参与 GC 管理体系；支持转为二进制写入物理硬盘的
+	// UMySaveContainer::StaticClass()：获取 UMySaveContainer 这个类的静态反射类型元数据
+	// 为什么用 CreateSaveGameObject 创建 UMySaveContainer 对象而不用 new：参与 GC 管理体系；支持转为二进制写入物理硬盘的
 	// 从不能存数据的类的元数据转为可以储存数据的内存中的实体对象
-	UMySaveGame* SaveObj = Cast<UMySaveGame>(UGameplayStatics::CreateSaveGameObject(UMySaveGame::StaticClass()));
+	UMySaveContainer* SaveObj = Cast<UMySaveContainer>(UGameplayStatics::CreateSaveGameObject(UMySaveContainer::StaticClass()));
 	if (!SaveObj)
 	{
 		// 万一内存爆了创建失败，直接告诉 UI 存盘失败
@@ -133,63 +136,70 @@ bool UMySaveSubsystem::DeleteSaveSlot(const FString& SlotName)
 
 bool UMySaveSubsystem::LoadGameFromSlot(const FString& SlotName)
 {
-	// 1. 物理检查：文件到底还在不在
-	if (!UGameplayStatics::DoesSaveGameExist(SlotName, 0)) return false;
-
-	// 2. 同步拉取巨大的文件到内存里
-	UMySaveGame* SaveObj = Cast<UMySaveGame>(UGameplayStatics::LoadGameFromSlot(SlotName, 0));
-	if (!SaveObj) return false;
-
+	// 检查世界上下文到底还在不在
 	UWorld* World = GetWorld();
 	if (!World) return false;
 
-	// 【修复：缺陷1】判断关卡名。如果不一致，强制切图，将恢复任务挂起
-	FName CurrentLevelName = FName(*World->GetName());
-	if (CurrentLevelName != SaveObj->GlobalDataBlock.SavedLevelName)
-	{
-		PendingLoadSlotName = SlotName;
-		UGameplayStatics::OpenLevel(World, SaveObj->GlobalDataBlock.SavedLevelName);
-		return true;
-	}
+	// 物理检查：文件到底还在不在
+	if (!UGameplayStatics::DoesSaveGameExist(SlotName, 0)) return false;
 
-	// 关卡一致，立刻原地恢复状态
+	// 同步拉取巨大的文件到内存里
+	UMySaveContainer* SaveObj = Cast<UMySaveContainer>(UGameplayStatics::LoadGameFromSlot(SlotName, 0));
+	if (!SaveObj) return false;
+
+
+	// =====================================================================
+	// 【终极修复：废除“同关卡免加载”的危险优化，强制刷新世界状态】
+	// 无论玩家是否在当前关卡，必须强制 OpenLevel。
+	// 否则那些已经被杀死的怪物、被触发的机关、被破坏的木箱，都不会被重置！
+	// 相当于一刀切，没专门设置的一切都会重置
+	// =====================================================================
 	PendingLoadSlotName = SlotName;
-	HandlePendingLoad();
+	UGameplayStatics::OpenLevel(World, SaveObj->GlobalDataBlock.SavedLevelName);
+
 	return true;
 }
 
 void UMySaveSubsystem::HandlePendingLoad()
 {
-	if (PendingLoadSlotName.IsEmpty()) return;
-
-	UMySaveGame* SaveObj = Cast<UMySaveGame>(UGameplayStatics::LoadGameFromSlot(PendingLoadSlotName, 0));
-	if (!SaveObj) return;
-
+	// 检查世界上下文到底还在不在
 	UWorld* World = GetWorld();
 	if (!World) return;
 
-	// 3. 子系统自己负责恢复最基础的属性：玩家位置
+	// 【校验记忆锚点】：判断本次新关卡的启动，是因为“读档切图”引起的，还是普通的“正常进入/死亡重生”。
+	// 如果锚点为空，说明就是普通进游戏，大管家直接下班。
+	if (PendingLoadSlotName.IsEmpty()) return;
+
+	// 【物理重载】：重新从物理硬盘把数十兆的存档拉取到当前的新内存里。
+	// 为什么要再读一次硬盘？
+	// 因为刚才执行了 OpenLevel（核弹清屏），旧世界连同之前在 LoadGameFromSlot 里临时拉取的 SaveObj 已经全部灰飞烟灭。
+	// 现在大管家身处重生后的新世界，必须拿着手里的“记忆锚点（存档名）”，去硬盘仓库里重新提一次货。
+	UMySaveContainer* SaveObj = Cast<UMySaveContainer>(UGameplayStatics::LoadGameFromSlot(PendingLoadSlotName, 0));
+	if (!SaveObj) return;
+
+
+	// 子系统自己负责恢复最基础的属性：玩家位置
 	if (ACharacter* PlayerChar = UGameplayStatics::GetPlayerCharacter(World, 0))
 	{
-		// 强制清空速度和物理运动状态
+		// 强制清空速度和物理运动状态，防摔死
 		if (UCharacterMovementComponent* MoveComp = PlayerChar->GetCharacterMovement())
 		{
 			MoveComp->StopMovementImmediately();
 		}
 
-		// 【避坑指南】：使用 ETeleportType::TeleportPhysics 是极其专业的写法。
-		// 当瞬间改变角色位置时，如果不加这个枚举，角色身上的披风布料、碰撞体会因为瞬间极速移动产生逆天惯性，导致模型爆炸或者被弹飞。
-		// 注意这里改为了从纯净包裹 GlobalDataBlock 中提取坐标
-		PlayerChar->SetActorTransform(SaveObj->GlobalDataBlock.PlayerTransform, false, nullptr, ETeleportType::TeleportPhysics);
+		// 【避坑指南】：使用 ETeleportType::ResetPhysics 是极其专业的写法。
+		// 读档是为了“重置”玩家状态。ResetPhysics 比 TeleportPhysics 更彻底地消除旧关卡残留的动量，防止读档后角色产生微小的位移补偿或抖动。
+		PlayerChar->SetActorTransform(SaveObj->GlobalDataBlock.PlayerTransform, false, nullptr, ETeleportType::ResetPhysics);
 	}
 
-	// =====================================================================
-	// 【极致解耦】：接口化注入！把包裹按名字分发给对应的子系统
-	// =====================================================================
+
+	// 暴力扫描底层内存池中存活的所有子系统。
+	// 架构意义：大管家无需硬编码具体的业务系统（如背包、技能），只需认准 IMySavableInterface 契约即可全自动抓取。
+	// 拓展优势：未来新增任何需要存档的模块，只需继承接口，此处分发管线的代码终生无需修改。
 	for (TObjectIterator<UWorldSubsystem> It; It; ++It)
 	{
 		UWorldSubsystem* Subsystem = *It;
-		// 绝对安全锁：确认是当前世界的子系统
+		// 绝对安全锁：确认是当前世界的子系统，而不是编辑器世界的
 		if (Subsystem && Subsystem->GetWorld() == World)
 		{
 			// 如果是个可存档系统
@@ -200,10 +210,10 @@ void UMySaveSubsystem::HandlePendingLoad()
 				// 在万能集装箱里找找，有没有属于它的 JSON 字符串包裹？
 				if (const FString* FoundJsonData = SaveObj->UniversalArchives.Find(ModuleName))
 				{
-					// 第一步：如果有，把字符串扔给它，让它自己去解析还原 (此时不操作Actor)
+					// 第一步：仅仅接收字符串缓存（时序分离防空指针崩溃）
 					SavableModule->InjectUniversalData(*FoundJsonData);
 
-					// 第二步：触发真正的数据应用逻辑
+					// 第二步：此时世界绝对安全，执行真实的数据应用
 					SavableModule->ApplyUniversalData();
 				}
 			}
@@ -301,10 +311,16 @@ void UMySaveSubsystem::CompactEmptySavePages()
 	// 拼接出当前游戏项目实际存放 .sav 存档文件的绝对物理路径（通常在 项目根目录/Saved/SaveGames）
 	FString SaveDirectory = FPaths::ProjectSavedDir() / TEXT("SaveGames");
 
-	// 【新增：两阶段提交防断电炸档】创建一个任务队列，记录所有需要搬运的 (旧名字 -> 新名字)
+
+	// 【新增】：两阶段提交防止玩家在“搬文件”的瞬间断电导致吞档
+	// 创建一个任务队列，记录所有需要搬运的 (旧名字 -> 新名字)
 	TArray<TPair<FString, FString>> MoveTasks;
 
-	// 第一轮扫描：只探查，不执行任何物理操作
+	// ==============================================================================
+	// 【阶段零：探查与规划 (Exploration & Planning)】
+	// 只遍历内存中的注册表，寻找数据碎片，生成搬迁任务清单（不执行任何物理文件读写）。
+	// CurrentPageIndex 为快指针，负责在前面探路；TargetPageIndex 为慢指针，指向空缺坑位。
+	// ==============================================================================
 	// 遍历所有已解锁的页，寻找数据碎片（CurrentPageIndex 为快指针，负责在前面探路）
 	for (int32 CurrentPageIndex = 1; CurrentPageIndex <= CachedRegistry->UnlockedPages; ++CurrentPageIndex)
 	{
@@ -468,8 +484,24 @@ void UMySaveSubsystem::OnRegistryLoaded(const FString& SlotName, const int32 Use
 	// 确保内存分配绝对成功
 	if (CachedRegistry)
 	{
+		// ==============================================================================
+		// 【终极修复：致命隐患 - 线程安全快照】
+		// 绝对不可以在后台线程遍历 UObject（即 CachedRegistry）的成员变量！
+		// 为了防止后台遍历时发生垃圾回收或主线程修改导致的随机崩溃，
+		// 必须在主线程先提取一份纯字符串的“数据快照”，只把字符串派发给后台去查岗。
+		// ==============================================================================
+
+		// 声明纯字符串数组作为数据“快照”容器，用于在主线程中安全隔离并存放所有的档位名称。
+		TArray<FString> SlotNamesToVerify;
+		// 调用 GenerateKeyArray 极速提取字典中所有的 Key 并强行复制到数组中。通过提取纯值类型（FString），
+		// 彻底切断后台线程对 UObject 及其内部字典的直接引用，封死因主线程并发增删或引擎 GC 引发的多线程踩内存崩溃。
+		CachedRegistry->SaveSlots.GenerateKeyArray(SlotNamesToVerify);
+
+		// 记录管家自身的弱引用，防止后台多线程运行期间管家意外死亡（如退出游戏）导致的野指针崩溃
+		TWeakObjectPtr<UMySaveSubsystem> WeakThis(this);
+
 		// 【修复性能隐患】：剥离几百次磁盘 FileExists I/O 的阻塞，扔进后台线程静默处理
-		AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [this, CachedReg = this->CachedRegistry]()
+		AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [WeakThis, SlotNamesToVerify]()
 			{
 				// 【启动期自检】：猎杀“僵尸索引” (Zombie Index Eradication)
 				// 防止玩家手动在系统文件夹中删除 .sav 文件而产生内存越界崩溃
@@ -479,49 +511,48 @@ void UMySaveSubsystem::OnRegistryLoaded(const FString& SlotName, const int32 Use
 				// 拼出物理存档目录
 				FString SaveDirectory = FPaths::ProjectSavedDir() / TEXT("SaveGames");
 
-				// 收集损坏索引，绝对不可以在遍历 TMap 的同时直接调用 Remove()（C++ 铁律：会导致迭代器失效直接崩溃！）
-				// 创建一个临时数组，充当“死亡黑名单”
-				TArray<FString> DeadSlots;
+				// 收集损坏索引。创建一个临时数组，充当“死亡黑名单”
+				TArray<FString> FoundDeadSlots;
 
-				// 后台静默扫描内存注册表里的每一条记录
-				for (const auto& Pair : CachedReg->SaveSlots)
+				// 后台静默扫描【纯字符串快照】，彻底规避 TMap 的并发冲突
+				for (const FString& SlotNameToCheck : SlotNamesToVerify)
 				{
 					// 拼装出该记录理论上对应的物理文件绝对路径
-					FString CheckPath = SaveDirectory / (Pair.Key + TEXT(".sav"));
+					FString CheckPath = SaveDirectory / (SlotNameToCheck + TEXT(".sav"));
 					// 去硬盘上查岗，如果发现这文件根本不存在（被玩家在外部私自删了）
 					if (!PlatformFile.FileExists(*CheckPath))
 					{
 						// 把这个名字记在黑名单上
-						DeadSlots.Add(Pair.Key);
+						FoundDeadSlots.Add(SlotNameToCheck);
 					}
 				}
 
-				// 切换回 GameThread 主线程执行 UI 变更与内存更新，虚幻铁律：绝不在后台修改影响 UI 的数据
-				AsyncTask(ENamedThreads::GameThread, [this, CachedReg, DeadSlots]()
+				// 切换回 GameThread 主线程执行 UI 变更与内存更新，虚幻铁律：绝不在后台修改影响 UI 和 UObject 的数据
+				AsyncTask(ENamedThreads::GameThread, [WeakThis, FoundDeadSlots]()
 					{
-						if (!IsValid(this) || !IsValid(CachedReg)) return;
-
-						// 标记位：是否发现了损坏的僵尸索引
-						bool bFoundZombies = false;
-
-						// 集中处决黑名单
-						for (const FString& DeadSlot : DeadSlots)
+						// 尝试获取强引用，如果管家还活着则继续
+						if (UMySaveSubsystem* StrongThis = WeakThis.Get())
 						{
-							// 安全地从字典里剔除这个空头支票
-							CachedReg->SaveSlots.Remove(DeadSlot);
-							bFoundZombies = true;
-						}
+							// 再次防御性检查注册表是否存活
+							if (!StrongThis->CachedRegistry) return;
 
-						// 如果真的发现了外部篡改并执行了清洗
-						if (bFoundZombies)
-						{
-							// 把清理干净、绝对吻合真实硬盘状态的注册表强制覆写回去
-							UGameplayStatics::SaveGameToSlot(CachedReg, TEXT("GlobalSaveRegistry"), 0);
-						}
+							// 如果真的发现了外部篡改（有死亡黑名单）
+							if (FoundDeadSlots.Num() > 0)
+							{
+								// 集中处决黑名单：安全地从字典里剔除这些空头支票
+								for (const FString& DeadSlot : FoundDeadSlots)
+								{
+									StrongThis->CachedRegistry->SaveSlots.Remove(DeadSlot);
+								}
 
-						// 只有在内存分配绝对成功、且脏数据被完全清洗干净的情况下，才敲响大喇叭！
-						// UI 接到这个通知时，读取到的将是 100% 纯净、安全的数据
-						OnSaveRegistryChanged.Broadcast();
+								// 把清理干净、绝对吻合真实硬盘状态的注册表强制覆写回去
+								UGameplayStatics::SaveGameToSlot(StrongThis->CachedRegistry, TEXT("GlobalSaveRegistry"), 0);
+							}
+
+							// 只有在内存分配绝对成功、且脏数据被完全清洗干净（或无需清洗）的情况下，才敲响大喇叭！
+							// UI 接到这个通知时，读取到的将是 100% 纯净、安全的数据
+							StrongThis->OnSaveRegistryChanged.Broadcast();
+						}
 					});
 			});
 	}

@@ -51,7 +51,7 @@ struct CCC_API FSaveSlotMetaData
 /** * 【归属关系】：
  * - 宿主：具体的业务部门（例如：技能点子系统 USkillPointSubsystem）。
  * - 存储形式：业务部门会用 JSON 榨汁机，把这个结构体压扁成纯文本的 FString 字符串。
- * - 物理落盘：被大管家当作无差别黑盒货物，扔进大卡车 (UMySaveGame) 的万能集装箱 (UniversalArchives) 里存盘。大管家不认识此数据。
+ * - 物理落盘：被大管家当作无差别黑盒货物，扔进大卡车 (UMySaveContainer) 的万能集装箱 (UniversalArchives) 里存盘。大管家不认识此数据。
  */
 USTRUCT(BlueprintType)
 struct CCC_API FCharacterSaveData
@@ -105,7 +105,7 @@ public:
 
 /** * 【归属关系】：
  * - 宿主：存档大管家（UMySaveSubsystem）亲自持有。
- * - 存储形式：作为大卡车 (UMySaveGame) 的核心 VIP 变量 GlobalDataBlock 原生存在，不经过 JSON 转换。
+ * - 存储形式：作为大卡车 (UMySaveContainer) 的核心 VIP 变量 GlobalDataBlock 原生存在，不经过 JSON 转换。
  * - 物理落盘：因为包含最底层的世界锚点（坐标、关卡），由大管家亲自收集数据并直接写入大卡车里。
  */
 USTRUCT(BlueprintType)

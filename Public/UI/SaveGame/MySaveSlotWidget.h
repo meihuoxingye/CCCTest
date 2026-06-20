@@ -7,7 +7,7 @@
 // 引入 UMG UI 系统中所有用户自定义控件的基类
 #include "Blueprint/UserWidget.h"
 // 引入自定义的存档游戏类，以便识别 FSaveSlotMetaData 等数据结构
-#include "SaveGame/MySaveGame.h" 
+#include "SaveGame/MySaveContainer.h" 
 // 虚幻引擎反射系统自动生成的头文件，必须放在最末尾
 #include "MySaveSlotWidget.generated.h"
 

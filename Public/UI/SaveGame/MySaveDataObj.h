@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "MVVMViewModelBase.h" 
-#include "SaveGame/MySaveGame.h" 
+#include "SaveGame/MySaveContainer.h" 
 #include "MySaveDataObj.generated.h"
 
 // 这是一个极其轻量级的纯数据壳子，用于 MVVM 数据总线传递元数据

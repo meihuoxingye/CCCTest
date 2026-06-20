@@ -22,17 +22,24 @@ void AMyGameModeBase::StartPlay()
 	Super::StartPlay();
 
 	// ==============================================================================
-	// 【新增：跨关卡读档落地执行】
-	// 此时新关卡的物理世界和 Actor 已完全存活，唤醒大管家去执行挂起的读档恢复任务
+	// 【修复时序隐患：跨关卡读档落地执行延迟一帧】
+	// 此时新关卡的物理世界虽然就绪，但有些 Actor 的 BeginPlay 可能还没跑完！
+	// 使用 SetTimerForNextTick 延迟到下一帧执行，确保所有 Actor 都初始化完毕，再进行安全的数据注入。
 	// ==============================================================================
 	if (UGameInstance* GI = GetGameInstance())
 	{
 		if (UMySaveSubsystem* SaveSub = GI->GetSubsystem<UMySaveSubsystem>())
 		{
-			SaveSub->HandlePendingLoad();
+			GetWorld()->GetTimerManager().SetTimerForNextTick([SaveSub]()
+				{
+					// 依然需要判定存活，虚幻的异步延迟必须处处带锁
+					if (IsValid(SaveSub))
+					{
+						SaveSub->HandlePendingLoad();
+					}
+				});
 		}
 	}
-
 
 	// ==============================================================================
 	// 后台基建任务预热 (Background Infrastructure Warm-up)
@@ -46,7 +53,6 @@ void AMyGameModeBase::StartPlay()
 	GetWorld()->GetTimerManager().SetTimer(SaveWarmupTimer, [WeakThis]()
 		{
 			// 匿名函数 (Lambda) 极度干净利落，不需要额外去 .h 里声明一个专门的预热函数
-			// 检查 GameMode 是否依然存活
 			if (WeakThis.IsValid())
 			{
 				if (UGameInstance* GI = WeakThis->GetGameInstance())

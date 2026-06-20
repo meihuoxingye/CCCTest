@@ -6,7 +6,7 @@
 #include "GameFramework/SaveGame.h"
 // 【绝对解耦】：仅包含纯净的图纸，不包含任何业务类
 #include "SaveGame/MySaveDataTypes.h" 
-#include "MySaveGame.generated.h"
+#include "MySaveContainer.generated.h"
 
 
 // ==============================================================================
@@ -55,17 +55,17 @@ public:
  * 铁律：本类中禁止声明任何独立的基础变量，只允许装载 MySaveDataTypes 中定义的数据块！
  */
 UCLASS()
-class CCC_API UMySaveGame : public USaveGame
+class CCC_API UMySaveContainer : public USaveGame
 {
 	GENERATED_BODY()
 
 public:
-	// UMySaveGame (实体大卡车，巨大文件)；FGlobalSaveData 自定义数据结构；
+	// UMySaveContainer (实体大卡车，巨大文件)；FGlobalSaveData 自定义数据结构；
 	// 记录绝对物理状态（玩家坐标、当前关卡名）。这些是底层的“硬基建”数据，由 UMySaveSubsystem 亲自保管。
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Global")
 	FGlobalSaveData GlobalDataBlock;
 
-	// UMySaveGame (实体大卡车，巨大文件)
+	// UMySaveContainer (实体大卡车，巨大文件)
 	// 各个业务部门（技能点、背包）把自己的数据打包成无逻辑的纸箱子（JSON 字符串）扔在这里。
 	// 只要存成了字符串，大管家 UMySaveSubsystem 就再也不需要认识任何业务系统的头文件了！
 	// 注意，结构体转 JSON 字符串的性能远不如二进制流，但二进制流无法用记事本直接打开存档去修改某个变量测试 Bug

@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
-#include "SaveGame/MySaveGame.h"
+#include "SaveGame/MySaveContainer.h"
 #include "MySaveSubsystem.generated.h"
 
 // ==============================================================================
@@ -27,6 +27,7 @@ UCLASS()
 class CCC_API UMySaveSubsystem : public UGameInstanceSubsystem
 {
 	GENERATED_BODY()
+
 
 	// ==============================================================================
 	// 核心接口 (Core Interfaces)
@@ -58,9 +59,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "SaveSystem|Execution")
 	bool LoadGameFromSlot(const FString& SlotName);
 
+
 	// ==============================================================================
 	// 分页系统 (Pagination System)
 	// ==============================================================================
+public:
 
 	// 核心功能：扩充档案页数并强制落盘；
 	// 回调函数 UMySaveMenuWidget::OnAddPageClicked() 调用
@@ -82,13 +85,15 @@ public:
 	// ==============================================================================
 	// 内部数据缓存 (Internal Data Cache)
 	// ==============================================================================
-public: // 调整为 public，以供 UI 面板的 BuildSaveSlotList 进行 O(1) 绝对查表读取
+public: 
 
 	// 缓存的全局存档常驻内存目录表，本质上是继承自 USaveGame 的数据容器
+	// 调整为 public，以供 UI 面板的 BuildSaveSlotList 进行 O(1) 绝对查表读取
 	// [数据功能] 仅存储所有槽位的索引元数据（名称、时间、关卡标识），不包含具体游戏状态数据。
 	// [生命周期] 通过 UPROPERTY 强引用标记，强制拦截垃圾回收(GC)巡检，防止此目录表被误销毁。
 	UPROPERTY()
 	TObjectPtr<UMySaveRegistry> CachedRegistry;
+
 
 	// ==============================================================================
 	// 内部管线 (Internal Pipeline)
@@ -101,9 +106,10 @@ public:
 	void HandlePendingLoad();
 
 private:
-	// 【新增原因】：致命缺陷 (跨关卡读档)。
-	// 当玩家在 A 关卡尝试读取 B 关卡的存档时，我们需要先切图。
-	// 因为 GameInstance (大管家) 的生命周期长于关卡，这个变量可以作为“记忆锚点”把存档名带到新关卡去。
+	// 【新增】：强制刷新世界状态 (World Reset)
+	// 无论玩家读取的是否是当前关卡，为了彻底重置物理世界（刷新怪物、重置破坏物等），现在读档一律强制执行 OpenLevel。
+	// 由于旧关卡会被引擎彻底销毁，而 GameInstance (大管家) 的生命周期长于关卡永生不死，
+	// 所以用这个变量作为“记忆锚点”，负责把要读的存档名安全地护送到重生后的新世界去。
 	UPROPERTY()
 	FString PendingLoadSlotName;
 
