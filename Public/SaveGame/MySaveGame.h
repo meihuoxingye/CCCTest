@@ -68,6 +68,7 @@ public:
 	// UMySaveGame (实体大卡车，巨大文件)
 	// 各个业务部门（技能点、背包）把自己的数据打包成无逻辑的纸箱子（JSON 字符串）扔在这里。
 	// 只要存成了字符串，大管家 UMySaveSubsystem 就再也不需要认识任何业务系统的头文件了！
+	// 注意，结构体转 JSON 字符串的性能远不如二进制流，但二进制流无法用记事本直接打开存档去修改某个变量测试 Bug
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "SaveData|Universal")
 	TMap<FName, FString> UniversalArchives;
 };

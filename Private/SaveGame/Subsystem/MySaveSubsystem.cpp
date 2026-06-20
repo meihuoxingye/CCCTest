@@ -12,6 +12,8 @@
 #include "SaveGame/MySavableInterface.h"
 // 【新增】：虚幻引擎底层极速对象遍历器
 #include "UObject/UObjectIterator.h"
+#include "GameFramework/CharacterMovementComponent.h" // 【新增】：递上运动组件的说明书
+#include "Async/Async.h" // 解决僵尸索引后台猎杀的异步支持
 
 // ==============================================================================
 // 核心接口 (Core Interfaces)
@@ -141,9 +143,40 @@ bool UMySaveSubsystem::LoadGameFromSlot(const FString& SlotName)
 	UWorld* World = GetWorld();
 	if (!World) return false;
 
+	// 【修复：缺陷1】判断关卡名。如果不一致，强制切图，将恢复任务挂起
+	FName CurrentLevelName = FName(*World->GetName());
+	if (CurrentLevelName != SaveObj->GlobalDataBlock.SavedLevelName)
+	{
+		PendingLoadSlotName = SlotName;
+		UGameplayStatics::OpenLevel(World, SaveObj->GlobalDataBlock.SavedLevelName);
+		return true;
+	}
+
+	// 关卡一致，立刻原地恢复状态
+	PendingLoadSlotName = SlotName;
+	HandlePendingLoad();
+	return true;
+}
+
+void UMySaveSubsystem::HandlePendingLoad()
+{
+	if (PendingLoadSlotName.IsEmpty()) return;
+
+	UMySaveGame* SaveObj = Cast<UMySaveGame>(UGameplayStatics::LoadGameFromSlot(PendingLoadSlotName, 0));
+	if (!SaveObj) return;
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+
 	// 3. 子系统自己负责恢复最基础的属性：玩家位置
 	if (ACharacter* PlayerChar = UGameplayStatics::GetPlayerCharacter(World, 0))
 	{
+		// 强制清空速度和物理运动状态
+		if (UCharacterMovementComponent* MoveComp = PlayerChar->GetCharacterMovement())
+		{
+			MoveComp->StopMovementImmediately();
+		}
+
 		// 【避坑指南】：使用 ETeleportType::TeleportPhysics 是极其专业的写法。
 		// 当瞬间改变角色位置时，如果不加这个枚举，角色身上的披风布料、碰撞体会因为瞬间极速移动产生逆天惯性，导致模型爆炸或者被弹飞。
 		// 注意这里改为了从纯净包裹 GlobalDataBlock 中提取坐标
@@ -167,14 +200,18 @@ bool UMySaveSubsystem::LoadGameFromSlot(const FString& SlotName)
 				// 在万能集装箱里找找，有没有属于它的 JSON 字符串包裹？
 				if (const FString* FoundJsonData = SaveObj->UniversalArchives.Find(ModuleName))
 				{
-					// 如果有，把字符串扔给它，让它自己去解析还原
+					// 第一步：如果有，把字符串扔给它，让它自己去解析还原 (此时不操作Actor)
 					SavableModule->InjectUniversalData(*FoundJsonData);
+
+					// 第二步：触发真正的数据应用逻辑
+					SavableModule->ApplyUniversalData();
 				}
 			}
 		}
 	}
 
-	return true;
+	// 任务完成，清空锚点
+	PendingLoadSlotName.Empty();
 }
 
 #pragma endregion
@@ -264,6 +301,10 @@ void UMySaveSubsystem::CompactEmptySavePages()
 	// 拼接出当前游戏项目实际存放 .sav 存档文件的绝对物理路径（通常在 项目根目录/Saved/SaveGames）
 	FString SaveDirectory = FPaths::ProjectSavedDir() / TEXT("SaveGames");
 
+	// 【新增：两阶段提交防断电炸档】创建一个任务队列，记录所有需要搬运的 (旧名字 -> 新名字)
+	TArray<TPair<FString, FString>> MoveTasks;
+
+	// 第一轮扫描：只探查，不执行任何物理操作
 	// 遍历所有已解锁的页，寻找数据碎片（CurrentPageIndex 为快指针，负责在前面探路）
 	for (int32 CurrentPageIndex = 1; CurrentPageIndex <= CachedRegistry->UnlockedPages; ++CurrentPageIndex)
 	{
@@ -296,7 +337,7 @@ void UMySaveSubsystem::CompactEmptySavePages()
 				// 计算出目标坑位页的第一个槽位编号
 				int32 TargetStartIndex = (TargetPageIndex - 1) * SlotsPerPage + 1;
 
-				// 开始将当前页的 5 个槽位，逐一搬迁到目标页对应的位置上
+				// 开始将当前页的 5 个槽位，逐一记录到搬迁任务队列中
 				for (int32 i = 0; i < SlotsPerPage; ++i)
 				{
 					// 拼出老（当前）槽位的名称（例如 SaveSlot_011）
@@ -304,46 +345,71 @@ void UMySaveSubsystem::CompactEmptySavePages()
 					// 拼出新（目标）槽位的名称（例如 SaveSlot_006）
 					FString NewSlotName = FString::Printf(TEXT("SaveSlot_%03d"), TargetStartIndex + i);
 
-					// 尝试在注册表中找到老槽位绑定的“元数据”（包含关卡名、存盘时间等详细信息）
-					if (FSaveSlotMetaData* FoundMeta = CachedRegistry->SaveSlots.Find(OldSlotName))
+					// 尝试在注册表中找到老槽位绑定的“元数据”
+					if (CachedRegistry->SaveSlots.Contains(OldSlotName))
 					{
-						// A. 【核武级底层优化】：绕开序列化管线，直接让操作系统操纵硬盘指针重命名文件（耗时 < 0.1毫秒）
-						// 拼出旧文件的绝对路径
-						FString OldFilePath = SaveDirectory / (OldSlotName + TEXT(".sav"));
-						// 拼出新文件的绝对路径
-						FString NewFilePath = SaveDirectory / (NewSlotName + TEXT(".sav"));
-
-						// 【预防措施】：清理目标坑位的残留死文件，防止因句柄冲突导致搬迁失败
-						if (PlatformFile.FileExists(*NewFilePath))
-						{
-							PlatformFile.DeleteFile(*NewFilePath);
-						}
-
-						// ==============================================================================
-						// 【原子性修复】：消除多余的 FileExists 检查，直接尝试物理移动！
-						// 只有当操作系统的系统调用明确返回 true 时，才允许修改内存，杜绝撕裂！
-						// ==============================================================================
-						if (PlatformFile.MoveFile(*NewFilePath, *OldFilePath))
-						{
-							// B. 更新极轻量的内存镜像主键
-							// 拷贝一份老元数据作为蓝本
-							FSaveSlotMetaData NewMeta = *FoundMeta;
-							// 把元数据内部记录的名字更新为新的
-							NewMeta.SlotName = NewSlotName;
-							// 将这条新记录添加到内存注册表
-							CachedRegistry->SaveSlots.Add(NewSlotName, NewMeta);
-							// 从内存注册表中彻底抹杀旧记录
-							CachedRegistry->SaveSlots.Remove(OldSlotName);
-
-							// 标记注册表发生了变动
-							bRegistryChanged = true;
-						}
-						// 隐式逻辑：如果 MoveFile 返回 false (比如断电、文件被杀毒软件锁定)，内存记录原封不动，保证数据与硬盘绝对一致！
+						// 记录搬运任务
+						MoveTasks.Add(TPair<FString, FString>(OldSlotName, NewSlotName));
 					}
 				}
 			}
 			// 只有装填了数据的页，目标指针才会推进（无论是原地不动还是搬移过来的，只要目标页装了数据，坑位就+1）
 			TargetPageIndex++;
+		}
+	}
+
+	// 如果真的有任务需要执行，开启“两阶段提交”极速安全搬运
+	if (MoveTasks.Num() > 0)
+	{
+		// ==============================================================================
+		// 【阶段一：意图登记 (Write-Ahead Logging)】
+		// 在物理文件变动前，把“新坑位”强行合法化，并写入硬盘。
+		// ==============================================================================
+		for (const auto& Task : MoveTasks)
+		{
+			// 拷贝一份老元数据作为蓝本
+			FSaveSlotMetaData NewMeta = CachedRegistry->SaveSlots[Task.Key];
+			// 把元数据内部记录的名字更新为新的
+			NewMeta.SlotName = Task.Value;
+			// 将这条新记录添加到内存注册表（此时新旧双胞胎共存）
+			CachedRegistry->SaveSlots.Add(Task.Value, NewMeta);
+		}
+
+		// 强制落盘。如果在这之后瞬间断电，下次启动时，僵尸猎手会自动把空壳新名字清理掉，存档绝对安全。
+		UGameplayStatics::SaveGameToSlot(CachedRegistry, TEXT("GlobalSaveRegistry"), 0);
+
+
+		// ==============================================================================
+		// 【阶段二：底层极速改名 (OS Level Move)】
+		// ==============================================================================
+		for (const auto& Task : MoveTasks)
+		{
+			// A. 【核武级底层优化】：绕开序列化管线，直接让操作系统操纵硬盘指针重命名文件（耗时 < 0.1毫秒）
+			// 拼出旧文件的绝对路径
+			FString OldFilePath = SaveDirectory / (Task.Key + TEXT(".sav"));
+			// 拼出新文件的绝对路径
+			FString NewFilePath = SaveDirectory / (Task.Value + TEXT(".sav"));
+
+			// 【预防措施】：清理目标坑位的残留死文件，防止因句柄冲突导致搬迁失败
+			if (PlatformFile.FileExists(*NewFilePath))
+			{
+				PlatformFile.DeleteFile(*NewFilePath);
+			}
+
+			// ==============================================================================
+			// 【原子性修复】：消除多余的 FileExists 检查，直接尝试物理移动！
+			// ==============================================================================
+			PlatformFile.MoveFile(*NewFilePath, *OldFilePath);
+		}
+
+
+		// ==============================================================================
+		// 【阶段三：清理旧账 (Commit & Cleanup)】
+		// ==============================================================================
+		for (const auto& Task : MoveTasks)
+		{
+			// 从内存注册表中彻底抹杀旧记录
+			CachedRegistry->SaveSlots.Remove(Task.Key);
 		}
 	}
 
@@ -353,6 +419,7 @@ void UMySaveSubsystem::CompactEmptySavePages()
 	// 最终安全削减页数
 	// 如果目标指针最后停在 X，说明前 X-1 页装了数据。用 Max(保底页数, ...) 保证游戏至少永远有配置的底线页数。
 	int32 NewTotalPages = FMath::Max(MinPages, TargetPageIndex - 1);
+
 	// 如果计算出的整理后总页数，跟现在记录的总页数不一样（也就是尾部有空页被砍掉了）
 	if (CachedRegistry->UnlockedPages != NewTotalPages)
 	{
@@ -361,8 +428,8 @@ void UMySaveSubsystem::CompactEmptySavePages()
 		bRegistryChanged = true;
 	}
 
-	// 如果整理过程中发生了任何文件的搬移或页数的削减
-	if (bRegistryChanged)
+	// 如果执行了搬移任务，或尾部空页被砍掉
+	if (MoveTasks.Num() > 0 || bRegistryChanged)
 	{
 		// 配合 UE 5.7 引擎底层的缓存刷新，稍微挂起极短的时间防冲突（非阻塞式）
 		// 虽然 MoveFile 极快，但给引擎的底层文件系统留一丝喘息空间是好习惯
@@ -401,51 +468,62 @@ void UMySaveSubsystem::OnRegistryLoaded(const FString& SlotName, const int32 Use
 	// 确保内存分配绝对成功
 	if (CachedRegistry)
 	{
-		// 【启动期自检】：猎杀“僵尸索引” (Zombie Index Eradication)
-		// 防止玩家手动在系统文件夹中删除 .sav 文件而产生内存越界崩溃
-
-		// 拿到系统底层的文件接口
-		IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
-		// 拼出物理存档目录
-		FString SaveDirectory = FPaths::ProjectSavedDir() / TEXT("SaveGames");
-		// 标记位：是否发现了损坏的僵尸索引
-		bool bFoundZombies = false;
-
-		// 收集损坏索引，绝对不可以在遍历 TMap 的同时直接调用 Remove()（C++ 铁律：会导致迭代器失效直接崩溃！）
-		// 创建一个临时数组，充当“死亡黑名单”
-		TArray<FString> DeadSlots;
-
-		// 遍历内存注册表里的每一条记录
-		for (const auto& Pair : CachedRegistry->SaveSlots)
-		{
-			// 拼装出该记录理论上对应的物理文件绝对路径
-			FString CheckPath = SaveDirectory / (Pair.Key + TEXT(".sav"));
-			// 去硬盘上查岗，如果发现这文件根本不存在（被玩家在外部私自删了）
-			if (!PlatformFile.FileExists(*CheckPath))
+		// 【修复性能隐患】：剥离几百次磁盘 FileExists I/O 的阻塞，扔进后台线程静默处理
+		AsyncTask(ENamedThreads::AnyBackgroundThreadNormalTask, [this, CachedReg = this->CachedRegistry]()
 			{
-				// 把这个名字记在黑名单上
-				DeadSlots.Add(Pair.Key);
-			}
-		}
+				// 【启动期自检】：猎杀“僵尸索引” (Zombie Index Eradication)
+				// 防止玩家手动在系统文件夹中删除 .sav 文件而产生内存越界崩溃
 
-		// 集中处决黑名单
-		for (const FString& DeadSlot : DeadSlots)
-		{
-			// 安全地从字典里剔除这个空头支票
-			CachedRegistry->SaveSlots.Remove(DeadSlot);
-			bFoundZombies = true;
-		}
+				// 拿到系统底层的文件接口
+				IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+				// 拼出物理存档目录
+				FString SaveDirectory = FPaths::ProjectSavedDir() / TEXT("SaveGames");
 
-		// 如果真的发现了外部篡改并执行了清洗
-		if (bFoundZombies)
-		{
-			// 把清理干净、绝对吻合真实硬盘状态的注册表强制覆写回去
-			UGameplayStatics::SaveGameToSlot(CachedRegistry, TEXT("GlobalSaveRegistry"), 0);
-		}
+				// 收集损坏索引，绝对不可以在遍历 TMap 的同时直接调用 Remove()（C++ 铁律：会导致迭代器失效直接崩溃！）
+				// 创建一个临时数组，充当“死亡黑名单”
+				TArray<FString> DeadSlots;
 
-		// 只有在内存分配绝对成功、且脏数据被完全清洗干净的情况下，才敲响大喇叭！
-		// UI 接到这个通知时，读取到的将是 100% 纯净、安全的数据
-		OnSaveRegistryChanged.Broadcast();
+				// 后台静默扫描内存注册表里的每一条记录
+				for (const auto& Pair : CachedReg->SaveSlots)
+				{
+					// 拼装出该记录理论上对应的物理文件绝对路径
+					FString CheckPath = SaveDirectory / (Pair.Key + TEXT(".sav"));
+					// 去硬盘上查岗，如果发现这文件根本不存在（被玩家在外部私自删了）
+					if (!PlatformFile.FileExists(*CheckPath))
+					{
+						// 把这个名字记在黑名单上
+						DeadSlots.Add(Pair.Key);
+					}
+				}
+
+				// 切换回 GameThread 主线程执行 UI 变更与内存更新，虚幻铁律：绝不在后台修改影响 UI 的数据
+				AsyncTask(ENamedThreads::GameThread, [this, CachedReg, DeadSlots]()
+					{
+						if (!IsValid(this) || !IsValid(CachedReg)) return;
+
+						// 标记位：是否发现了损坏的僵尸索引
+						bool bFoundZombies = false;
+
+						// 集中处决黑名单
+						for (const FString& DeadSlot : DeadSlots)
+						{
+							// 安全地从字典里剔除这个空头支票
+							CachedReg->SaveSlots.Remove(DeadSlot);
+							bFoundZombies = true;
+						}
+
+						// 如果真的发现了外部篡改并执行了清洗
+						if (bFoundZombies)
+						{
+							// 把清理干净、绝对吻合真实硬盘状态的注册表强制覆写回去
+							UGameplayStatics::SaveGameToSlot(CachedReg, TEXT("GlobalSaveRegistry"), 0);
+						}
+
+						// 只有在内存分配绝对成功、且脏数据被完全清洗干净的情况下，才敲响大喇叭！
+						// UI 接到这个通知时，读取到的将是 100% 纯净、安全的数据
+						OnSaveRegistryChanged.Broadcast();
+					});
+			});
 	}
 }
 

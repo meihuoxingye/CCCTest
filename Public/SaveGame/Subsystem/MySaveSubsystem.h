@@ -93,7 +93,19 @@ public: // 调整为 public，以供 UI 面板的 BuildSaveSlotList 进行 O(1) 
 	// ==============================================================================
 	// 内部管线 (Internal Pipeline)
 	// ==============================================================================
+public:
+
+	// 【新增原因】：跨关卡与注入时序的终极落地执行者。
+	// 等 GameMode 宣告“场景构建完毕”时，调用此函数完成真实的 Actor 状态恢复。
+	UFUNCTION(BlueprintCallable, Category = "SaveSystem|Execution")
+	void HandlePendingLoad();
+
 private:
+	// 【新增原因】：致命缺陷 (跨关卡读档)。
+	// 当玩家在 A 关卡尝试读取 B 关卡的存档时，我们需要先切图。
+	// 因为 GameInstance (大管家) 的生命周期长于关卡，这个变量可以作为“记忆锚点”把存档名带到新关卡去。
+	UPROPERTY()
+	FString PendingLoadSlotName;
 
 	// 异步加载回调函数，当在硬盘上读取到存档文件内存后自动触发
 	void OnRegistryLoaded(const FString& SlotName, const int32 UserIndex, USaveGame* LoadedGame);
@@ -105,4 +117,5 @@ private:
 	// 内部回调：底层 AsyncSaveGameToSlot 硬盘写入执行完毕后触发，用于向 UI 宣告结果
 	// UMySaveSubsystem::PerformAsyncSave 中调用
 	void OnAsyncSaveComplete(const FString& SlotName, const int32 UserIndex, bool bSuccess);
+
 };
