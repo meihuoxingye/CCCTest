@@ -48,9 +48,13 @@ public:
 	UPROPERTY(BlueprintReadOnly, FieldNotify, Setter, Getter, Category = "SaveSystem|ViewModel")
 	UMySaveDataObj* SlotViewModel;
 
-	// 替代原有的 InitSlotData。大面板只负责传模型指针，数据全自动拆解同步
+	// 【UI 与底层的跨界握手协议】 (ViewModel Injection)
+	// 架构升级：彻底废除老旧的 InitSlotData（把时间、名字拆成零碎变量传给 UI）的低效做法。
+	// 职责边界：现在大面板 (C++) 极其克制，只负责扔一个封装好的物理机顶盒 (ViewModel) 指针过来。
+	// 剩下所有的数据拆解、监听和局部刷新，全权由 MVVM 管线和此卡片内部的蓝图自动接管。
 	UFUNCTION(BlueprintCallable, Category = "SaveSystem|ViewModel")
 	void SetSlotViewModel(UMySaveDataObj* InViewModel);
+
 	UMySaveDataObj* GetSlotViewModel() const { return SlotViewModel; }
 
 

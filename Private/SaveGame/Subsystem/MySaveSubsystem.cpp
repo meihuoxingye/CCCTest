@@ -591,3 +591,39 @@ void UMySaveSubsystem::OnAsyncSaveComplete(const FString& SlotName, const int32 
 }
 
 #pragma endregion
+
+
+// ==============================================================================
+// 安全数据访问接口 (Safe Data Access Getters)
+// ==============================================================================
+#pragma region
+
+int32 UMySaveSubsystem::GetSlotsPerPage() const
+{
+	// 绝对防御：如果内存台账完好，返回设定值；如果由于极小概率异常导致台账丢失，抛出兜底值 5，防止 UI 算力除零崩溃。
+	return CachedRegistry ? CachedRegistry->SlotsPerPage : 5;
+}
+
+int32 UMySaveSubsystem::GetTotalUnlockedPages() const
+{
+	// 返回当前玩家实际拥有的页数，丢档兜底值为 1 页。
+	return CachedRegistry ? CachedRegistry->UnlockedPages : 1;
+}
+
+int32 UMySaveSubsystem::GetMaxUnlockedPages() const
+{
+	// 返回系统设定的物理硬上限，兜底值为 50。
+	return CachedRegistry ? CachedRegistry->MaxUnlockedPages : 50;
+}
+
+FSaveSlotMetaData* UMySaveSubsystem::GetSlotMetaData(const FString& SlotName) const
+{
+	// 绝对防御：如果台账在，才去哈希表里找；如果台账丢了，直接返回空指针，告诉 UI “没查到这个档”。
+	if (CachedRegistry)
+	{
+		return CachedRegistry->SaveSlots.Find(SlotName);
+	}
+	return nullptr;
+}
+
+#pragma endregion

@@ -88,8 +88,12 @@ public:
 public: 
 
 	// 缓存的全局存档常驻内存目录表，本质上是继承自 USaveGame 的数据容器
-	// 调整为 public，以供 UI 面板的 BuildSaveSlotList 进行 O(1) 绝对查表读取
-	// [数据功能] 仅存储所有槽位的索引元数据（名称、时间、关卡标识），不包含具体游戏状态数据。
+	// 【核心定性】：它是物理硬盘里真实存档数据在内存中的“轻量级镜像 (Memory Mirror)”。
+	// 【为什么必须依赖此镜像？】：
+	// 1. 斩断 I/O 阻塞：物理硬盘读取极慢。如果 UI 翻页时直接读硬盘，会瞬间卡死游戏主线程引发严重掉帧；
+	// 有了镜像，UI 翻页变成了纯粹的内存寻址，快了上万倍。
+	// 2. 剥离重度载荷：真实存档包含几十MB的关卡和背包物品数据。镜像仅剥离提取了最轻薄的“表皮（名字、时间）”；
+	// 避免了为了看一眼目录而把整座冰山搬进内存引发 GC 灾难。
 	// [生命周期] 通过 UPROPERTY 强引用标记，强制拦截垃圾回收(GC)巡检，防止此目录表被误销毁。
 	UPROPERTY()
 	TObjectPtr<UMySaveRegistry> CachedRegistry;
@@ -124,4 +128,26 @@ private:
 	// UMySaveSubsystem::PerformAsyncSave 中调用
 	void OnAsyncSaveComplete(const FString& SlotName, const int32 UserIndex, bool bSuccess);
 
+
+	// ==============================================================================
+	// 安全数据访问接口 (Safe Data Access Getters)
+	// ==============================================================================
+public:
+
+	// 【迪米特法则】：向外部 UI 提供安全的单页容量查询，彻底隐藏底层 Registry 实体。
+	// BlueprintPure 使得蓝图调用时没有执行引脚，属于纯净的数据拉取。
+	UFUNCTION(BlueprintPure, Category = "SaveSystem|Data")
+	int32 GetSlotsPerPage() const;
+
+	// 向外部提供当前玩家已解锁的总页数查询，内置极端情况的兜底防御。
+	UFUNCTION(BlueprintPure, Category = "SaveSystem|Data")
+	int32 GetTotalUnlockedPages() const;
+
+	// 向外部提供游戏允许的绝对最大扩容页数上限查询。
+	UFUNCTION(BlueprintPure, Category = "SaveSystem|Data")
+	int32 GetMaxUnlockedPages() const;
+
+	// 向上层 UI 安全暴露查询存档元数据的接口
+	// 不加 UFUNCTION，因为蓝图虚拟机无法接住和解析一个裸的 C++ 结构体物理指针
+	FSaveSlotMetaData* GetSlotMetaData(const FString& SlotName) const;
 };
