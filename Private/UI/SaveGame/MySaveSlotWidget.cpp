@@ -14,17 +14,8 @@
 // ==============================================================================
 #pragma region
 
-void UMySaveSlotWidget::NativePreConstruct()
+void UMySaveSlotWidget::NativeOnInitialized()
 {
-	Super::NativePreConstruct();
-}
-
-// 实现 UI 创建时的初始化逻辑
-void UMySaveSlotWidget::NativeConstruct()
-{
-	// 必须调用父类 UUserWidget 的构造逻辑，完成底层 Slate 控件树的搭建
-	Super::NativeConstruct();
-
 	// 防御性编程：检查保存按钮是否已被蓝图正确绑定，防止蓝图损坏导致空指针崩溃
 	if (Btn_Save)
 	{
@@ -47,44 +38,39 @@ void UMySaveSlotWidget::NativeConstruct()
 	}
 }
 
+void UMySaveSlotWidget::NativePreConstruct()
+{
+	Super::NativePreConstruct();
+}
+
+void UMySaveSlotWidget::NativeConstruct()
+{
+	// 必须调用父类 UUserWidget 的构造逻辑，完成底层 Slate 控件树的搭建
+	Super::NativeConstruct();
+}
+
 void UMySaveSlotWidget::NativeDestruct()
 {
-	// 【对策 1 落地】：在生命周期结束时，强制断开所有原生 C++ 引用，规避垃圾回收期（GC）空指针崩溃
-	if (Btn_Save)
-	{
-		Btn_Save->OnClicked().RemoveAll(this);
-	}
-
-	if (Btn_Load)
-	{
-		Btn_Load->OnClicked().RemoveAll(this);
-	}
-
-	if (Btn_DeleteSlot)
-	{
-		Btn_DeleteSlot->OnClicked().RemoveAll(this);
-	}
+	// 【核心重构】：因为改为在 Initialized 绑定内部组件，这里彻底不需要 RemoveAll 了。
+	// 当这块卡片内存被 GC 回收时，内部的按钮会自动死亡，委托自动销毁。
+	// 这里只保留一行 Super 调用。
 
 	Super::NativeDestruct();
 }
 
 void UMySaveSlotWidget::SetSlotViewModel(UMySaveDataObj* InViewModel)
 {
+	// MVVM 底座防抖与强制重连
+	// 防御性校验（防抖）：检查系统塞进来的“新机顶盒”（ViewModel 实例），是不是卡片当前正在用的那一个。
+	// 在双对象池架构中，初次造池子时这里必定不相等；后续复用时可能相等（相等就不需要浪费性能重连底座）。
 	if (SlotViewModel != InViewModel)
 	{
+		// 物理替换：将全新的数据总线（ViewModel）插进这张 UI 卡片的内存槽中
 		SlotViewModel = InViewModel;
-		// 【核心修复 3】：使用 UHT 生成的静态 FieldId，通知 UMG 面板 ViewModel 底座发生变更
-		BroadcastFieldValueChanged(UMySaveSlotWidget::FFieldNotificationClassDescriptor::SlotViewModel);
-	}
 
-	// 兼容原有的表现层红节点，确保你原本蓝图里连的那些 SetText 节点一字不改依然有效
-	if (SlotViewModel)
-	{
-		BP_OnSlotDataInitialized(SlotViewModel->GetMetaData(), !SlotViewModel->GetIsEmptySlot());
-	}
-	else
-	{
-		BP_OnSlotDataInitialized(FSaveSlotMetaData(), false);
+		// 利用 UHT（虚幻头文件工具）编译时静态生成的 FieldId 标识符，向引擎大声广播：“我的数据源底座换人了！”
+		// 底层收到后，会自动去蓝图里找到所有绑定了 SlotViewModel 的 {{表达式}}，并执行一次全量数据异步重绘。
+		BroadcastFieldValueChanged(UMySaveSlotWidget::FFieldNotificationClassDescriptor::SlotViewModel);
 	}
 }
 

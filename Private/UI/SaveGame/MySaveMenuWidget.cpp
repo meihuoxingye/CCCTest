@@ -82,17 +82,9 @@ void UMySaveMenuWidget::NativeConstruct()
 
 void UMySaveMenuWidget::NativeDestruct()
 {
-	// 内存安全生命线：UI 被销毁时，必须摘下耳机，取消一切订阅！
-	// 防止 UI 被垃圾回收后，大管家还在向这块死亡的内存发送广播，导致游戏直接崩溃（野指针）
-	if (UGameInstance* GI = GetGameInstance())
-	{
-		if (UMySaveSubsystem* SaveSub = GI->GetSubsystem<UMySaveSubsystem>())
-		{
-			// 安全解绑监听事件
-			SaveSub->OnSaveFinished.RemoveDynamic(this, &UMySaveMenuWidget::HandleSaveFinished);
-			SaveSub->OnSaveRegistryChanged.RemoveDynamic(this, &UMySaveMenuWidget::BuildSaveSlotList);
-		}
-	}
+	// 【核心重构】：大管家绑定已移至 Initialized (一生只绑一次)。
+	// 绝对禁止在此处使用 RemoveDynamic，否则第二次打开 UI 时将永久失去监听！
+	// Dynamic 委托底层自带弱指针保护，UI 被 GC 销毁时绝对不会引发野指针崩溃。
 
 	Super::NativeDestruct();
 }

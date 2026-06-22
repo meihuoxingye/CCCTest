@@ -210,10 +210,16 @@ void UMySaveSubsystem::HandlePendingLoad()
 				// 在万能集装箱里找找，有没有属于它的 JSON 字符串包裹？
 				if (const FString* FoundJsonData = SaveObj->UniversalArchives.Find(ModuleName))
 				{
-					// 第一步：仅仅接收字符串缓存（时序分离防空指针崩溃）
+					// 【核心解耦：第一阶段：时序隔离数据注入】
+					// 机制：通过 IMySavableInterface 接口，触发具体子系统（如背包/技能）各自实现的解析逻辑。
+					// 职责：仅执行本地数据结构的静态填充与反序列化，严禁在此刻触碰或检索任何外部 Actor 物理实体。
+					// 目的：此节点处于新关卡初期的不确定时序，目标 Actor 尚未完全就绪，提前物理寻址将引发灾难性的空指针击穿。
 					SavableModule->InjectUniversalData(*FoundJsonData);
 
-					// 第二步：此时世界绝对安全，执行真实的数据应用
+					// 【核心解耦：第二阶段：业务状态安全拉载】
+					// 机制：同样通过接口分发，通知所有子系统把刚才吃进肚子里的缓存数据，真正实例化到游戏世界中。
+					// 职责：当所有子系统均已完成数据持有（网状数据已安全着陆）后，方可触发此函数执行真实的物理状态应用。
+					// 目的：分离“数据持有”与“业务落地”，彻底根绝跨系统由于“互为依赖、但初始化先后顺序不同”导致的死锁或空指针崩溃。
 					SavableModule->ApplyUniversalData();
 				}
 			}

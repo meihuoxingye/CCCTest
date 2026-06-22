@@ -30,10 +30,13 @@ class CCC_API UMySaveSlotWidget : public UUserWidget
 	// 生命周期与核心虚函数 (Lifecycle & Core Virtual Functions)
 	// ==============================================================================
 protected:
+	// 核心生命周期监听放 NativeOnInitialized，在 Widget 实例的整个生命周期内仅触发一次。
+	virtual void NativeOnInitialized() override;
+
 	// UI 蓝图预构建阶段：负责在底层 Slate 控件成型前，处理属性配置（如剥夺按钮焦点）
 	virtual void NativePreConstruct() override;
 
-	// 重写父类的构造回调，在 UI 控件被实际创建并添加到屏幕的那一刻触发
+	// 在 UI 控件被实际创建并添加到屏幕的那一刻触发,每次界面创建后都会触发。
 	virtual void NativeConstruct() override;
 
 	virtual void NativeDestruct() override;
@@ -48,10 +51,13 @@ public:
 	UPROPERTY(BlueprintReadOnly, FieldNotify, Setter, Getter, Category = "SaveSystem|ViewModel")
 	UMySaveDataObj* SlotViewModel;
 
-	// 【UI 与底层的跨界握手协议】 (ViewModel Injection)
-	// 架构升级：彻底废除老旧的 InitSlotData（把时间、名字拆成零碎变量传给 UI）的低效做法。
-	// 职责边界：现在大面板 (C++) 极其克制，只负责扔一个封装好的物理机顶盒 (ViewModel) 指针过来。
-	// 剩下所有的数据拆解、监听和局部刷新，全权由 MVVM 管线和此卡片内部的蓝图自动接管。
+	// 核心逻辑：动态更新当前 UI 实例的新的 ViewModel 引用，给这张 UI 卡片换上新的存档数据（比如翻页时，把卡片从“存盘1”刷新成“存盘6”，或变成“空档位”）；
+	// 并触发底层 FieldNotification 广播，UI 面板（View Bindings）监听到数据变化后，会自动完成所有文字修改和按钮显隐，完全无需蓝图连线；
+	// 【注意】：如果 UI 卡片的 ViewModel 引用未改变就不用担心数据显示更新，机顶盒的内存地址没变，MVVM UI 就会自己一直监听着它；
+	// 调用时机 1：UMySaveMenuWidget::InitializeSlotPool()，第一次打开这个存档菜单时；
+	// 调用时机 2：UMySaveMenuWidget::BuildSaveSlotList()，每一次点击“上一页/下一页”、点击“整理碎片”，或者大管家在后台删完档发出广播时；
+	// 架构演进：已废除原有的蓝图接口及事件图表连线机制。控件的状态转换（如按钮可见性切换）现已全权由 UMG View Bindings 框架静默处理。
+	// 设计规范：遵循表现与逻辑绝对解耦原则，C++ 端仅维护数据上下文，严禁直接操作视觉表现层 API。
 	UFUNCTION(BlueprintCallable, Category = "SaveSystem|ViewModel")
 	void SetSlotViewModel(UMySaveDataObj* InViewModel);
 
@@ -101,9 +107,4 @@ protected:
 	// 声明删除按钮的点击事件响应函数
 	UFUNCTION()
 	void OnDeleteSlotClicked();
-
-	// 声明一个没有 C++ 实现的接口，强制交由 UI 蓝图去连节点实现（纯表现层拆分）
-	// 蓝图事件：把元数据传给蓝图，bHasData 控制是显示“新建存档”还是显示读取/删除按钮
-	UFUNCTION(BlueprintImplementableEvent, Category = "SaveSystem|Slot")
-	void BP_OnSlotDataInitialized(const FSaveSlotMetaData& SlotMetaData, bool bHasData);
 };
