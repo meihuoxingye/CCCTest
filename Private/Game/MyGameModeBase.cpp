@@ -21,50 +21,60 @@ void AMyGameModeBase::StartPlay()
 	// GameMode 的 StartPlay 是所有 Actor 准备就绪、游戏正式开始的冲锋号
 	Super::StartPlay();
 
-	// ==============================================================================
-	// 【修复时序隐患：跨关卡读档落地执行延迟一帧】
-	// 此时新关卡的物理世界虽然就绪，但有些 Actor 的 BeginPlay 可能还没跑完！
-	// 使用 SetTimerForNextTick 延迟到下一帧执行，确保所有 Actor 都初始化完毕，再进行安全的数据注入。
-	// ==============================================================================
+
+	// 【核心时序控制：第一阶段 - 读档分发微操 (NextTick Deferral)】
+
+	// 尝试获取当前游戏世界的全局实例 (GameInstance)，它是跨关卡存活的最高级别实体
 	if (UGameInstance* GI = GetGameInstance())
 	{
+		// 从游戏实例中，精准拉取负责统筹所有存档逻辑的大管家 (MySaveSubsystem)
 		if (UMySaveSubsystem* SaveSub = GI->GetSubsystem<UMySaveSubsystem>())
 		{
+			// 灾难规避：此时新关卡的物理世界虽然就绪，但有些 Actor 的 BeginPlay 可能还没跑完！
+			// 核心机制：利用 SetTimerForNextTick，强行将内部的“数据物理注入”挂起到引擎下一帧执行。
+			// 借此让引擎跑完当前帧的地图收尾工作，确保物理世界地基彻底稳固。
 			GetWorld()->GetTimerManager().SetTimerForNextTick([SaveSub]()
 				{
-					// 依然需要判定存活，虚幻的异步延迟必须处处带锁
+					// 极限防御锁：哪怕只推迟了 1 帧 (约 16ms)，多线程及 GC 环境下对象依然可能失效，异步回调必须带锁
 					if (IsValid(SaveSub))
 					{
+						// 此时世界绝对安全，大管家正式下场，给各个已就绪的 Actor 分发读档数据
 						SaveSub->HandlePendingLoad();
 					}
 				});
 		}
 	}
 
-	// ==============================================================================
-	// 后台基建任务预热 (Background Infrastructure Warm-up)
-	// ==============================================================================
 
-	// 使用弱引用捕获 'this'，防止在 2 秒内切换关卡导致的崩溃风险 (UE5.7 规范)
+	// 【核心时序控制：第二阶段 - 后台基建任务预热 (Background Infrastructure Warm-up)】
+
+	// 灾难规避：严禁在异步 Lambda 中直接捕获裸指针 [this]。若玩家在 2 秒内强退或切图，GameMode 将被 GC 强行销毁，引发 Fatal Error。
+	// 规范解法：遵循 UE 5.8 内存安全规范，使用 TWeakObjectPtr 弱引用捕获 GameMode 自身 (this)
 	TWeakObjectPtr<AMyGameModeBase> WeakThis(this);
 
-	// 设置一个 2 秒的后台定时器，避开加载地图初期的 CPU 性能峰值
+	// 声明一个定时器句柄，用于在底层追踪并管理这个 2 秒的延时任务
 	FTimerHandle SaveWarmupTimer;
+
+	// 架构目的：错峰出行（CPU Peak Shaving），避开地图刚加载时渲染层构建和 Shader 编译的性能算力尖峰。
+	// 设置一个 2 秒的后台定时器，将高耗时的 IO 预载作业平滑推迟
+	// 匿名函数 (Lambda) 极度干净利落，不需要额外去 .h 里声明一个专门的预热函数
 	GetWorld()->GetTimerManager().SetTimer(SaveWarmupTimer, [WeakThis]()
 		{
-			// 匿名函数 (Lambda) 极度干净利落，不需要额外去 .h 里声明一个专门的预热函数
+			// 极其优雅的内存安全判定：静默查验 2 秒后的 GameMode (this) 是否依然存活，若世界毁灭则静默失效，绝不越界
 			if (WeakThis.IsValid())
 			{
+				// 再次安全获取当前 GameMode 所在新世界的游戏实例
 				if (UGameInstance* GI = WeakThis->GetGameInstance())
 				{
+					// 再次安全拉取存档大管家子系统
 					if (UMySaveSubsystem* SaveSub = GI->GetSubsystem<UMySaveSubsystem>())
 					{
-						// 避开 CPU 负载尖峰，平稳执行异步预加载
+						// 此时地图加载的 CPU 峰值已平息，利用后台低负载期平滑执行高耗时的硬盘拉取作业
 						SaveSub->PreloadRegistry();
 					}
 				}
 			}
-		}, 2.0f, false);
+		}, 2.0f, false); // 2.0f 代表延时 2 秒执行，false 代表不循环（仅触发一次）
 }
 
 #pragma endregion
