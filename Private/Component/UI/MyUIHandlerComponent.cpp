@@ -63,32 +63,59 @@ void UMyUIHandlerComponent::BeginPlay()
 // ==============================================================================
 void UMyUIHandlerComponent::ProcessNextWarmup()
 {
+	// 【防线 1：宿主有效性校验】
+	// 前置检查玩家控制器缓存是否有效，防止角色突然死亡或关卡切换导致的野指针崩溃
 	if (!CachedPC) return;
 
 	// 第一步：预热战术面板 (开局第 2 秒触发)
+	// 【状态机步进管理】：利用 CurrentWarmupStep 实现“时间切片”，确保开局的繁重加载任务被分散到不同的时间点，避免同一帧扎堆导致游戏卡顿。
 	if (CurrentWarmupStep == 0)
 	{
-		CurrentWarmupStep++; // 推进状态
+		CurrentWarmupStep++; // 推进状态，保证该步骤（第一步）终其一生只会被执行一次
 
+		// 【防线 2：资产配置校验】
+		// 检查蓝图中的软类引用 (SoftClassPtr) 是否为空，防止去硬盘里加载一个“虚无”。
 		if (!TacticalWidgetClass.IsNull())
 		{
+			// 获取虚幻引擎全局的“异步流式加载大管家”
 			FStreamableManager& Streamable = UAssetManager::GetStreamableManager();
+
+			// 【异步 IO 释放主线程】：
+			// 向大管家提交软路径，让后台线程去硬盘里把巨大的 UI 资产（包含材质、贴图）慢慢读进内存。
+			// 此时主线程 (游戏画面) 继续丝滑运行。等读完了，才会回头调用后面的 Lambda 匿名函数。
 			Streamable.RequestAsyncLoad(TacticalWidgetClass.ToSoftObjectPath(), [this]()
 				{
 					// 【防抢占锁】：如果玩家手速极快，在 2 秒内已经按 Tab 触发了同步保底加载，
 					// 那么实例已存在，绝不能覆盖指针！直接跳过本次创建。
+					// （高级架构：完美化解了异步回调极易引发的“业务竞态条件”导致的内存泄漏与指针覆盖）
 					if (!TacticalWidgetInstance)
 					{
+						// 安全地将内存中已就绪的 UClass 提取出来
 						if (UClass* LoadedClass = TacticalWidgetClass.Get())
 						{
+							// 实例化这个重度战术面板 UI
 							TacticalWidgetInstance = CreateWidget<UMyActivatableWidgetBase>(CachedPC, LoadedClass);
 							if (TacticalWidgetInstance)
 							{
+								// 【预热核心 1：底层静默挂载】
+								// 强行塞入屏幕，ZOrder 设为极小的负数 (-999)，保证它躲在所有画面的最底层，绝不遮挡视野。
 								TacticalWidgetInstance->AddToViewport(-999);
+
+								// 【预热核心 2：Slate 引擎排版欺骗】
+								// 为什么不用 Collapsed？
+								// 因为 Hidden 状态下，UI 看不见，但 Slate 引擎依然会老老实实地为它构建控件树、计算长宽尺寸、编译材质着色器（非常耗时）！
+								// 这等同于提前“白嫖”了第一次打开面板时最卡顿的排版时间！
 								TacticalWidgetInstance->SetVisibility(ESlateVisibility::Hidden);
+
+								// 将 UI 内部的关闭请求，接回本组件的事件网络中
 								TacticalWidgetInstance->OnCloseRequested.AddUniqueDynamic(this, &UMyUIHandlerComponent::HandleWidgetCloseRequested);
 
+								// 【预热核心 3：次帧收尾 (NextTick)】
+								// 为什么要等下一帧？
+								// 因为上面刚设为 Hidden，必须让引擎跑完当前这一帧的渲染管线，尺寸才算彻底计算完毕。
 								GetWorld()->GetTimerManager().SetTimerForNextTick([this]() {
+									// 等引擎老老实实算完尺寸后，立刻将它设为 Collapsed（彻底折叠）！
+									// 意义：Collapsed 状态下的 UI 彻底不参与引擎每帧的 Layout 遍历，将潜伏期的 CPU 性能损耗降为绝对的 0！
 									if (TacticalWidgetInstance && !bIsTacticalUIOpen) TacticalWidgetInstance->SetVisibility(ESlateVisibility::Collapsed);
 									});
 							}
@@ -96,44 +123,12 @@ void UMyUIHandlerComponent::ProcessNextWarmup()
 					}
 
 					// 当前面板渲染预热搞定后，再让 CPU 休息 1.5 秒，然后触发下一个预热！
+					// 【削峰填谷】：主动留白 1.5 秒，让开局时其他的运算任务（如刷怪、AI寻路初始化）有喘息之机，这是非常成熟的 3A 性能分配策略。
 					FTimerHandle NextTimer;
 					GetWorld()->GetTimerManager().SetTimer(NextTimer, this, &UMyUIHandlerComponent::ProcessNextWarmup, 1.5f, false);
 				});
 		}
-		else { ProcessNextWarmup(); } // 跳过空项，继续下一步
-	}
-
-	// 第二步：预热存档面板 (开局第 3.5 秒左右触发)
-	else if (CurrentWarmupStep == 1)
-	{
-		CurrentWarmupStep++;
-
-		if (!SaveMenuClass.IsNull())
-		{
-			FStreamableManager& Streamable = UAssetManager::GetStreamableManager();
-			Streamable.RequestAsyncLoad(SaveMenuClass.ToSoftObjectPath(), [this]()
-				{
-					// 【防抢占锁】：如果玩家在 3.5 秒内已经摸到了存档点，触发了同步保底，
-					// 实例必然已存在，绝不覆盖指针！产生孤儿 UI 会导致面板永远无法关闭！
-					if (!SaveMenuInstance)
-					{
-						if (UClass* LoadedClass = SaveMenuClass.Get())
-						{
-							SaveMenuInstance = CreateWidget<UMyActivatableWidgetBase>(CachedPC, LoadedClass);
-							if (SaveMenuInstance)
-							{
-								SaveMenuInstance->AddToViewport(10);
-								SaveMenuInstance->SetVisibility(ESlateVisibility::Hidden);
-								SaveMenuInstance->OnCloseRequested.AddUniqueDynamic(this, &UMyUIHandlerComponent::HandleSaveMenuCloseRequested);
-
-								GetWorld()->GetTimerManager().SetTimerForNextTick([this]() {
-									if (SaveMenuInstance && !bIsSaveMenuOpen) SaveMenuInstance->SetVisibility(ESlateVisibility::Collapsed);
-									});
-							}
-						}
-					}
-				});
-		}
+		else { ProcessNextWarmup(); } // 跳过空项，立刻进行下一步预热（尾递归）
 	}
 }
 
@@ -254,22 +249,36 @@ void UMyUIHandlerComponent::ToggleSaveMenuWidget()
 
 void UMyUIHandlerComponent::ToggleSaveMenuWidget(bool bShouldOpen)
 {
+	// 【防线】：宿主有效性校验，防止角色死亡后依然触发 UI 逻辑导致空指针崩溃
 	if (!CachedPC) return;
 
 	// 状态原子性锁：杜绝重复触发
+	// 【架构意义】：防止玩家在 0.01 秒内连按两次打开/关闭键，导致 UI 状态机（入场/退场动画）发生重入冲突或死锁
 	if (bIsSaveMenuOpen == bShouldOpen) return;
 
-	// 懒加载模式：创建存档面板实例
+	// ==============================================================================
+	// 懒加载模式与同步保底防线 (Lazy Loading & Synchronous Fallback)
+	// ==============================================================================
 	// 【适配预热保底】：如果玩家在后台 3.5 秒预热完成前就跑去点了存档点，提供强制同步加载保底
 	if (!SaveMenuInstance && !SaveMenuClass.IsNull())
 	{
+		// 【防线突破妥协】：玩家手速超过了异步预热速度。强行挂起主线程（引发微弱卡顿），
+		// 逼迫操作系统立刻去硬盘同步拉取 UI 资产，确保核心业务（存档）绝不因为资源未就绪而崩溃。
 		if (UClass* LoadedClass = SaveMenuClass.LoadSynchronous())
 		{
 			SaveMenuInstance = CreateWidget<UMyActivatableWidgetBase>(CachedPC, LoadedClass);
 			if (SaveMenuInstance)
 			{
+				// ZOrder 为 10：确立存档面板极高的物理覆盖层级
 				SaveMenuInstance->AddToViewport(10);
+				// 初始折叠：只建仓不渲染，把展开的表演权移交给 OnWidgetActivated
 				SaveMenuInstance->SetVisibility(ESlateVisibility::Collapsed);
+				// 【事件管线热插拔与控制反转】
+				// 将 UI 内部发出的“关闭请求”信号（例如玩家点击了面板上的返回按钮，或按下了 Esc 键），
+				// 向上接入本组件的专属处理函数 (HandleSaveMenuCloseRequested) 中。
+				// @架构意义：UI 绝不自裁！UI 只负责发信号，由统筹组件负责执行真正的关闭、出栈以及鼠标焦点的重置。
+				// @安全机制：使用 AddUniqueDynamic 而非 AddDynamic，提供绝对防线，确保即使在极短时间内多次触发保底建仓逻辑，
+				// 该委托也只会被绑定一次，彻底根绝关闭事件被重复触发导致的状态机崩溃。
 				SaveMenuInstance->OnCloseRequested.AddUniqueDynamic(this, &UMyUIHandlerComponent::HandleSaveMenuCloseRequested);
 			}
 		}
@@ -284,11 +293,16 @@ void UMyUIHandlerComponent::ToggleSaveMenuWidget(bool bShouldOpen)
 	{
 		SaveMenuInstance->SetVisibility(ESlateVisibility::Visible);
 		// 发送点火信号，UI 基类全自动推流、入栈
+		// 【移交大权】：此时，MyActivatableWidgetBase 里的 NativeOnActivated 将接管一切：
+		// 强制排版、MVVM 进度归零、开启双轨入场动画、向大管家请求输入焦点。
 		SaveMenuInstance->OnWidgetActivated();
 
 		// ==============================================================================
 		// 【核武级修复】：彻底清除“幽灵输入/按键粘滞” (Fix Input Ghosting)
 		// ==============================================================================
+		// 灾难重现：玩家按住 'W' 或 'D'（奔跑）时，突然按 E 打开了存档面板。
+		// 由于 UI 瞬间抢走了引擎的“输入焦点”，键盘松开时的 KeyUp 事件被 UI 护盾挡住了！
+		// 底层 PlayerController 永远收不到“按键已抬起”的信号，导致主角一直在背景里撞墙奔跑（按键粘滞）。
 		if (CachedPC)
 		{
 			// 1. 强令底层的 PlayerController 清空所有物理按键的“按下”状态
@@ -296,6 +310,7 @@ void UMyUIHandlerComponent::ToggleSaveMenuWidget(bool bShouldOpen)
 			CachedPC->FlushPressedKeys();
 
 			// 2. （绝对兜底）清空角色当前帧残余的移动方向向量，实现瞬间急刹车
+			// 物理层面彻底粉碎角色身上的惯性残留，确保打开 UI 的瞬间主角乖乖立正。
 			if (APawn* MyPawn = CachedPC->GetPawn())
 			{
 				MyPawn->ConsumeMovementInputVector();
@@ -305,25 +320,35 @@ void UMyUIHandlerComponent::ToggleSaveMenuWidget(bool bShouldOpen)
 	else
 	{
 		// 触发收起信号，UI 基类全自动播放动画、出栈
+		// 【防幽灵点击】：绝不立刻 RemoveFromParent，而是让基类切换状态为 Closing，
+		// 继续用 UI 挡住屏幕防走火，直到退场动画彻底播完，基类才会自己出栈。
 		SaveMenuInstance->OnWidgetDeactivated();
 
 		// =====================================================================
-		// 【终极修复：消除存档面板的双击 Bug】
+		// 【终极修复：消除存档面板的双击 Bug (Focus Trap)】
 		// 1. 补上战术面板同款的“上帝之手”，强制剥夺 UI 的输入焦点
 		// =====================================================================
+		// 灾难重现：UI 虽然关了（或正在播放退场动画），但操作系统的焦点还残留在 UI 树上。
+		// 此时玩家点左键开火，第一枪会被系统判定为“点回游戏窗口（夺回焦点）”，第二枪才能打出去。
+		// 解决方案：调用 Slate 大管家，发动上帝之手，强行把全局焦点从 UI 树上扒下来，直接砸回底层的 3D 游戏视口！保证关 UI 后第一枪绝对能射出。
 		FSlateApplication::Get().SetAllUserFocusToGameViewport();
 
 		// =====================================================================
-		// 2. 强行冲刷底层的输入状态机
-		// 因为 MySaveMenuWidget 使用了 NoCapture，鼠标被引擎物理放生了。
-		// 必须重新向引擎下达你原本在 TopPlayerController 里写好的初始输入模式，
-		// 强迫引擎重新“抓住”鼠标，让单次点击立刻转化为开枪！
+		// 2. 强行冲刷底层的输入状态机 (Input Pipeline Flush)
 		// =====================================================================
+		// 灾难重现：我们在 MySaveMenuWidget 里“造反”重写了 GetDesiredInputConfig，
+		// 强行返回了 NoCapture，拆除空气墙把鼠标放跑了。
+		// 此时 UI 关了，如果不管它，虚幻引擎的鼠标捕获状态机可能依然处于混乱的“放养状态”。
+		// 解决方案：必须重新向引擎下达你原本在 TopPlayerController 里写好的初始输入模式，
+		// 强迫引擎重新“抓住”鼠标，让单次点击立刻转化为开枪！
 		if (CachedPC)
 		{
 			FInputModeGameAndUI InputModeData;
+			// 不锁死鼠标位置，但允许游戏和 UI 共同响应
 			InputModeData.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+			// 绝对防御：确保即使恢复到 GameMode，指针该显示时也绝不隐藏
 			InputModeData.SetHideCursorDuringCapture(false);
+			// 将上方调配好的输入模式数据包 (InputModeData)，正式下发并强塞给玩家控制器的底层状态机。
 			CachedPC->SetInputMode(InputModeData);
 		}
 	}

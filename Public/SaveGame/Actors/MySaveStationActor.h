@@ -45,8 +45,10 @@ protected:
 public:
 
 	// 执行交互逻辑：玩家控制器通过此接口安全触发存档面板翻转
+	// 发起者 ATopCharacter::OnInteractKeyPressed()
 	virtual void Interact_Implementation(class ACharacter* Interactor) override;
 
+	// 未实现
 	// 获取交互提示：向 HUD 层的交互提示框提供渲染文本
 	// 例如要显示：“按 E 键保存游戏”
 	virtual FText GetInteractPrompt_Implementation() const override;

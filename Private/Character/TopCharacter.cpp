@@ -253,77 +253,83 @@ void ATopCharacter::OnInteractSphereEndOverlap(UPrimitiveComponent* OverlappedCo
 
 AActor* ATopCharacter::GetClosestInteractableActor()
 {
+	// 【前置防线：空盘拦截】
+	// 检查当前雷达缓存的数组里是否为空
 	if (InteractableActorsInRange.IsEmpty())
 	{
 		// 【测谎仪节点 3 - 橙色警告】：按键按下了，但列表居然是空的
+		// @排错意义：帮助开发者瞬间定位 Bug 是出在“按键没响应”还是“碰撞没配对”上。
 		if (GEngine)
 		{
 			GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Orange, TEXT("[排查警告] 名单列表为空！雷达此时没有捕获到任何实现了接口的合法物体，请检查碰撞通道。"));
 		}
+		// 没东西可交互，直接下班
 		return nullptr;
 	}
 
+	// 最终胜出的“交互对象”指针
 	AActor* BestActor = nullptr;
+	// 距离擂主的记录板：初始设为宇宙最大值，保证第一个上台的合法选手一定能打破这个记录
 	double MinDistanceSq = MAX_dbl;
+	// 优先级擂主的记录板：初始设为宇宙最小值，保证第一个上台的合法选手一定能打破这个记录
 	int32 HighestPriority = MIN_int32;
 
+	// 缓存主角当前的绝对物理坐标，作为测量所有选手距离的“靶心”
 	const FVector PlayerLocation = GetActorLocation();
-	// 【核心修复】：改用骨骼网格体（视觉模型）的实际正前方
-	FVector PlayerForward = GetMesh()->GetForwardVector();
 
-	// 抹平 Z 轴，专为 2.5D 视角优化朝向判定
-	PlayerForward.Z = 0.0;
-	PlayerForward.Normalize();
-
+	// 【架构级细节：为什么要倒序（--i）？】
+	// 因为我们在循环中可能会执行 RemoveAt(i) 踢人操作！
+	// 如果是正序（0 -> N），踢掉 2 号位后，3 号位会自动滑到 2 号位，此时下一次循环直接去查 3 号位，
+	// 就会导致那个滑过来的原本的“3 号位”被彻底漏检。倒序遍历完美规避了数组动态缩容导致的越界和漏检！
 	for (int32 i = InteractableActorsInRange.Num() - 1; i >= 0; --i)
 	{
+		// 从弱指针（TWeakObjectPtr 或类似包装）中提取真实的 Actor 内存地址
 		AActor* CurrentActor = InteractableActorsInRange[i].Get();
 
-		// 严密防御机制：剔除已被破坏或销毁的无效指针
+		// 【严密防御机制：清理僵尸指针】
+		// 1. IsValid：防止指向的内存已经被 GC（垃圾回收）清理。
+		// 2. IsActorBeingDestroyed：防止物体正在播放销毁动画、即将死亡，但还没被彻底清出内存。
 		if (!IsValid(CurrentActor) || CurrentActor->IsActorBeingDestroyed())
 		{
+			// 如果碰到死人，直接把它从雷达名单里踢出去，防止下次按键时再查一遍
 			InteractableActorsInRange.RemoveAt(i);
+			// 跳过本次循环，换下一个选手上台
 			continue;
 		}
 
-		// 朝向权重判定
-		FVector DirToTarget = CurrentActor->GetActorLocation() - PlayerLocation;
-		DirToTarget.Z = 0.0;
-		DirToTarget.Normalize();
-
-		const double DotWeight = FVector::DotProduct(PlayerForward, DirToTarget);
-
-		// 过滤掉位于玩家背后（>90度）的物体
-		if (DotWeight < 0.0)
-		{
-			// 【测谎仪节点 4 - 黄色信息】：物体在身边，但因为角度被点积算出来在背后，被无情过滤了
-			if (GEngine)
-			{
-				GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Yellow, FString::Printf(TEXT("[排查提示] 发现了 %s，但它的点积结果为负数，判断在角色背后，已被剥夺交互权。"), *CurrentActor->GetName()));
-			}
-			continue;
-		}
-
-		// 优先级与距离演算
+		// 1. 测算优先级：通过 UE 的接口系统（Interface），向当前选手发问：“你的交互优先级是多少？”
+		// 使用 Execute_ 前缀是因为该接口大概率为 BlueprintNativeEvent，必须走虚幻的反射调用机制。
 		const int32 CurrentPriority = IMyInteractableInterface::Execute_GetInteractionPriority(CurrentActor);
+
+		// 2. 测算距离：计算主角和选手之间的【距离平方】。
+		// 【性能压榨】：为什么用 DistSquared 而不是 Distance？
+		// 算真实距离需要对坐标求算数平方根，CPU 开销极大。而比较远近大小，直接比平方值效果完全一样，这是 3A 级优化的基本素养。
 		const double DistanceSq = FVector::DistSquared(PlayerLocation, CurrentActor->GetActorLocation());
 
+		// 【第一层筛选：绝对阶级压制】
+		// 如果当前选手的优先级，严格大于现在的擂主（比如任务 NPC 优先级高于地上的普通树枝）
 		if (CurrentPriority > HighestPriority)
 		{
+			// 无视距离，直接篡位夺权，全面刷新三项擂主指标！
 			HighestPriority = CurrentPriority;
 			MinDistanceSq = DistanceSq;
 			BestActor = CurrentActor;
 		}
+		// 【第二层筛选：平民夺魁机制】
+		// 如果当前选手的优先级，跟现在的擂主一模一样大（比如地上有两根一模一样的树枝）
 		else if (CurrentPriority == HighestPriority)
 		{
+			// 进入残酷的物理距离大比拼，如果当前选手离玩家更近...
 			if (DistanceSq < MinDistanceSq)
 			{
+				// 篡位夺权，刷新距离和擂主身份（但不刷新优先级，因为大家一样大）
 				MinDistanceSq = DistanceSq;
 				BestActor = CurrentActor;
 			}
 		}
 	}
 
+	// 返回经历了千锤百炼后，最终留在台上的那个唯一胜者（如果全都挂了，这就是个 nullptr）
 	return BestActor;
 }
 
@@ -336,6 +342,7 @@ void ATopCharacter::OnInteractKeyPressed()
 	}
 
 	// 只触发唯一的最佳目标，消除误操作
+	// 调用筛选函数，获取当前范围内优先级最高且距离最近的交互目标
 	if (AActor* TargetActor = GetClosestInteractableActor())
 	{
 		if (GEngine)
@@ -343,6 +350,9 @@ void ATopCharacter::OnInteractKeyPressed()
 			GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Cyan, FString::Printf(TEXT("[锁定成功] 最终决出的最优目标是: %s！正在向其投掷 Execute_Interact 接口调用命令！"), *TargetActor->GetName()));
 		}
 
+		// 确认目标有效后，通过蓝图接口系统 (Interface) 通知目标执行具体的交互逻辑
+		// 将玩家自身 (this) 作为交互的发起者 (Instigator) 传递给目标
+		// 接收者 AMySavePointActor::Interact_Implementation
 		IMyInteractableInterface::Execute_Interact(TargetActor, this);
 	}
 }
