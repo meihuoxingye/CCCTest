@@ -19,6 +19,7 @@
 // 【新增】：契约接口，UI 向上级发送请求用
 #include "Interaction/MyPlayerUIInterface.h"
 
+
 // ==============================================================================
 // 核心生命周期与初始化 (Core Lifecycle & Initialization)
 // ==============================================================================
@@ -108,7 +109,7 @@ void UMyCharacterStatusWidget::NativeOnInitialized()
 	// 1. 虚幻底层初始化：构建基础的 Slate 控件树
 	Super::NativeOnInitialized();
 
-	// ===================== 【绑定上行请求 (触发源)】 =====================
+	// ===================== 【绑定上行请求接口 (触发源)】 =====================
 	if (AvatarButton)
 	{
 		// 【纯 C++ 解决焦点劫持】：抢夺按钮的抢占焦点特权！
@@ -117,7 +118,7 @@ void UMyCharacterStatusWidget::NativeOnInitialized()
 		// 官方推荐，UI 蓝图静态控制，在按钮细节面板中取消勾选（Is Focusable）
 
 		// AddDynamic 是供蓝图/UMG使用的动态多播委托绑定
-		// 当玩家在按钮上点击时，触发 OnAvatarClicked 去向总线【盲发换人请求】
+		// 【架构修正】：当玩家在按钮上点击时，触发 OnAvatarClicked，通过契约接口向专属玩家控制器【盲发私密换人请求】
 		AvatarButton->OnClicked.AddDynamic(this, &UMyCharacterStatusWidget::OnAvatarClicked);
 	}
 
@@ -127,7 +128,7 @@ void UMyCharacterStatusWidget::NativeOnInitialized()
 	{
 		if (UCharacterSwitchSubsystem* SwitchSub = World->GetSubsystem<UCharacterSwitchSubsystem>())
 		{
-			// 【架构闭环】：这里就是 UI 戴上耳机，接收由玩家控制器物理附身后下发的变更通报，默默监听“频道二（既定事实）”的地方
+			// 【架构闭环】：这里就是 UI 戴上耳机，默默监听由底层的“最高法庭（子系统）”下发的全局“既定事实广播”的地方
 			//
 			// 【致命内存危机与防御】：
 			// 为什么不直接写 AddUObject(this, ...)？
@@ -176,7 +177,7 @@ void UMyCharacterStatusWidget::NativeDestruct()
 		SPChangedHandle.Reset();
 	}
 
-	// 【2. 清除 换人宣告 (CQRS 下行事实频道) 的订阅记录】
+	// 【2. 清除 换人宣告 (CQRS 下行事实宣告) 的订阅记录】
 	if (ActiveCharChangedHandle.IsValid())
 	{
 		if (UWorld* World = GetWorld())
@@ -246,19 +247,19 @@ void UMyCharacterStatusWidget::RefreshSPDataFromSubsystem()
 
 
 // ==============================================================================
-// 角色切换总线与用户交互 (Character Switch Bus & User Interaction)
+// 角色切换交互与事实监听 (Character Switch Interaction & Fact Listening)
 // ==============================================================================
 #pragma region
 
 void UMyCharacterStatusWidget::OnAvatarClicked()
 {
 	// 1. 【内存级防御】：CachedCharacterRef 必然是一个 TWeakObjectPtr (弱指针)
-	// 在发广播前，先查验这个绑定的肉体是否还在游戏世界里活着（万一刚刚被炸毁了呢）
-	// 只有确保肉体有效，才允许发起切换请求，杜绝向总线抛出脏数据（野指针）
+	// 在发请求前，先查验这个绑定的肉体是否还在游戏世界里活着（万一刚刚被炸毁了呢）
+	// 只有确保肉体有效，才允许发起切换请求，杜绝向专属玩家控制器抛出脏指令（野指针）
 	if (!CachedCharacterRef.IsValid()) return;
 
 	// 2. 【契约调用：点对点发送意图】：
-	// UI 根本不需要大喇叭广播，它只是通过 UI 通信契约，
+	// UI 绝不走任何全局总线，它只严格遵循 IMyPlayerUIInterface 通信契约，
 	// 把“自己绑定的角色指针”拍给拥有它的玩家控制器，申请灵魂交接
 	if (APlayerController* PC = GetOwningPlayer())
 	{
@@ -267,6 +268,7 @@ void UMyCharacterStatusWidget::OnAvatarClicked()
 		{
 			// 接口发起方，带Execute_
 			// Execute_ 的作用：它会去检查 PC 的底细，如果 PC 有蓝图节点，就去触发蓝图；
+			// 接收方：ATopPlayerController::RequestCharacterSwitch_Implementation()：转接到具体处理角色附身逻辑的函数
 			// 如果只有 C++ 代码，就去执行 PC 的 RequestCharacterSwitch_Implementation 函数。
 			// PC：接收执行方；CachedCharacterRef.Get()：传递的数据
 			// .Get()：之前在头文件里，为了防内存泄漏，把 CachedCharacterRef 定义成了弱指针，需要强行转回普通指针才能用
@@ -277,9 +279,9 @@ void UMyCharacterStatusWidget::OnAvatarClicked()
 
 void UMyCharacterStatusWidget::HandleActiveCharacterChanged(ATopCharacter* NewActiveChar)
 {
-	// 1. 【频道二：接收结果】：
-	// 这个函数一定是被绑在 OnActiveCharacterChanged 频道上的
-	// 当控制器完成了灵魂交接并全网通报后，UI 瞬间收到了这个最新上位的“新王(NewActiveChar)”
+	// 1. 【下行宣告：接收既定事实】：
+	// 这个函数一定是被绑在 OnActiveCharacterChanged 宣告总线上的
+	// 当控制器完成了灵魂交接并全网通报后，UI 瞬间收到了这个最新上位的“新王”
 	if (CharacterVM && CachedCharacterRef.IsValid())
 	{
 		// 2. 【MVVM 数据绑定引擎的核心】：

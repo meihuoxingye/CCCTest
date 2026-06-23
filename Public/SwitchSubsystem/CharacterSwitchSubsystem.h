@@ -8,10 +8,12 @@
 
 class ATopCharacter;
 
-// 1. 换人请求委托：UI 点击时广播，控制器接收
-DECLARE_MULTICAST_DELEGATE_OneParam(FOnSwitchCharacterRequestSignature, ATopCharacter* /*TargetCharacter*/);
 
-// 2. 主控角色变更委托：换人成功后广播，所有 UI 接收以刷新高亮
+// 【架构演进记录 (Deprecated)】：原“频道一：换人请求委托 (FOnSwitchCharacterRequestSignature)” 已被彻底废除！
+// 废除原因：换人请求属于 UI 与特定控制器之间的私密交互。全局子系统广播缺乏目标指向性，极易在多手柄/分屏模式下引发指令交叉与逻辑灾难。
+// 现行规范：全面引入 IMyPlayerUIInterface 接口通信。利用接口“一对一精准制导”的底层特性，确保 UI 的请求仅能点对点送达给拥有它的专属 Controller，实现指令的绝对物理隔离。
+
+// 主控角色变更委托：换人成功后广播，所有 UI 接收以刷新高亮
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnActiveCharacterChangedSignature, ATopCharacter* /*NewActiveChar*/);
 
 UCLASS()
@@ -20,27 +22,17 @@ class CCC_API UCharacterSwitchSubsystem : public UWorldSubsystem
 	GENERATED_BODY()
 
 public:
+
 	/*
-	// 换人频道的双向总线
-	// 架构精髓：将“意图 (Request)”与“事实 (Changed)”严格拆分为双频道
-	// 绝不允许 UI 自行决定状态，所有换人逻辑必须形成“UI申请 -> 引擎仲裁 -> 全局派发结果”的闭环
+	 * 【换人通信架构规范 (CQRS 演进版)】
+	 * 绝不允许 UI 自行决定表现状态，所有换人逻辑必须形成绝对的单向闭环。
+	 * * ❌ 【已废弃的频道一：上行提议 (Command)】
+	 * 严禁在此子系统中处理 UI 的“意图（Request）”。所有的换人请求必须由 UI 通过接口点对点直发给控制器。
+	 * * ✅ 【硕果仅存的下行事实 (Event/Fact)】
+	 * 架构精髓：本子系统仅作为引擎底层的“最高法庭”，只负责宣判“既定事实”。
+	 */
 
-	// 架构核心拷问：为什么要用两个频道？
-	// 答：为了彻底杜绝“状态撕裂 (State Tearing)” Bug。
-	// 如果只有一个频道，UI 一点就亮，但万一底层逻辑(因角色阵亡/受控)拒绝了换人，就会导致 UI 亮着但人没换
-	// 因此，必须建立严格的【UI盲发申请 -> 引擎底层仲裁 -> 全局下发既定事实】的单向审批流
-	// UI 绝不能因为“玩家按了鼠标”而改变表现，只能因为“世界真正发生了改变”才改变表现
-	*/
-
-
-	// 【频道一：上行提议 (Command)】
-	// 流向：UI_StatusWidget OnAvatarClicked()广播站 -> 玩家控制器 SwitchToSpecificCharacter(ATopCharacter* TargetCharacter)委托绑定函数
-	// 职责：传递玩家的“换人愿望”。
-	// 机制：UI 点击后仅向此频道发送请求，发完后按兵不动（绝不提前修改高亮）
-	// 仲裁：玩家控制器接听此频道，校验目标角色状态。若不可换则静默抛弃，若可换则执行 Possess
-	FOnSwitchCharacterRequestSignature OnSwitchRequest;
-
-	// 【频道二：下行事实 (Event/Fact)】
+	// 【下行事实频道】
 	// 流向：玩家控制器 OnPossess()广播站 -> UI_StatusWidget HandleActiveCharacterChanged(ATopCharacter* NewActiveChar)委托绑定函数
 	// 职责：宣判引擎底层的“既定事实”
 	// 机制：控制器在完成真正的灵魂交接后，向此频道广播“新王登基”

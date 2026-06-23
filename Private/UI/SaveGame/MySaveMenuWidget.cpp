@@ -104,7 +104,7 @@ TOptional<FUIInputConfig> UMySaveMenuWidget::GetDesiredInputConfig() const
 
 	// Menu 模式就像在屏幕上拍了一面绝对防弹的玻璃：
 	// 切断硬件（鼠标/键盘/手柄）与 3D 游戏世界的所有物理连接，信号只能留在这个二维平面上。
-	// 什么是捕获：在正常的动作或射击游玩状态下，把鼠标“捕获”并死死锁在游戏窗口的中心，隐藏起来用来转动视角
+	// NoCapture(不捕获) 鼠标滑到屏幕边缘时，可以直接划出游戏窗口，划到你的 Windows 桌面或者第二块显示器上。
 	return FUIInputConfig(ECommonInputMode::Menu, EMouseCaptureMode::NoCapture, false);
 }
 

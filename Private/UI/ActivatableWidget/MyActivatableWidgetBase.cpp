@@ -23,7 +23,7 @@
 // 在 UE 5.8 中，不再需要引入 MVVMViewModelBase.h，因为底层 Widget 已原生支持
 
 // ==============================================================================
-// 状态驱动接口 (State Drivers)
+// 状态查询与驱动接口 (State Queries & Drivers)
 // ==============================================================================
 #pragma region
 
@@ -39,6 +39,231 @@ void UMyActivatableWidgetBase::OnWidgetActivated_Implementation()
 void UMyActivatableWidgetBase::OnWidgetDeactivated_Implementation()
 {
 	DeactivateWidget();
+}
+
+#pragma endregion
+
+// ==============================================================================
+// MVVM 双轨渲染驱动源 (MVVM Dual-Track Drive Source)
+// ==============================================================================
+#pragma region
+
+void UMyActivatableWidgetBase::SetTransitionProgress(float InProgress)
+{
+	// 【第一道防线：脏标记防抖拦截 (Dirty Flag Debounce)】
+	// 业务背景：当 UI 播放出场/退场动画时，本类的 NativeTick 会在短短 0.3 秒内，亲自每帧向这里塞入递增/递减的进度。
+	// 灾难规避：此处必须执行严格的内存值比对。一旦拦截到因超高帧率导致 DeltaTime 过小而产生的无效重复数字，立刻掐断广播。
+	// 绝不允许对全网 UI 下发无效的刷新指令，死守渲染管线的 CPU 消耗底线。
+	if (TransitionProgress != InProgress)
+	{
+		// 数据物理着陆 (记录最新的 0~1 线性进度)
+		TransitionProgress = InProgress;
+
+		// 【第二道防线：编译期寻址与零反射广播 (Zero-Reflection Broadcast)】
+		// 架构解耦：它与 UpdateOpeningEffect（蓝图缓动钩子）共同组成了本框架的“双轨动画渲染机制”。
+		// 此处 C++ 只负责大喊“线性进度变了”，绝不关心蓝图拿这个进度去干什么。
+		// 极限压榨：摒弃慢速的字符串哈希匹配，直接利用 UHT 编译期生成的静态描述符地址 (FieldId)。
+		// 使得向 MVVM 框架通报变更的时间复杂度降为纯粹的 O(1)，确保极致流畅。
+		BroadcastFieldValueChanged(UMyActivatableWidgetBase::FFieldNotificationClassDescriptor::TransitionProgress);
+	}
+}
+
+#pragma endregion
+
+// ==============================================================================
+// 控件生命周期 (Widget Lifecycle)
+// ==============================================================================
+#pragma region
+
+void UMyActivatableWidgetBase::NativeOnInitialized()
+{
+	// 调用父类 UserWidget 的初始化逻辑
+	Super::NativeOnInitialized();
+
+	// 将 UI 动画过渡进度归零（0.0 代表动画起点）
+	TransitionProgress = 0.0f;
+	// 将 UI 的初始状态设置为待机（Idle）
+	CurrentState = EUIState::Idle;
+
+	// 【修复】：消除直接赋值的弃用警告，统一使用 5.8 标准 Setter
+	SetIsFocusable(true);
+	bSupportsActivationFocus = bAutoStealFocusWhenActivated;
+}
+
+void UMyActivatableWidgetBase::NativeConstruct()
+{
+	// 1. 执行底层构建：完成 UMG/Slate 控件树的实例化与运行时环境挂载
+	Super::NativeConstruct();
+
+	// 防止编辑器预览模式绑定委托，导致编辑器挂死
+	if (IsDesignTime()) return;
+
+	// 2. 作用域收束与安全寻址：精准获取当前 UI 的宿主本地玩家
+	// @防线：使用 GetOwningLocalPlayer() 替代 GetPlayerController(0)，物理隔离多实例/分屏环境中的输入越权，且能防止网络同步环境下的空指针崩溃。
+	if (ULocalPlayer* LP = GetOwningLocalPlayer())
+	{
+		// 3. 获取增强输入子系统：定位负责当前玩家输入管线仲裁的局部单例
+		if (UEnhancedInputLocalPlayerSubsystem* InputSubsystem = LP->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
+		{
+			// 4. 挂载缓存重建监听（数据驱动核心）
+			// @触发时机：当玩家在设置菜单中修改了快捷键，或者底层添加/移除了输入上下文导致控制逻辑重组时广播。
+			// 使用 AddUniqueDynamic 是正确的，防止重复构造导致的委托膨胀
+			// 防止玩家改键后“新快捷键失灵”或“旧快捷键误漏”。
+			// ControlMappingsRebuiltDelegate，引擎底层专门用来通知全量系统：“玩家的按键映射规则发生改变” 的一个全局大喇叭
+			InputSubsystem->ControlMappingsRebuiltDelegate.AddUniqueDynamic(this, &UMyActivatableWidgetBase::RefreshInputPassthroughCache);
+		}
+	}
+
+	// 5. 初始建仓：在 UI 刚加入屏幕并准备接收首个硬件输入的前一刻，强制执行一次遍历，将允许穿透的按键填入 O(1) 哈希缓存中
+	RefreshInputPassthroughCache();
+}
+
+void UMyActivatableWidgetBase::SynchronizeProperties()
+{
+	// 调用父类逻辑，同步蓝图编辑器中的属性到 C++ 实例
+	Super::SynchronizeProperties();
+
+	// 如果当前 UI 正在打开或者处于待机状态
+	if (CurrentState == EUIState::Opening || CurrentState == EUIState::Idle)
+	{
+		// 计算经过缓动曲线（EaseInOut）处理后的当前进度值
+		float EasedProgress = FMath::InterpEaseInOut(0.0f, 1.0f, TransitionProgress, OpeningExp);
+		// 将计算好的进度传递给蓝图或底层的打开特效更新函数
+		UpdateOpeningEffect(TransitionProgress, EasedProgress);
+	}
+	// 如果当前 UI 正在关闭
+	else if (CurrentState == EUIState::Closing)
+	{
+		// 计算经过缓动曲线处理后的关闭动画进度值
+		float EasedProgress = FMath::InterpEaseInOut(0.0f, 1.0f, TransitionProgress, ClosingExp);
+		// 将计算好的进度传递给蓝图或底层的关闭特效更新函数
+		UpdateClosingEffect(TransitionProgress, EasedProgress);
+	}
+}
+
+void UMyActivatableWidgetBase::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+	// 调用父类 Tick，保证基础 UI 逻辑正常执行
+	Super::NativeTick(MyGeometry, InDeltaTime);
+
+	// Idle 状态下直接返回，这是最廉价的开销，避免不必要的数学推演
+	// 如果处于待机状态，不需要更新动画进度，直接返回以节省性能
+	if (CurrentState == EUIState::Idle) return;
+
+	// 根据当前是打开还是关闭状态，确定对应的动画总时长
+	float CurrentDuration = (CurrentState == EUIState::Opening) ? OpeningDuration : ClosingDuration;
+
+	// 【优化】：将除法预计算并转为乘法，消除每一帧的除法开销，对 CPU 分支预测更友好
+	// 计算本帧进度增加/减少的步长（防止除零错误，最少取 0.001f 应对高帧率显示器）
+	const float InvDuration = 1.0f / FMath::Max(0.001f, CurrentDuration);
+	const float Step = InDeltaTime * InvDuration;
+
+	float NewProgress = TransitionProgress;
+
+	// 如果正在播放入场动画
+	if (CurrentState == EUIState::Opening)
+	{
+		// 累加进度，最高不超过 1.0f
+		NewProgress = FMath::Min(TransitionProgress + Step, 1.0f);
+	}
+	// 如果正在播放退场动画
+	else if (CurrentState == EUIState::Closing)
+	{
+		// 递减进度，最低不低于 0.0f
+		NewProgress = FMath::Max(TransitionProgress - Step, 0.0f);
+	}
+
+	// 【双轨渲染之第一轨】：MVVM 核心数据总线更新广播
+	SetTransitionProgress(NewProgress);
+
+	// 再次判断状态，用于应用动画效果及判定动画是否结束
+	if (CurrentState == EUIState::Opening)
+	{
+		// ==============================================================================
+		// 【双轨渲染之第二轨：数学引擎与蓝图交接 (Math Engine & Blueprint Handover)】
+		// ==============================================================================
+		// 性能与表现的完美平衡：C++ 承担极其昂贵的非线性数学插值计算 (InterpEaseInOut)，
+		// 算出带有丝滑惯性的 EasedProgress 后，将其直接拍给蓝图的 UpdateOpeningEffect 钩子。
+		// 让蓝图只做它最擅长的事——把现成的算好的数字连到 Transform 节点上。
+		// 计算缓动后的进度值
+		float EasedProgress = FMath::InterpEaseInOut(0.0f, 1.0f, TransitionProgress, OpeningExp);
+		// 更新打开动画的视觉表现
+		UpdateOpeningEffect(TransitionProgress, EasedProgress);
+
+		// 如果进度达到或超过 1.0，说明入场动画播放完毕
+		if (TransitionProgress >= 1.0f) CurrentState = EUIState::Idle; // 切换为待机状态
+	}
+	else if (CurrentState == EUIState::Closing)
+	{
+		// 【执行第二轨：退场非线性渲染】
+		// 计算缓动后的进度值
+		float EasedProgress = FMath::InterpEaseInOut(0.0f, 1.0f, TransitionProgress, ClosingExp);
+		// 更新关闭动画的视觉表现
+		UpdateClosingEffect(TransitionProgress, EasedProgress);
+
+		// 状态机收尾：当进度彻底归零（退场动画播完）
+		if (TransitionProgress <= 0.0f)
+		{
+			// 将状态重置为待机
+			CurrentState = EUIState::Idle;
+			// 隐藏 UI（折叠状态不占位、不渲染）
+			SetVisibility(ESlateVisibility::Collapsed);
+
+			// 【核心修复】：直到 UI 彻底看不见了，才将其出栈！
+			// 这彻底封死了“退场动画期间开火走火”的幽灵点击 Bug。
+			// 退出逻辑增加完全安全性检查
+			// 获取持有该 UI 的本地玩家实例
+			if (ULocalPlayer* LP = GetOwningLocalPlayer())
+			{
+				// 获取挂载在本地玩家上的自定义 UI 管理器子系统
+				if (UMyUIManagerSubsystem* UIMgr = LP->GetSubsystem<UMyUIManagerSubsystem>())
+				{
+					// 通知管理器将当前 UI 从拦截栈中移除
+					UIMgr->PopUI(this);
+				}
+			}
+		}
+	}
+}
+
+void UMyActivatableWidgetBase::NativeDestruct()
+{
+	// 在 Destruct 时必须非常小心，因为很多关联对象可能已经先于 Widget 销毁
+	// 最后的保险：无论 UI 是怎么没的（切场景、被强杀等），都要从子系统中消除
+	// 获取所属本地玩家
+	if (ULocalPlayer* LP = GetOwningLocalPlayer())
+	{
+		// 1. 安全移除入栈记录
+		// 获取 UI 子系统
+		if (UMyUIManagerSubsystem* UIMgr = LP->GetSubsystem<UMyUIManagerSubsystem>())
+		{
+			// 强行从子系统栈中移除自己，防止悬空指针
+			UIMgr->PopUI(this);
+		}
+
+		// 2. 安全解绑委托
+		// 解绑增强输入映射重构委托，防止野指针崩溃
+		if (UEnhancedInputLocalPlayerSubsystem* InputSubsystem = LP->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
+		{
+			// 对于动态多播委托，建议使用对应的 RemoveDynamic，而不是 RemoveAll(this)
+			InputSubsystem->ControlMappingsRebuiltDelegate.RemoveDynamic(this, &UMyActivatableWidgetBase::RefreshInputPassthroughCache);
+		}
+	}
+
+	// 调用父类的析构清理逻辑
+	Super::NativeDestruct();
+}
+
+void UMyActivatableWidgetBase::NativeOnFocusLost(const FFocusEvent& InFocusEvent)
+{
+	Super::NativeOnFocusLost(InFocusEvent);
+
+	// 如果 UI 依然可见且并未进入关闭程序，说明焦点丢失是意外发生的（如 Alt-Tab 切屏）
+	// 强制收回焦点，确保 NativeOnKeyDown 持续生效，消除因切屏导致的交互中断
+	if (GetVisibility() == ESlateVisibility::Visible && CurrentState != EUIState::Closing)
+	{
+		SetFocus();
+	}
 }
 
 // 【原生状态机钩子】：引擎底层激活时触发，完美接管原本在 OnWidgetActivated 中的核心防线
@@ -140,197 +365,23 @@ void UMyActivatableWidgetBase::NativeOnDeactivated()
 	// 注意：这里绝不调用 PopUI！留在拦截栈中抗点击穿透，交由 Tick 动画结束时出栈。
 }
 
-#pragma endregion
-
-// ==============================================================================
-// 控件生命周期 (Widget Lifecycle)
-// ==============================================================================
-#pragma region
-
-void UMyActivatableWidgetBase::NativeOnInitialized()
+TOptional<FUIInputConfig> UMyActivatableWidgetBase::GetDesiredInputConfig() const
 {
-	// 调用父类 UserWidget 的初始化逻辑
-	Super::NativeOnInitialized();
+	// CommonUI 会根据你设置的这个布尔值，自动决定是否在底层封杀 WASD 移动
+	if (bAutoStealFocusWhenActivated)
+	{
+		// 【重度面板模式】 (适用场景：全屏背包、系统设置菜单)
+		// ECommonInputMode::Menu：相当于在屏幕上降下一道“绝对防弹玻璃”。
+		// 彻底切断硬件设备与底层 3D 游戏角色 (WASD移动/鼠标开火) 的所有联系，确保玩家在翻背包时绝对不会走火。
+		// EMouseCaptureMode::CapturePermanently：永久捕获鼠标，确保鼠标指针不会意外滑出游戏窗口边界。
+		return FUIInputConfig(ECommonInputMode::Menu, EMouseCaptureMode::CapturePermanently);
+	}
 
-	// 将 UI 动画过渡进度归零（0.0 代表动画起点）
-	TransitionProgress = 0.0f;
-	// 将 UI 的初始状态设置为待机（Idle）
-	CurrentState = EUIState::Idle;
-
-	// 【修复】：消除直接赋值的弃用警告，统一使用 5.8 标准 Setter
-	SetIsFocusable(true);
-	bSupportsActivationFocus = bAutoStealFocusWhenActivated;
+	// 【轻度面板模式】 (适用场景：悬浮任务栏、左下角击杀提示、右侧伤害统计)
+	// 保持 Game 模式，UI 仅作为画中画存在。玩家的键盘和鼠标信号依然全额漏给底层的 3D 角色，不妨碍战斗。
+	return FUIInputConfig(ECommonInputMode::Game, EMouseCaptureMode::CapturePermanently);
 }
 
-void UMyActivatableWidgetBase::NativeConstruct()
-{
-	// 1. 执行底层构建：完成 UMG/Slate 控件树的实例化与运行时环境挂载
-	Super::NativeConstruct();
-
-	// 防止编辑器预览模式绑定委托，导致编辑器挂死
-	if (IsDesignTime()) return;
-
-	// 2. 作用域收束与安全寻址：精准获取当前 UI 的宿主本地玩家
-	// @防线：使用 GetOwningLocalPlayer() 替代 GetPlayerController(0)，物理隔离多实例/分屏环境中的输入越权，且能防止网络同步环境下的空指针崩溃。
-	if (ULocalPlayer* LP = GetOwningLocalPlayer())
-	{
-		// 3. 获取增强输入子系统：定位负责当前玩家输入管线仲裁的局部单例
-		if (UEnhancedInputLocalPlayerSubsystem* InputSubsystem = LP->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
-		{
-			// 4. 挂载缓存重建监听（数据驱动核心）
-			// @触发时机：当玩家在设置菜单中修改了快捷键，或者底层添加/移除了输入上下文导致控制逻辑重组时广播。
-			// 使用 AddUniqueDynamic 是正确的，防止重复构造导致的委托膨胀
-			// 防止玩家改键后“新快捷键失灵”或“旧快捷键误漏”。
-			// ControlMappingsRebuiltDelegate，引擎底层专门用来通知全量系统：“玩家的按键映射规则发生改变” 的一个全局大喇叭
-			InputSubsystem->ControlMappingsRebuiltDelegate.AddUniqueDynamic(this, &UMyActivatableWidgetBase::RefreshInputPassthroughCache);
-		}
-	}
-
-	// 5. 初始建仓：在 UI 刚加入屏幕并准备接收首个硬件输入的前一刻，强制执行一次遍历，将允许穿透的按键填入 O(1) 哈希缓存中
-	RefreshInputPassthroughCache();
-}
-
-void UMyActivatableWidgetBase::SynchronizeProperties()
-{
-	// 调用父类逻辑，同步蓝图编辑器中的属性到 C++ 实例
-	Super::SynchronizeProperties();
-
-	// 如果当前 UI 正在打开或者处于待机状态
-	if (CurrentState == EUIState::Opening || CurrentState == EUIState::Idle)
-	{
-		// 计算经过缓动曲线（EaseInOut）处理后的当前进度值
-		float EasedProgress = FMath::InterpEaseInOut(0.0f, 1.0f, TransitionProgress, OpeningExp);
-		// 将计算好的进度传递给蓝图或底层的打开特效更新函数
-		UpdateOpeningEffect(TransitionProgress, EasedProgress);
-	}
-	// 如果当前 UI 正在关闭
-	else if (CurrentState == EUIState::Closing)
-	{
-		// 计算经过缓动曲线处理后的关闭动画进度值
-		float EasedProgress = FMath::InterpEaseInOut(0.0f, 1.0f, TransitionProgress, ClosingExp);
-		// 将计算好的进度传递给蓝图或底层的关闭特效更新函数
-		UpdateClosingEffect(TransitionProgress, EasedProgress);
-	}
-}
-
-void UMyActivatableWidgetBase::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
-{
-	// 调用父类 Tick，保证基础 UI 逻辑正常执行
-	Super::NativeTick(MyGeometry, InDeltaTime);
-
-	// Idle 状态下直接返回，这是最廉价的开销，避免不必要的数学推演
-	// 如果处于待机状态，不需要更新动画进度，直接返回以节省性能
-	if (CurrentState == EUIState::Idle) return;
-
-	// 根据当前是打开还是关闭状态，确定对应的动画总时长
-	float CurrentDuration = (CurrentState == EUIState::Opening) ? OpeningDuration : ClosingDuration;
-
-	// 【删减】：float Step = InDeltaTime / FMath::Max(0.001f, CurrentDuration);
-	// 【优化】：将除法预计算并转为乘法，消除每一帧的除法开销，对 CPU 分支预测更友好
-	// 计算本帧进度增加/减少的步长（防止除零错误，最少取 0.001f 应对高帧率显示器）
-	const float InvDuration = 1.0f / FMath::Max(0.001f, CurrentDuration);
-	const float Step = InDeltaTime * InvDuration;
-
-	float NewProgress = TransitionProgress;
-
-	// 如果正在播放入场动画
-	if (CurrentState == EUIState::Opening)
-	{
-		// 累加进度，最高不超过 1.0f
-		NewProgress = FMath::Min(TransitionProgress + Step, 1.0f);
-	}
-	// 如果正在播放退场动画
-	else if (CurrentState == EUIState::Closing)
-	{
-		// 递减进度，最低不低于 0.0f
-		NewProgress = FMath::Max(TransitionProgress - Step, 0.0f);
-	}
-
-	// 【MVVM 核心更新】：更新进度的同时，触发蓝图动画 UI 的自动刷新
-	SetTransitionProgress(NewProgress);
-
-	// 再次判断状态，用于应用动画效果及判定动画是否结束
-	if (CurrentState == EUIState::Opening)
-	{
-		// 计算缓动后的进度值
-		float EasedProgress = FMath::InterpEaseInOut(0.0f, 1.0f, TransitionProgress, OpeningExp);
-		// 更新打开动画的视觉表现
-		UpdateOpeningEffect(TransitionProgress, EasedProgress);
-
-		// 如果进度达到或超过 1.0，说明入场动画播放完毕
-		if (TransitionProgress >= 1.0f) CurrentState = EUIState::Idle; // 切换为待机状态
-	}
-	else if (CurrentState == EUIState::Closing)
-	{
-		// 计算缓动后的进度值
-		float EasedProgress = FMath::InterpEaseInOut(0.0f, 1.0f, TransitionProgress, ClosingExp);
-		// 更新关闭动画的视觉表现
-		UpdateClosingEffect(TransitionProgress, EasedProgress);
-
-		// 状态机收尾：当进度彻底归零（退场动画播完）
-		if (TransitionProgress <= 0.0f)
-		{
-			// 将状态重置为待机
-			CurrentState = EUIState::Idle;
-			// 隐藏 UI（折叠状态不占位、不渲染）
-			SetVisibility(ESlateVisibility::Collapsed);
-
-			// 【核心修复】：直到 UI 彻底看不见了，才将其出栈！
-			// 这彻底封死了“退场动画期间开火走火”的幽灵点击 Bug。
-			// 退出逻辑增加完全安全性检查
-			// 获取持有该 UI 的本地玩家实例
-			if (ULocalPlayer* LP = GetOwningLocalPlayer())
-			{
-				// 获取挂载在本地玩家上的自定义 UI 管理器子系统
-				if (UMyUIManagerSubsystem* UIMgr = LP->GetSubsystem<UMyUIManagerSubsystem>())
-				{
-					// 通知管理器将当前 UI 从拦截栈中移除
-					UIMgr->PopUI(this);
-				}
-			}
-		}
-	}
-}
-
-void UMyActivatableWidgetBase::NativeDestruct()
-{
-	// 在 Destruct 时必须非常小心，因为很多关联对象可能已经先于 Widget 销毁
-	// 最后的保险：无论 UI 是怎么没的（切场景、被强杀等），都要从子系统中消除
-	// 获取所属本地玩家
-	if (ULocalPlayer* LP = GetOwningLocalPlayer())
-	{
-		// 1. 安全移除入栈记录
-		// 获取 UI 子系统
-		if (UMyUIManagerSubsystem* UIMgr = LP->GetSubsystem<UMyUIManagerSubsystem>())
-		{
-			// 强行从子系统栈中移除自己，防止悬空指针
-			UIMgr->PopUI(this);
-		}
-
-		// 2. 安全解绑委托
-		// 解绑增强输入映射重构委托，防止野指针崩溃
-		if (UEnhancedInputLocalPlayerSubsystem* InputSubsystem = LP->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
-		{
-			// 对于动态多播委托，建议使用对应的 RemoveDynamic，而不是 RemoveAll(this)
-			InputSubsystem->ControlMappingsRebuiltDelegate.RemoveDynamic(this, &UMyActivatableWidgetBase::RefreshInputPassthroughCache);
-		}
-	}
-
-	// 调用父类的析构清理逻辑
-	Super::NativeDestruct();
-}
-
-void UMyActivatableWidgetBase::NativeOnFocusLost(const FFocusEvent& InFocusEvent)
-{
-	Super::NativeOnFocusLost(InFocusEvent);
-
-	// 如果 UI 依然可见且并未进入关闭程序，说明焦点丢失是意外发生的（如 Alt-Tab 切屏）
-	// 强制收回焦点，确保 NativeOnKeyDown 持续生效，消除因切屏导致的交互中断
-	if (GetVisibility() == ESlateVisibility::Visible && CurrentState != EUIState::Closing)
-	{
-		SetFocus();
-	}
-}
 #pragma endregion
 
 // ==============================================================================
@@ -455,39 +506,4 @@ bool UMyActivatableWidgetBase::IsPassthroughAction(const FKey& InKey) const
 	// 【布尔决断】：查中则返回 true（引导上层 Unhandled 放行）；未中则返回 false（引导上层 Super 拦截）。
 	return CachedPassthroughKeys.Contains(InKey);
 }
-#pragma endregion
-
-// ==============================================================================
-// CommonUI 焦点系统 (CommonUI Focus System)
-// ==============================================================================
-#pragma region
-
-TOptional<FUIInputConfig> UMyActivatableWidgetBase::GetDesiredInputConfig() const
-{
-	// CommonUI 会根据你设置的这个布尔值，自动决定是否在底层封杀 WASD 移动
-	if (bAutoStealFocusWhenActivated)
-	{
-		return FUIInputConfig(ECommonInputMode::Menu, EMouseCaptureMode::CapturePermanently);
-	}
-	return FUIInputConfig(ECommonInputMode::Game, EMouseCaptureMode::CapturePermanently);
-}
-
-#pragma endregion
-
-// ==============================================================================
-// MVVM 状态驱动 (MVVM State Driven)
-// ==============================================================================
-#pragma region
-
-void UMyActivatableWidgetBase::SetTransitionProgress(float InProgress)
-{
-	// 性能防线：只有当数值发生真实的物理变化时，才触发底层广播，杜绝每帧无效 UI 刷新
-	if (TransitionProgress != InProgress)
-	{
-		TransitionProgress = InProgress;
-		// 【核心修复 2】：使用 UHT 生成的静态 FieldId，实现纯 O(1) 极速广播
-		BroadcastFieldValueChanged(UMyActivatableWidgetBase::FFieldNotificationClassDescriptor::TransitionProgress);
-	}
-}
-
 #pragma endregion

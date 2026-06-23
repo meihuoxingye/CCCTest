@@ -92,9 +92,11 @@ private:
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<class UButton> AvatarButton;
 
-	// 当玩家鼠标点击了这张头像卡片时，UI 的底层 UButton 立刻向控制器递交换人请求；
-	// 必须加 UFUNCTION()！虚幻委托经过引擎反射系统；
-	// UI 到此为止绝不立刻改高亮！广播发出的瞬间，玩家控制器会听到请求并进行合法性仲裁
+	// 当玩家鼠标点击了这张头像卡片时，触发此函数；
+	// 必须加 UFUNCTION()！因为供蓝图 Button 的 OnClicked 动态多播委托绑定，需经过引擎反射系统；
+	// 【架构演进】：彻底摒弃旧版的全局总线广播！现改由 IMyPlayerUIInterface 契约接口;
+	// 点对点向专属的 ATopPlayerController::RequestCharacterSwitch_Implementation() 转接到具体处理角色附身逻辑;
+	// 纪律重申：UI 至此绝不立刻修改高亮表现！盲发请求后，必须按兵不动，静候引擎底层仲裁后的“下行事实”广播。
 	UFUNCTION()
 	void OnAvatarClicked();
 
@@ -104,7 +106,7 @@ private:
 	// 原生 C++ 委托，完全绕过了沉重的反射系统，执行效率极高
 	void HandleActiveCharacterChanged(ATopCharacter* NewActiveChar);
 
-	// 【频道二退订凭证句柄】
+	// 【下行事实频道退订凭证句柄】
 	// 本质：UI 成功订阅 OnActiveCharacterChanged (下行事实频道) 时，由全局总线颁发的唯一单号。
 	// 唯一使命：在 UI 生命周期结束 (NativeDestruct) 时，执此句柄调用 Remove 解绑，防野指针崩溃。
 	FDelegateHandle ActiveCharChangedHandle;
