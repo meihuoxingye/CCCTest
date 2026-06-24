@@ -16,6 +16,10 @@
 
 void UMySaveSlotWidget::NativeOnInitialized()
 {
+	// 必须加上这行，MVVM 是作为 UUserWidget 的一个扩展组件存在的。
+	// 当 UI 被创建时，引擎必须通过执行父类 UUserWidget::NativeOnInitialized() 来初始化这些扩展组件，并在底层建立起所有的 MVVM 监听网络。
+	Super::NativeOnInitialized();
+
 	// 防御性编程：检查保存按钮是否已被蓝图正确绑定，防止蓝图损坏导致空指针崩溃
 	if (Btn_Save)
 	{
