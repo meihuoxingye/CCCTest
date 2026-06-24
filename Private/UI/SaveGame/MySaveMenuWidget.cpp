@@ -16,6 +16,8 @@
 
 #include "CommonInputBaseTypes.h"
 
+#include "UI/CommonButton/MyCommonButtonBase.h" 
+
 
 // ==============================================================================
 // 核心生命周期与初始化 (Core Lifecycle & Initialization)
@@ -36,13 +38,13 @@ void UMySaveMenuWidget::NativeOnInitialized()
 {
 	// 1. 绑定分页按钮的点击事件
 	// 为什么用委托绑定：解耦、一对多、动态绑定参与反射系统防止空指针崩溃
-	if (Btn_PrevPage) Btn_PrevPage->OnClicked.AddDynamic(this, &UMySaveMenuWidget::OnPrevPageClicked);
-	if (Btn_NextPage) Btn_NextPage->OnClicked.AddDynamic(this, &UMySaveMenuWidget::OnNextPageClicked);
-	if (Btn_AddPage) Btn_AddPage->OnClicked.AddDynamic(this, &UMySaveMenuWidget::OnAddPageClicked);
+	if (Btn_PrevPage) Btn_PrevPage->OnClicked().AddUObject(this, &UMySaveMenuWidget::OnPrevPageClicked);
+	if (Btn_NextPage) Btn_NextPage->OnClicked().AddUObject(this, &UMySaveMenuWidget::OnNextPageClicked);
+	if (Btn_AddPage) Btn_AddPage->OnClicked().AddUObject(this, &UMySaveMenuWidget::OnAddPageClicked);
 
 	// 绑定清空与整理按钮
-	if (Btn_ClearPage) Btn_ClearPage->OnClicked.AddDynamic(this, &UMySaveMenuWidget::OnClearPageClicked);
-	if (Btn_CompactPages) Btn_CompactPages->OnClicked.AddDynamic(this, &UMySaveMenuWidget::OnCompactPagesClicked);
+	if (Btn_ClearPage) Btn_ClearPage->OnClicked().AddUObject(this, &UMySaveMenuWidget::OnClearPageClicked);
+	if (Btn_CompactPages) Btn_CompactPages->OnClicked().AddUObject(this, &UMySaveMenuWidget::OnCompactPagesClicked);
 
 	// 2. 找到全局的存档大管家，戴上耳机监听它的广播；缓存每页档位数、最高页数上限
 	if (UGameInstance* GI = GetGameInstance())

@@ -78,23 +78,23 @@ protected:
 
 	// “上一页”按钮
 	UPROPERTY(meta = (BindWidget))
-	TObjectPtr<UButton> Btn_PrevPage;
+	TObjectPtr<class UMyCommonButtonBase> Btn_PrevPage;
 
 	// “下一页”按钮
 	UPROPERTY(meta = (BindWidget))
-	TObjectPtr<UButton> Btn_NextPage;
+	TObjectPtr<class UMyCommonButtonBase> Btn_NextPage;
 
 	// “加一页”按钮
 	UPROPERTY(meta = (BindWidget))
-	TObjectPtr<UButton> Btn_AddPage;
+	TObjectPtr<class UMyCommonButtonBase> Btn_AddPage;
 
 	// 清空本页按钮
 	UPROPERTY(meta = (BindWidget))
-	TObjectPtr<UButton> Btn_ClearPage;
+	TObjectPtr<class UMyCommonButtonBase> Btn_ClearPage;
 
 	// 整理碎片（删除所有空页）按钮
 	UPROPERTY(meta = (BindWidget))
-	TObjectPtr<UButton> Btn_CompactPages;
+	TObjectPtr<class UMyCommonButtonBase> Btn_CompactPages;
 
 	// 暴露给蓝图，让美术指定要生成的卡片类 (如 WBP_SaveSlot)
 	UPROPERTY(EditDefaultsOnly, Category = "SaveMenu|Classes")
