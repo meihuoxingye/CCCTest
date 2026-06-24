@@ -16,6 +16,13 @@
 // ==============================================================================
 #pragma region
 
+AMyGameModeBase::AMyGameModeBase()
+{
+	// 【核心配置】：在构造函数中开启无缝旅行支持，允许跨地图动态无缝加载，消除黑屏与连接中断
+	// 这样引擎在加载此类时 (CDO阶段)，就会将其刻入默认配置
+	bUseSeamlessTravel = true;
+}
+
 void AMyGameModeBase::StartPlay()
 {
 	// GameMode 的 StartPlay 是所有 Actor 准备就绪、游戏正式开始的冲锋号

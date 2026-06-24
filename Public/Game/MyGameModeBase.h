@@ -20,6 +20,9 @@ class CCC_API AMyGameModeBase : public AGameModeBase
 	// 生命周期 (Lifecycle)
 	// ==============================================================================
 public:
+	// 声明构造函数
+	AMyGameModeBase();
+
 	// 重写 StartPlay，作为后台基建预热的触发点
 	virtual void StartPlay() override;
 
