@@ -73,9 +73,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Interaction")
 	bool bCanBeClosedByBackgroundClick = true;
 
-	// 控制开关：该面板在展开时，是否自动抢夺键盘/手柄的输入焦点？
-	// 如果为 true：UI 展开瞬间化身“输入黑洞”，玩家的 WASD 会被 NativeOnKeyDown 拦截吞噬，底层角色被定身。适合“重度面板”（如存档、全屏背包）。
-	// 如果为 false：UI 处于“礼貌状态”，只拦截鼠标点击，不管键盘输入。玩家可以一边看 UI 一边走路。适合“轻度面板”（如悬浮任务栏）。
+	// 【架构总闸：重度/轻度面板界定】
+	// 核心开关：该面板在展开时，是否自动抢夺键盘/手柄的输入焦点？
+	// 如果为 true（UI 和游戏共存面板）：UI 展开时将触发 SetFocus() 强夺焦点，并启用 All (GameAndUI) 模式。
+	//      - 逻辑闭环：UI 拿到焦点后，NativeOnKeyDown 开始裁决。拦截 WASD 防走位，放行 E 键。
+	//      - 模式配合：当前是 UI 和游戏共存模式。如果 UI 层面不要这个 E 键（Unhandled），那就把它顺理成章地扔给底层的 3D 角色！
+	// 如果为 false（轻度面板）：UI 处于“礼貌状态”，只拦截鼠标点击，不管键盘输入。
+	//      - 逻辑闭环：键盘输入天然直达底层角色，玩家可以一边看悬浮 UI 一边走路开火。
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Interaction")
 	bool bAutoStealFocusWhenActivated = false;
 

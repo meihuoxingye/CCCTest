@@ -101,13 +101,12 @@ void UMySaveMenuWidget::NativeDestruct()
 
 TOptional<FUIInputConfig> UMySaveMenuWidget::GetDesiredInputConfig() const
 {
-	// 参数1: Menu(仅UI模式)  参数2: 不捕获鼠标  参数3: bHideCursor(是否隐藏鼠标) -> 绝对填 false!
+	// 参数1: All (GameAndUI) 模式  参数2: 不捕获鼠标  参数3: bHideCursor(是否隐藏鼠标) -> 绝对填 false!
 	// 这行代码将彻底粉碎 CommonUI 默认隐藏鼠标的霸王条款
 
-	// Menu 模式就像在屏幕上拍了一面绝对防弹的玻璃：
-	// 切断硬件（鼠标/键盘/手柄）与 3D 游戏世界的所有物理连接，信号只能留在这个二维平面上。
+	// All (GameAndUI) 模式：如果 UI 层面不要这个键（Unhandled），那就把它顺理成章地扔给底层的 3D 角色！
 	// NoCapture(不捕获) 鼠标滑到屏幕边缘时，可以直接划出游戏窗口，划到你的 Windows 桌面或者第二块显示器上。
-	return FUIInputConfig(ECommonInputMode::Menu, EMouseCaptureMode::NoCapture, false);
+	return FUIInputConfig(ECommonInputMode::All, EMouseCaptureMode::NoCapture, false);
 }
 
 UWidget* UMySaveMenuWidget::NativeGetDesiredFocusTarget() const

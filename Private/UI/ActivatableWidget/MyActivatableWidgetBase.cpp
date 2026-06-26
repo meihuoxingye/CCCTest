@@ -369,11 +369,17 @@ TOptional<FUIInputConfig> UMyActivatableWidgetBase::GetDesiredInputConfig() cons
 	// CommonUI 会根据你设置的这个布尔值，自动决定是否在底层封杀 WASD 移动
 	if (bAutoStealFocusWhenActivated)
 	{
-		// 【重度面板模式】 (适用场景：全屏背包、系统设置菜单)
-		// ECommonInputMode::Menu：相当于在屏幕上降下一道“绝对防弹玻璃”。
-		// 彻底切断硬件设备与底层 3D 游戏角色 (WASD移动/鼠标开火) 的所有联系，确保玩家在翻背包时绝对不会走火。
-		// EMouseCaptureMode::CapturePermanently：永久捕获鼠标，确保鼠标指针不会意外滑出游戏窗口边界。
-		return FUIInputConfig(ECommonInputMode::Menu, EMouseCaptureMode::CapturePermanently);
+		// ==============================================================================
+		// 【架构觉醒：抛弃 Menu 黑洞，全面采用 All 模式】
+		// 历史包袱：ECommonInputMode::Menu 会像黑洞一样，把 UI 返回 Unhandled 的按键当做垃圾直接销毁，导致底层收不到快捷键。
+		// 架构重构：改为 ECommonInputMode::All，彻底打通 UI 到 3D 游戏世界的输入管线！
+		// 绝对护盾：
+		// 1. 防走位：依靠我们在 NativeOnKeyDown 底部兜底的 FReply::Handled()，将白名单外的按键（如 WASD）就地按死。
+		// 2. 防走火：依靠 ATopPlayerController::ProcessGlobalClick 实现全局 UI 点击拦截。
+		// 3. 防脱轨：依靠 NativeOnFocusLost 实现焦点的无限夺回。
+		// 结论：我们靠自己的代码实现了完美的“智能防弹玻璃”，彻底告别死板的 Menu 模式！
+		// ==============================================================================
+		return FUIInputConfig(ECommonInputMode::All, EMouseCaptureMode::CapturePermanently);
 	}
 
 	// 【轻度面板模式】 (适用场景：悬浮任务栏、左下角击杀提示、右侧伤害统计)
