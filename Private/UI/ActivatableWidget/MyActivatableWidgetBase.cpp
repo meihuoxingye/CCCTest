@@ -22,11 +22,6 @@
 #include "CommonInputModeTypes.h"
 // 在 UE 5.8 中，不再需要引入 MVVMViewModelBase.h，因为底层 Widget 已原生支持
 
-// 【补充这两个 CommonUI 的输入路由头文件】
-// 解决 FBindUIActionArgs 和 RegisterBinding 找不到标识符的编译报错
-#include "Input/CommonUIInputTypes.h"
-#include "Input/UIActionBindingHandle.h"
-
 
 // ==============================================================================
 // MVVM 双轨渲染驱动源 (MVVM Dual-Track Drive Source)
@@ -330,25 +325,6 @@ void UMyActivatableWidgetBase::NativeOnActivated()
 
 	// 触发更新动画，防止出现一帧的默认状态画面闪烁
 	UpdateOpeningEffect(TransitionProgress, EasedProgress);
-
-
-	// =========================================================
-	// 【拥抱 CommonUI 官方正统逻辑】
-	// =========================================================
-	if (IsValid(CloseUIAction))
-	{
-		// 1. 创建一个标准的简单委托，绑定到我们的返回函数上
-		FSimpleDelegate BackDelegate = FSimpleDelegate::CreateUObject(this, &UMyActivatableWidgetBase::OnBackActionExecuted);
-
-		// 2. 使用虚幻 5.8 的新版构造函数：参数1是 InputAction，参数2是委托
-		FBindUIActionArgs BindArgs(CloseUIAction, BackDelegate);
-
-		// 3. （可选）如果不想让它在原生的底部动作条里显示，直接修改成员变量
-		BindArgs.bDisplayInActionBar = false;
-
-		// 4. 调用基类正确的注册函数！
-		RegisterUIActionBinding(BindArgs);
-	}
 }
 
 void UMyActivatableWidgetBase::NativeOnDeactivated()
@@ -438,6 +414,34 @@ FReply UMyActivatableWidgetBase::NativeOnMouseButtonDoubleClick(const FGeometry&
 
 FReply UMyActivatableWidgetBase::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
 {
+	// =========================================================
+	// 1. 终极防线：物理拦截专属关闭键 (无视 CommonUI 路由体系)
+	// =========================================================
+	if (IsValid(CloseUIAction))
+	{
+		if (ULocalPlayer* LP = GetOwningLocalPlayer())
+		{
+			if (auto* InputSubsystem = LP->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
+			{
+				// 动态向底层查询当前绑定的关闭键 (如 E、Esc)
+				TArray<FKey> CloseKeys = InputSubsystem->QueryKeysMappedToAction(CloseUIAction);
+				if (CloseKeys.Contains(InKeyEvent.GetKey()))
+				{
+					// 防长按连发：如果是按住不放产生的多余信号，直接吞噬
+					if (InKeyEvent.IsRepeat()) return FReply::Handled();
+
+					// 神级防抖：只有动画跑过了第 0 帧，才允许打断关闭，拯救出场动画！
+					if (TransitionProgress > 0.0f)
+					{
+						OnCloseRequested.Broadcast();
+					}
+					// 无论关不关，这个键必须被 UI 死死吃掉，绝不漏给 3D 世界！
+					return FReply::Handled();
+				}
+			}
+		}
+	}
+
 	// 【动态动作寻址】：向 O(1) 缓存查询当前按下的物理键（无论键盘还是手柄）是否隶属于蓝图配置的免检动作名单。
 	if (IsPassthroughAction(InKeyEvent.GetKey()))
 	{

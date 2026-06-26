@@ -101,6 +101,9 @@ void UMyUIHandlerComponent::ProcessNextWarmup()
 								// 强行塞入屏幕，ZOrder 设为极小的负数 (-999)，保证它躲在所有画面的最底层，绝不遮挡视野。
 								TacticalWidgetInstance->AddToViewport(-999);
 
+								// 【加回闷棍】：强制打断后台的自动激活，保住它的第一次出场动画！
+								TacticalWidgetInstance->DeactivateWidget();
+
 								// 【预热核心 2：Slate 引擎排版欺骗】
 								// 为什么不用 Collapsed？
 								// 因为 Hidden 状态下，UI 看不见，但 Slate 引擎依然会老老实实地为它构建控件树、计算长宽尺寸、编译材质着色器（非常耗时）！
@@ -160,6 +163,9 @@ void UMyUIHandlerComponent::ProcessNextWarmup()
 								// 【预热核心 1：底层静默挂载】
 								// 强行塞入屏幕，ZOrder 设为极小的负数 (-999)，保证绝不遮挡视野
 								SaveMenuInstance->AddToViewport(-999);
+
+								// 【加回闷棍】：强制打断自动激活！
+								SaveMenuInstance->DeactivateWidget();
 
 								// 【预热核心 2：Slate 引擎排版欺骗】
 								// 设置为 Hidden，诱导 Slate 引擎在后台默默计算它的长宽尺寸并编译材质
@@ -338,6 +344,10 @@ void UMyUIHandlerComponent::ToggleSaveMenuWidget(bool bShouldOpen)
 			{
 				// ZOrder 为 10：确立存档面板极高的物理覆盖层级
 				SaveMenuInstance->AddToViewport(10);
+
+				// 【加回闷棍】：哪怕是紧急加载，也要打晕它，把点火权交给下面的 ActivateWidget！
+				SaveMenuInstance->DeactivateWidget();
+
 				// 设置为 Collapsed 只建仓不渲染，把展开的表演权移交给后续的 CommonUI 原生管线 ActivateWidget()
 				SaveMenuInstance->SetVisibility(ESlateVisibility::Collapsed);
 
