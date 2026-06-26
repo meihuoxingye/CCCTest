@@ -256,17 +256,7 @@ protected:
 	// ==============================================================================
 	// 响应式输入路由 (Input Routing)
 	// ==============================================================================
-public:
-
-	// 给蓝图暴露一个选项，让你选择用哪个动作来关闭 UI（比如绑了 E 键的 IA_ToggleSaveMenu）
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Input Routing")
-	TObjectPtr<class UInputAction> CloseUIAction;
-
 protected:
-
-	// 官方的 CommonUI 返回动作回调函数
-	void OnBackActionExecuted();
-
 	/** * 【鼠标物理防穿透盾牌】：裁决当前的鼠标点击是“穿透放行给底层 3D 世界”，还是“被 UI 拦截消化（防走火）”。
 	 * 活动面板的第一道防线，拦截点击到 UI 的不能放行的鼠标按键，其他可放行的点击 UI 事件以及未点到 UI 的事件将会经过 UI 管理子系统的判决
 	 * @调用机制：引擎 UI 框架事件驱动全自动调用。

@@ -15,8 +15,6 @@
 // 引入控制器
 #include "Character/TopPlayerController.h"
 
-// 文本
-#include "Engine/Engine.h"
 
 UMyUIHandlerComponent::UMyUIHandlerComponent()
 {
@@ -121,8 +119,6 @@ void UMyUIHandlerComponent::ProcessNextWarmup()
 									// 意义：Collapsed 状态下的 UI 彻底不参与引擎每帧的 Layout 遍历，将潜伏期的 CPU 性能损耗降为绝对的 0！
 									if (TacticalWidgetInstance && !bIsTacticalUIOpen)
 									{
-										// 【加回闷棍】：强制打断后台的自动激活，保住它的第一次出场动画！
-										TacticalWidgetInstance->DeactivateWidget();
 										TacticalWidgetInstance->SetVisibility(ESlateVisibility::Collapsed);
 									}
 										
@@ -183,8 +179,6 @@ void UMyUIHandlerComponent::ProcessNextWarmup()
 									// 等引擎乖乖算完尺寸后，立刻设为 Collapsed，将其渲染和排版开销降为 0！
 									if (SaveMenuInstance && !bIsSaveMenuOpen)
 									{
-										// 【加回闷棍】：强制打断后台的自动激活，保住它的第一次出场动画！
-										SaveMenuInstance->DeactivateWidget();
 										SaveMenuInstance->SetVisibility(ESlateVisibility::Collapsed);
 									}
 								});
@@ -353,14 +347,6 @@ void UMyUIHandlerComponent::ToggleSaveMenuWidget(bool bShouldOpen)
 				// 设置为 Collapsed 只建仓不渲染，把展开的表演权移交给后续的 CommonUI 原生管线 ActivateWidget()
 				SaveMenuInstance->SetVisibility(ESlateVisibility::Collapsed);
 
-				// 新增这一段：将打晕操作放到下一帧
-				GetWorld()->GetTimerManager().SetTimerForNextTick([this]() {
-					if (SaveMenuInstance && !bIsSaveMenuOpen)
-					{
-						SaveMenuInstance->DeactivateWidget();
-					}
-				});
-
 				// 【事件管线热插拔与控制反转】
 				// 将 UI 内部发出的“关闭请求”信号（例如玩家点击了面板上的返回按钮，或按下了 Esc 键），
 				// 向上接入本组件的专属处理函数 (HandleSaveMenuCloseRequested) 中。
@@ -379,9 +365,6 @@ void UMyUIHandlerComponent::ToggleSaveMenuWidget(bool bShouldOpen)
 
 	if (bIsSaveMenuOpen)
 	{
-		// 【添加日志】：看看到底有没有向底层发命令
-		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.f, FColor::Magenta, TEXT("[1.大管家] 按下了E键，正在呼叫 ActivateWidget()!"));
-
 		// 【必须加回来】：赋予 UI 物理体积，打破 CommonUI 对 Collapsed 控件的死锁拦截！
 		SaveMenuInstance->SetVisibility(ESlateVisibility::Visible);
 

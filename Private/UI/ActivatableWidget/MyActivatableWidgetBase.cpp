@@ -22,9 +22,6 @@
 #include "CommonInputModeTypes.h"
 // 在 UE 5.8 中，不再需要引入 MVVMViewModelBase.h，因为底层 Widget 已原生支持
 
-// 文本
-#include "Engine/Engine.h"
-
 
 // ==============================================================================
 // MVVM 双轨渲染驱动源 (MVVM Dual-Track Drive Source)
@@ -251,9 +248,6 @@ void UMyActivatableWidgetBase::NativeOnFocusLost(const FFocusEvent& InFocusEvent
 
 void UMyActivatableWidgetBase::NativeOnActivated()
 {
-	// 【添加日志】：看看大管家呼叫后，UI到底听没听到
-	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.f, FColor::Yellow, TEXT("[2.UI状态机] NativeOnActivated 成功触发！状态机正常点火！"));
-
 	Super::NativeOnActivated();
 
 	// 防御 1 - 设计时拦截。防止 UMG 编辑器在预览/编译时运行逻辑，这是 90% 编辑器崩溃的原因。
@@ -377,12 +371,6 @@ TOptional<FUIInputConfig> UMyActivatableWidgetBase::GetDesiredInputConfig() cons
 // ==============================================================================
 #pragma region
 
-void UMyActivatableWidgetBase::OnBackActionExecuted()
-{
-	// 既然官方底层已经帮我们过滤掉了“第 0 帧残影”，这里直接放心大胆地关！
-	OnCloseRequested.Broadcast();
-}
-
 FReply UMyActivatableWidgetBase::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
 	// 【动态动作寻址】：向 O(1) 缓存查询当前按下的鼠标物理键（无论左/右/中/侧键）是否隶属于蓝图配置的免检动作名单。
@@ -420,45 +408,6 @@ FReply UMyActivatableWidgetBase::NativeOnMouseButtonDoubleClick(const FGeometry&
 
 FReply UMyActivatableWidgetBase::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
 {
-	// 【添加日志】：任何按键只要进了这个UI，立刻在屏幕上爆出来！
-	FString KeyStr = InKeyEvent.GetKey().ToString();
-	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Cyan, FString::Printf(TEXT("[3.UI底层按键] 截获按键: %s | 进度: %f | 状态: %d"), *KeyStr, TransitionProgress, (int32)CurrentState));
-
-	// =========================================================
-	// 1. 终极防线：物理拦截专属关闭键 (无视 CommonUI 路由体系)
-	// =========================================================
-	if (IsValid(CloseUIAction))
-	{
-		if (ULocalPlayer* LP = GetOwningLocalPlayer())
-		{
-			if (auto* InputSubsystem = LP->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
-			{
-				// 动态向底层查询当前绑定的关闭键 (如 E、Esc)
-				TArray<FKey> CloseKeys = InputSubsystem->QueryKeysMappedToAction(CloseUIAction);
-				if (CloseKeys.Contains(InKeyEvent.GetKey()))
-				{
-					// 防长按连发：如果是按住不放产生的多余信号，直接吞噬
-					if (InKeyEvent.IsRepeat()) return FReply::Handled();
-
-					// 【状态机防抖】：只要不是正在关闭的过程中，都允许触发关闭请求
-					// 彻底解决因进度卡在 0.0f 导致的“死锁拒收”问题
-					if (CurrentState != EUIState::Closing)
-					{
-						if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT("[5.放行] 进度 > 0.0f，允许关闭！呼叫大管家！"));
-						OnCloseRequested.Broadcast();
-					}
-					else
-					{
-						// 【致命死锁验证】
-						if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.f, FColor::Red, TEXT("[5.卡死] 致命错误：因为进度 = 0.0f，你的关闭请求被防抖锁拦截了！！！"));
-					}
-					// 无论关不关，这个键必须被 UI 死死吃掉，绝不漏给 3D 世界！
-					return FReply::Handled();
-				}
-			}
-		}
-	}
-
 	// 【动态动作寻址】：向 O(1) 缓存查询当前按下的物理键（无论键盘还是手柄）是否隶属于蓝图配置的免检动作名单。
 	if (IsPassthroughAction(InKeyEvent.GetKey()))
 	{
