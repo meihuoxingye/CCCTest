@@ -269,6 +269,9 @@ void UMyUIHandlerComponent::ToggleTacticalWidget(bool bShouldOpen)
 	// 如果判定为：准备打开战术面板
 	if (bIsTacticalUIOpen)
 	{
+		// 【必须加回来】：赋予 UI 物理体积，打破 CommonUI 对 Collapsed 控件的死锁拦截！
+		TacticalWidgetInstance->SetVisibility(ESlateVisibility::Visible);
+
 		// 呼叫 UI 实例执行 CommonUI 的“被激活”逻辑，它会自动触发 UMyActivatableWidgetBase 的 NativeOnActivated
 		// NativeOnActivated 核心职责：将状态切为 Opening，强制底层立刻排版（防闪烁），并将自身推入子系统拦截栈接管焦点。
 		TacticalWidgetInstance->ActivateWidget();
@@ -337,6 +340,7 @@ void UMyUIHandlerComponent::ToggleSaveMenuWidget(bool bShouldOpen)
 				SaveMenuInstance->AddToViewport(10);
 				// 设置为 Collapsed 只建仓不渲染，把展开的表演权移交给后续的 CommonUI 原生管线 ActivateWidget()
 				SaveMenuInstance->SetVisibility(ESlateVisibility::Collapsed);
+
 				// 【事件管线热插拔与控制反转】
 				// 将 UI 内部发出的“关闭请求”信号（例如玩家点击了面板上的返回按钮，或按下了 Esc 键），
 				// 向上接入本组件的专属处理函数 (HandleSaveMenuCloseRequested) 中。
@@ -355,13 +359,8 @@ void UMyUIHandlerComponent::ToggleSaveMenuWidget(bool bShouldOpen)
 
 	if (bIsSaveMenuOpen)
 	{
-		// =====================================================================
-		// 【神级回调：Menu 模式的专属保命符】
-		// 因为 SaveMenu 是重度面板，申请了 Menu 模式，必须抢夺操作系统焦点。
-		// 虚幻 Slate 引擎绝对禁止将焦点赋予给 Collapsed 的隐形控件。
-		// 如果不提前唤醒为 Visible，CommonUI 会在 ActivateWidget 的瞬间判定“抢夺焦点失败”并当场取消激活！
-		// =====================================================================
-		SaveMenuInstance->SetVisibility(ESlateVisibility::Visible);
+		// 【必须加回来】：赋予 UI 物理体积，打破 CommonUI 对 Collapsed 控件的死锁拦截！
+		TacticalWidgetInstance->SetVisibility(ESlateVisibility::Visible);
 
 		// 发送点火信号，呼叫 CommonUI 总司令全自动推流、入栈
 		// 【移交大权】：调用原生 ActivateWidget() 后，CommonUI 底层会接管一切：

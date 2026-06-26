@@ -260,12 +260,10 @@ void UMyActivatableWidgetBase::NativeOnActivated()
 	// 防御 2 - 世界上下文检查，防止在关卡切换等极端情况下触发空指针
 	if (!GetWorld()) return;
 
-	// 如果当前是折叠不可见状态，或者进度已经归零（完全关闭状态）
-	if (GetVisibility() == ESlateVisibility::Collapsed || TransitionProgress <= 0.0f)
-	{
-		// 重置进度到 0.0，准备重新播放入场动画 (MVVM 方式)
-		SetTransitionProgress(0.0f);
-	}
+	// 【终极修复 1：无条件归零】
+	// 删掉那个脆弱的 if (GetVisibility() == Collapsed) 判断。
+	// 无论发生什么，只要触发了激活，就必须无条件将进度强制拨回 0！
+	SetTransitionProgress(0.0f);
 
 	// 将 UI 的根节点（WBP_TacticalMenu）设为可见，从而使整个UI可见，使其开始渲染并接受交互
 	// 因为根节点下就是画布面板，所以实际上整个屏幕都被设为可见
@@ -336,6 +334,12 @@ void UMyActivatableWidgetBase::NativeOnDeactivated()
 	// 增加可见性检查与设计时拦截，防止对象已销毁时依然触发逻辑
 	// 如果已经在关闭过程中，或者是折叠不可见状态，则无需重复执行反激活
 	if (IsDesignTime() || CurrentState == EUIState::Closing || GetVisibility() == ESlateVisibility::Collapsed) return;
+
+	// 【终极修复 2：Tick 抢救术】
+	// 虚幻引擎规定：Collapsed 状态下的 UI 绝对不执行 Tick！
+	// 为了让你的退场动画能在 Tick 里跑完，我们必须强行把可见性改回 HitTestInvisible
+	// 直到动画跑完（TransitionProgress <= 0），再由我们自己在 Tick 结尾设回 Collapsed。
+	SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 
 	// 将状态机切换为“正在关闭”
 	CurrentState = EUIState::Closing;
