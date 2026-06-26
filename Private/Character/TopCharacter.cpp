@@ -67,7 +67,7 @@ void ATopCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// 【新增核心修复】：允许没有控制器附身的躯壳继续受物理引擎控制（保持重力下落和惯性）
+	// 允许没有控制器附身的躯壳继续受物理引擎控制（保持重力下落和惯性）
 	// 这行代码会打破虚幻“无魂则静”的默认优化，彻底修复半空切人定格的 Bug！
 	GetCharacterMovement()->bRunPhysicsWithNoController = true;
 
@@ -100,10 +100,14 @@ void ATopCharacter::BeginPlay()
 		}
 	}
 
-	// 【新增】：绑定物理范围重叠委托
+	// 绑定物理范围重叠委托
 	if (InteractionSphere)
 	{
+		// 【新增】：工业级防御性安全设计：先注销再绑定，彻底封死无缝流转或蓝图双重重入导致的查重崩溃
+		InteractionSphere->OnComponentBeginOverlap.RemoveDynamic(this, &ATopCharacter::OnInteractSphereBeginOverlap);
 		InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &ATopCharacter::OnInteractSphereBeginOverlap);
+
+		InteractionSphere->OnComponentEndOverlap.RemoveDynamic(this, &ATopCharacter::OnInteractSphereEndOverlap);
 		InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &ATopCharacter::OnInteractSphereEndOverlap);
 	}
 }

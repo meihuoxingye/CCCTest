@@ -6,7 +6,6 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
-
 // ==============================================================================
 // 生命周期与初始化 (Lifecycle & Initialization)
 // ==============================================================================
@@ -35,11 +34,15 @@ void AMyLevelTransitionActor::Interact_Implementation(ACharacter* Interactor)
 		return;
 	}
 
-	// 1. 消除 (Eliminate) 管线启动前，由于按键宏导致的重复交互风险
 	if (Interactor)
 	{
 		if (UCharacterMovementComponent* MoveComp = Interactor->GetCharacterMovement())
 		{
+			// 硬性速度检测，拒绝高速冲门造成的物理穿透或相机跳帧
+			if (MoveComp->Velocity.Size() > 10.0f)
+			{
+				return;
+			}
 			MoveComp->DisableMovement();
 		}
 	}
@@ -48,7 +51,6 @@ void AMyLevelTransitionActor::Interact_Implementation(ACharacter* Interactor)
 	{
 		if (UMyMapTravelSubsystem* TravelSubsystem = World->GetSubsystem<UMyMapTravelSubsystem>())
 		{
-			// 发出指令后彻底脱手，无需等待异步回调，直接起飞
 			TravelSubsystem->ExecuteMapTravel(TargetLevelName);
 		}
 	}

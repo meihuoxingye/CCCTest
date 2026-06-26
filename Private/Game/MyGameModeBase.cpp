@@ -10,6 +10,9 @@
 #include "TimerManager.h"
 #include "SaveGame/Subsystem/MySaveSubsystem.h"
 
+// 无缝流转所需的头文件
+#include "EngineUtils.h"
+#include "Weapon/Projectile/MyBaseProjectile.h"
 
 // ==============================================================================
 // 生命周期 (Lifecycle)
@@ -27,7 +30,6 @@ void AMyGameModeBase::StartPlay()
 {
 	// GameMode 的 StartPlay 是所有 Actor 准备就绪、游戏正式开始的冲锋号
 	Super::StartPlay();
-
 
 	// 【核心时序控制：第一阶段 - 读档分发微操 (NextTick Deferral)】
 
@@ -115,6 +117,23 @@ void AMyGameModeBase::UnregisterFriendly(ATopCharacter* Character)
 		// 向全宇宙广播：友军名单已更新！
 		OnRosterChanged.Broadcast();
 	}
+}
+
+#pragma endregion
+
+
+// ==============================================================================
+// 无缝旅行与状态流转 (Seamless Travel)
+// ==============================================================================
+#pragma region
+
+void AMyGameModeBase::GetSeamlessTravelActorList(bool bToTransition, TArray<AActor*>& ActorList)
+{
+	Super::GetSeamlessTravelActorList(bToTransition, ActorList);
+
+	// 目前保持完全空白，不强制干涉任何飞行物或 Actor 的跨地图流转。
+	// 一切由引擎默认规则处理，新关卡将是一个干干净净的新开局。
+	// (如果你以后有特定的剧情道具需要保留，再由你自己决定是否写进这个 ActorList 里)
 }
 
 #pragma endregion

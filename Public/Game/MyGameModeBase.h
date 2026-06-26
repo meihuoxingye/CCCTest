@@ -44,4 +44,12 @@ public:
 
 	// 外部调用：角色死亡或销毁时注销
 	void UnregisterFriendly(class ATopCharacter* Character);
+
+
+	// ==============================================================================
+	// 无缝旅行与状态流转 (Seamless Travel)
+	// ==============================================================================
+public:
+	/** 重写：决定哪些正在飞行的“幽灵 Actor”能无视空间毁灭，直接跟入下一个世界 */
+	virtual void GetSeamlessTravelActorList(bool bToTransition, TArray<AActor*>& ActorList) override;
 };

@@ -130,6 +130,70 @@ void UMyUIHandlerComponent::ProcessNextWarmup()
 		}
 		else { ProcessNextWarmup(); } // 跳过空项，立刻进行下一步预热（尾递归）
 	}
+
+
+	// 第二步：预热存档面板 (开局第 3.5 秒触发)
+	else if (CurrentWarmupStep == 1)
+	{
+		CurrentWarmupStep++; // 推进状态，保证该步骤终其一生只会被执行一次
+
+		// 检查蓝图中的软类引用是否为空
+		if (!SaveMenuClass.IsNull())
+		{
+			// 获取虚幻引擎全局的“异步流式加载大管家”
+			FStreamableManager& Streamable = UAssetManager::GetStreamableManager();
+
+			// 向后台线程提交异步加载请求
+			Streamable.RequestAsyncLoad(SaveMenuClass.ToSoftObjectPath(), [this]()
+				{
+					// 【防抢占锁】：如果玩家手速极快，在开局 3.5 秒内已经摸了存档点，
+					// 触发了同步保底加载，此时实例已存在，绝不能覆盖指针！直接跳过。
+					if (!SaveMenuInstance)
+					{
+						// 安全地将内存中已就绪的 UClass 提取出来
+						if (UClass* LoadedClass = SaveMenuClass.Get())
+						{
+							// 实例化存档面板 UI
+							SaveMenuInstance = CreateWidget<UMyActivatableWidgetBase>(CachedPC, LoadedClass);
+							if (SaveMenuInstance)
+							{
+								// 【预热核心 1：底层静默挂载】
+								// 强行塞入屏幕，ZOrder 设为极小的负数 (-999)，保证绝不遮挡视野
+								SaveMenuInstance->AddToViewport(-999);
+
+								// 【预热核心 2：Slate 引擎排版欺骗】
+								// 设置为 Hidden，诱导 Slate 引擎在后台默默计算它的长宽尺寸并编译材质
+								SaveMenuInstance->SetVisibility(ESlateVisibility::Hidden);
+
+								// 【事件管线绑定】
+								// 将 UI 内部发出的关闭请求，绑定到大管家专属的存档面板关闭函数上
+								SaveMenuInstance->OnCloseRequested.AddUniqueDynamic(this, &UMyUIHandlerComponent::HandleSaveMenuCloseRequested);
+
+								// 【预热核心 3：次帧收尾 (NextTick)】
+								GetWorld()->GetTimerManager().SetTimerForNextTick([this]() {
+									// 等引擎乖乖算完尺寸后，立刻设为 Collapsed，将其渲染和排版开销降为 0！
+									if (SaveMenuInstance && !bIsSaveMenuOpen)
+									{
+										SaveMenuInstance->SetVisibility(ESlateVisibility::Collapsed);
+									}
+									});
+							}
+						}
+					}
+
+					// 【架构拓展性】：如果未来你还要做“技能树面板”、“全屏地图”，
+					// 就让 CPU 继续休息 1.5 秒后触发第三步。
+					// 如果没有第三步了，下一次调用 ProcessNextWarmup 时会自动 Return 退出。
+					FTimerHandle NextTimer;
+					GetWorld()->GetTimerManager().SetTimer(NextTimer, this, &UMyUIHandlerComponent::ProcessNextWarmup, 1.5f, false);
+				});
+		}
+		else
+		{
+			// 如果软引用为空（没配置类），跳过当前项，立刻尾递归进入下一步预热
+			ProcessNextWarmup();
+		}
+	}
 }
 
 void UMyUIHandlerComponent::UpdateHUD()
@@ -205,10 +269,9 @@ void UMyUIHandlerComponent::ToggleTacticalWidget(bool bShouldOpen)
 	// 如果判定为：准备打开战术面板
 	if (bIsTacticalUIOpen)
 	{
-		// 必须在此处显式恢复可视状态
-		TacticalWidgetInstance->SetVisibility(ESlateVisibility::Visible);
-		// 呼叫 UI 实例执行它自己的“被激活”逻辑（比如重置进度、播放展开动画、主动入栈防穿透）
-		TacticalWidgetInstance->OnWidgetActivated();
+		// 呼叫 UI 实例执行 CommonUI 的“被激活”逻辑，它会自动触发 UMyActivatableWidgetBase 的 NativeOnActivated
+		// NativeOnActivated 核心职责：将状态切为 Opening，强制底层立刻排版（防闪烁），并将自身推入子系统拦截栈接管焦点。
+		TacticalWidgetInstance->ActivateWidget();
 
 		// 为增强输入系统挂载战术面板专用的 IMC，优先级设为 10（高于默认的 0）
 		// IMC（输入映射上下文）是可以像穿衣服一样一层一层“穿上”和“脱下”的
@@ -219,8 +282,9 @@ void UMyUIHandlerComponent::ToggleTacticalWidget(bool bShouldOpen)
 	// 如果判定为：准备关闭战术面板
 	else
 	{
-		// 呼叫 UI 实例执行它自己的“反激活”逻辑（比如切换状态机、播放收起动画并在动画结束时自动出栈）
-		TacticalWidgetInstance->OnWidgetDeactivated();
+		// 呼叫 UI 实例执行它自己的“反激活”逻辑，它会自动触发 UMyActivatableWidgetBase 的 NativeOnDeactivated
+		// NativeOnDeactivated 核心职责：将状态切为 Closing ，在 NativeTick 里触发退场动画。注意：为防幽灵点击，此处仅改状态，绝不出栈。
+		TacticalWidgetInstance->DeactivateWidget();
 
 		// 从输入系统中剥夺战术面板专属的 IMC，把按键映射还给正常的 3D 游戏操作
 		// RemoveMappingContext 卸载 IMC
@@ -271,7 +335,7 @@ void UMyUIHandlerComponent::ToggleSaveMenuWidget(bool bShouldOpen)
 			{
 				// ZOrder 为 10：确立存档面板极高的物理覆盖层级
 				SaveMenuInstance->AddToViewport(10);
-				// 初始折叠：只建仓不渲染，把展开的表演权移交给 OnWidgetActivated
+				// 设置为 Collapsed 只建仓不渲染，把展开的表演权移交给后续的 CommonUI 原生管线 ActivateWidget()
 				SaveMenuInstance->SetVisibility(ESlateVisibility::Collapsed);
 				// 【事件管线热插拔与控制反转】
 				// 将 UI 内部发出的“关闭请求”信号（例如玩家点击了面板上的返回按钮，或按下了 Esc 键），
@@ -291,11 +355,18 @@ void UMyUIHandlerComponent::ToggleSaveMenuWidget(bool bShouldOpen)
 
 	if (bIsSaveMenuOpen)
 	{
+		// =====================================================================
+		// 【神级回调：Menu 模式的专属保命符】
+		// 因为 SaveMenu 是重度面板，申请了 Menu 模式，必须抢夺操作系统焦点。
+		// 虚幻 Slate 引擎绝对禁止将焦点赋予给 Collapsed 的隐形控件。
+		// 如果不提前唤醒为 Visible，CommonUI 会在 ActivateWidget 的瞬间判定“抢夺焦点失败”并当场取消激活！
+		// =====================================================================
 		SaveMenuInstance->SetVisibility(ESlateVisibility::Visible);
-		// 发送点火信号，UI 基类全自动推流、入栈
-		// 【移交大权】：此时，MyActivatableWidgetBase 里的 NativeOnActivated 将接管一切：
-		// 强制排版、MVVM 进度归零、开启双轨入场动画、向大管家请求输入焦点。
-		SaveMenuInstance->OnWidgetActivated();
+
+		// 发送点火信号，呼叫 CommonUI 总司令全自动推流、入栈
+		// 【移交大权】：调用原生 ActivateWidget() 后，CommonUI 底层会接管一切：
+		// 自动分配焦点、拦截输入，并在最后一刻触发 NativeOnActivated 开启你的双轨入场动画。
+		SaveMenuInstance->ActivateWidget();
 
 		// ==============================================================================
 		// 【核武级修复】：彻底清除“幽灵输入/按键粘滞” (Fix Input Ghosting)
@@ -319,10 +390,11 @@ void UMyUIHandlerComponent::ToggleSaveMenuWidget(bool bShouldOpen)
 	}
 	else
 	{
-		// 触发收起信号，UI 基类全自动播放动画、出栈
-		// 【防幽灵点击】：绝不立刻 RemoveFromParent，而是让基类切换状态为 Closing，
-		// 继续用 UI 挡住屏幕防走火，直到退场动画彻底播完，基类才会自己出栈。
-		SaveMenuInstance->OnWidgetDeactivated();
+		// 触发收起信号，呼叫 CommonUI 总司令执行退场连招
+		// 【防幽灵点击】：调用原生 DeactivateWidget() 会瞬间剥夺 UI 的输入焦点，
+		// 但不会立刻销毁面板。它会触发 NativeOnDeactivated 将状态切为 Closing，
+		// 继续用 UI 挡住屏幕防走火，直到 Tick 里的退场动画彻底播完，基类才会自己出栈。
+		SaveMenuInstance->DeactivateWidget();
 
 		// =====================================================================
 		// 【终极修复：消除存档面板的双击 Bug (Focus Trap)】

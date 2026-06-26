@@ -40,15 +40,15 @@ struct FVirtualBulletData
 
     // 哪里开的枪
     UPROPERTY()
-    FVector Position;
+    FVector Position = FVector::ZeroVector; // 必须赋初值
 
     // 速度 = 方向 * 速度大小
     UPROPERTY()
-    FVector Velocity;
+    FVector Velocity = FVector::ZeroVector; // 必须赋初值
 
     // 子弹寿命
     UPROPERTY()
-    float RemainingLife;
+    float RemainingLife = 0.0f;             // 必须赋初值
 
     // 记录是谁打的，防止自伤
     // 优化：改为弱指针！防野指针防内存泄漏

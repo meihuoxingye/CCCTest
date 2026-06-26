@@ -22,26 +22,6 @@
 #include "CommonInputModeTypes.h"
 // 在 UE 5.8 中，不再需要引入 MVVMViewModelBase.h，因为底层 Widget 已原生支持
 
-// ==============================================================================
-// 状态查询与驱动接口 (State Queries & Drivers)
-// ==============================================================================
-#pragma region
-
-// 【激活接口】：由外部调用，触发 UI 展开逻辑，展开过程中只执行一次。
-// 【兼容保留】：通过调用 ActivateWidget 将权力移交给 CommonUI 状态机
-void UMyActivatableWidgetBase::OnWidgetActivated_Implementation()
-{
-	ActivateWidget();
-}
-
-// 【激活接口】：由外部调用，触发 UI 收起逻辑，收起过程中只执行一次。
-// 【兼容保留】：通过调用 DeactivateWidget 将权力移交给 CommonUI 状态机
-void UMyActivatableWidgetBase::OnWidgetDeactivated_Implementation()
-{
-	DeactivateWidget();
-}
-
-#pragma endregion
 
 // ==============================================================================
 // MVVM 双轨渲染驱动源 (MVVM Dual-Track Drive Source)
@@ -266,7 +246,6 @@ void UMyActivatableWidgetBase::NativeOnFocusLost(const FFocusEvent& InFocusEvent
 	}
 }
 
-// 【原生状态机钩子】：引擎底层激活时触发，完美接管原本在 OnWidgetActivated 中的核心防线
 void UMyActivatableWidgetBase::NativeOnActivated()
 {
 	Super::NativeOnActivated();
@@ -350,7 +329,6 @@ void UMyActivatableWidgetBase::NativeOnActivated()
 	UpdateOpeningEffect(TransitionProgress, EasedProgress);
 }
 
-// 【原生状态机钩子】：引擎底层失活时触发，完美接管原本在 OnWidgetDeactivated 中的核心防线
 void UMyActivatableWidgetBase::NativeOnDeactivated()
 {
 	Super::NativeOnDeactivated();

@@ -91,22 +91,6 @@ public:
 	UFUNCTION(BlueprintPure, Category = "UI|Transition")
 	EUIState GetCurrentState() const { return CurrentState; }
 
-	// 【激活接口】：由外部调用，触发 UI 展开逻辑，展开过程中只执行一次。
-	// 声明为 BlueprintNativeEvent（蓝图原生事件），允许 C++ 调用与蓝图重写，C++ 定义时必须带后缀 _Implementation，引用不用
-	// 是事件且无返回值，在虚幻中为 Event On Widget Activated 红色节点；
-	// 目前蓝图中暂无此节点，需要时自行添加，连接 Parent 节点并补上其他逻辑（如播放音效、触发子动画等）；
-	// 目前由玩家控制器 ToggleTacticalWidget 调用
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "UI|Transition")
-	void OnWidgetActivated();
-
-	// 【激活接口】：由外部调用，触发 UI 收起逻辑，收起过程中只执行一次。
-	// 声明为 BlueprintNativeEvent（蓝图原生事件），允许 C++ 调用蓝图重写，C++ 定义时必须带后缀 _Implementation，引用不用
-	// 是事件且无返回值，在虚幻中为 Event On Widget Deactivated 红色节点；
-	// 目前蓝图中暂无此节点，需要时自行添加，连接 Parent 节点并补上其他逻辑（如播放音效、触发子动画等）；
-	// 目前由玩家控制器 ToggleTacticalWidget 调用
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "UI|Transition")
-	void OnWidgetDeactivated();
-
 
 	// ==============================================================================
 	// 核心转换系统配置 (Transition System Settings)
@@ -258,7 +242,7 @@ protected:
 
 	/** * 【CommonUI 函数：原生失活挂载点】
 	 * @调用时机：UI 被引擎移出激活栈时自动触发（收起过程中仅执行一次）。
-	 * @核心职责：将状态切为 Closing 触发退场动画。注意：为防幽灵点击，此处仅改状态，绝不出栈。
+	 * @核心职责：将状态切为 Closing ，在 NativeTick 里触发退场动画。注意：为防幽灵点击，此处仅改状态，绝不出栈。
 	 */
 	virtual void NativeOnDeactivated() override;
 
