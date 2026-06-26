@@ -22,6 +22,11 @@
 #include "CommonInputModeTypes.h"
 // 在 UE 5.8 中，不再需要引入 MVVMViewModelBase.h，因为底层 Widget 已原生支持
 
+// 【补充这两个 CommonUI 的输入路由头文件】
+// 解决 FBindUIActionArgs 和 RegisterBinding 找不到标识符的编译报错
+#include "Input/CommonUIInputTypes.h"
+#include "Input/UIActionBindingHandle.h"
+
 
 // ==============================================================================
 // MVVM 双轨渲染驱动源 (MVVM Dual-Track Drive Source)
@@ -325,6 +330,25 @@ void UMyActivatableWidgetBase::NativeOnActivated()
 
 	// 触发更新动画，防止出现一帧的默认状态画面闪烁
 	UpdateOpeningEffect(TransitionProgress, EasedProgress);
+
+
+	// =========================================================
+	// 【拥抱 CommonUI 官方正统逻辑】
+	// =========================================================
+	if (IsValid(CloseUIAction))
+	{
+		// 1. 创建一个标准的简单委托，绑定到我们的返回函数上
+		FSimpleDelegate BackDelegate = FSimpleDelegate::CreateUObject(this, &UMyActivatableWidgetBase::OnBackActionExecuted);
+
+		// 2. 使用虚幻 5.8 的新版构造函数：参数1是 InputAction，参数2是委托
+		FBindUIActionArgs BindArgs(CloseUIAction, BackDelegate);
+
+		// 3. （可选）如果不想让它在原生的底部动作条里显示，直接修改成员变量
+		BindArgs.bDisplayInActionBar = false;
+
+		// 4. 调用基类正确的注册函数！
+		RegisterUIActionBinding(BindArgs);
+	}
 }
 
 void UMyActivatableWidgetBase::NativeOnDeactivated()
@@ -370,6 +394,12 @@ TOptional<FUIInputConfig> UMyActivatableWidgetBase::GetDesiredInputConfig() cons
 // 响应式输入路由 (Input Routing)
 // ==============================================================================
 #pragma region
+
+void UMyActivatableWidgetBase::OnBackActionExecuted()
+{
+	// 既然官方底层已经帮我们过滤掉了“第 0 帧残影”，这里直接放心大胆地关！
+	OnCloseRequested.Broadcast();
+}
 
 FReply UMyActivatableWidgetBase::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {

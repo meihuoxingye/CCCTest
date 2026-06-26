@@ -360,7 +360,7 @@ void UMyUIHandlerComponent::ToggleSaveMenuWidget(bool bShouldOpen)
 	if (bIsSaveMenuOpen)
 	{
 		// 【必须加回来】：赋予 UI 物理体积，打破 CommonUI 对 Collapsed 控件的死锁拦截！
-		TacticalWidgetInstance->SetVisibility(ESlateVisibility::Visible);
+		SaveMenuInstance->SetVisibility(ESlateVisibility::Visible);
 
 		// 发送点火信号，呼叫 CommonUI 总司令全自动推流、入栈
 		// 【移交大权】：调用原生 ActivateWidget() 后，CommonUI 底层会接管一切：
