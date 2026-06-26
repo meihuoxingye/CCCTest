@@ -312,6 +312,7 @@ void UMySquadSubsystem::SearchAndFormSquads(const TMap<FIntPoint, TArray<ABaseCh
 
 void UMySquadSubsystem::PrintSquadStatus() const
 {
+    /*
     // 实时打印小队状态到 Output Log
     // 打印一个分割线，方便在日志里区分不同时间点的数据
     UE_LOG(LogSquadSystem, Log, TEXT("--------- 实时战术面板 (%d 个小组) ---------"), ActiveGroups.Num());
@@ -328,6 +329,7 @@ void UMySquadSubsystem::PrintSquadStatus() const
         // 输出到日志：小组索引、成员数、具体的成员名字
         UE_LOG(LogSquadSystem, Log, TEXT("小组 %d | 成员数: %d | 成员列表: %s"), i, ActiveGroups[i].Members.Num(), *MemberList);
     }
+    */
 }
 
 #pragma endregion

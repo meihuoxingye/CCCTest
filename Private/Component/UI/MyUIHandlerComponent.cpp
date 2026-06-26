@@ -15,6 +15,8 @@
 // 引入控制器
 #include "Character/TopPlayerController.h"
 
+#include "Engine/Engine.h"
+
 
 UMyUIHandlerComponent::UMyUIHandlerComponent()
 {
@@ -57,6 +59,14 @@ void UMyUIHandlerComponent::BeginPlay()
 			UpdateHUD();
 		}
 	}
+
+	// ==============================================================================
+	// ！！！【终极修复：给预热系统通电】！！！
+	// 在开局 0.5 秒后，正式启动时间分片预热器。
+	// 这将完美执行你的 Hidden -> 算尺寸 -> Collapsed 逻辑，彻底粉碎第一次没动画的 Bug！
+	// ==============================================================================
+	FTimerHandle WarmupStarterTimer;
+	GetWorld()->GetTimerManager().SetTimer(WarmupStarterTimer, this, &UMyUIHandlerComponent::ProcessNextWarmup, 0.5f, false);
 }
 
 // ==============================================================================
@@ -180,6 +190,10 @@ void UMyUIHandlerComponent::ProcessNextWarmup()
 									if (SaveMenuInstance && !bIsSaveMenuOpen)
 									{
 										SaveMenuInstance->SetVisibility(ESlateVisibility::Collapsed);
+
+										// ！！！【新增日志 1：预热照妖镜】！！！
+										if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 20.f, FColor::Cyan, FString::Printf(TEXT("[1. 预热结束] 存档面板已建仓 | 当前可见性: %d (0=可见, 1=Collapsed, 2=Hidden) | 是否在视口: %d"),
+											(int32)SaveMenuInstance->GetVisibility(), SaveMenuInstance->IsInViewport()));
 									}
 								});
 							}
@@ -274,9 +288,6 @@ void UMyUIHandlerComponent::ToggleTacticalWidget(bool bShouldOpen)
 	// 如果判定为：准备打开战术面板
 	if (bIsTacticalUIOpen)
 	{
-		// 【必须加回来】：赋予 UI 物理体积，打破 CommonUI 对 Collapsed 控件的死锁拦截！
-		TacticalWidgetInstance->SetVisibility(ESlateVisibility::Visible);
-
 		// 呼叫 UI 实例执行 CommonUI 的“被激活”逻辑，它会自动触发 UMyActivatableWidgetBase 的 NativeOnActivated
 		// NativeOnActivated 核心职责：将状态切为 Opening，强制底层立刻排版（防闪烁），并将自身推入子系统拦截栈接管焦点。
 		TacticalWidgetInstance->ActivateWidget();
@@ -365,8 +376,9 @@ void UMyUIHandlerComponent::ToggleSaveMenuWidget(bool bShouldOpen)
 
 	if (bIsSaveMenuOpen)
 	{
-		// 【必须加回来】：赋予 UI 物理体积，打破 CommonUI 对 Collapsed 控件的死锁拦截！
-		SaveMenuInstance->SetVisibility(ESlateVisibility::Visible);
+		// ！！！【新增日志 2：按键瞬间照妖镜】！！！
+		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 20.f, FColor::Yellow, FString::Printf(TEXT("[2. 按下E键] 大管家准备点火 | 点火前可见性: %d (0=可见, 1=Collapsed, 2=Hidden)"),
+			(int32)SaveMenuInstance->GetVisibility()));
 
 		// 发送点火信号，呼叫 CommonUI 总司令全自动推流、入栈
 		// 【移交大权】：调用原生 ActivateWidget() 后，CommonUI 底层会接管一切：

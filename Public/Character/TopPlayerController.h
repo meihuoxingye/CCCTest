@@ -55,6 +55,7 @@ public:
 	bool ProcessGlobalClick();
 
 	// 换人系统总线的最终执行者：接收 UI 传来的“目标角色”并执行灵魂交接
+	// 核心职责：处理角色附身逻辑，并安全清理残留的 UI 状态与输入焦点
 	void SwitchToSpecificCharacter(ATopCharacter* TargetCharacter);
 
 	// 只读查询现在是否处于切人模式（子弹时间）状态

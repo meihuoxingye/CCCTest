@@ -178,8 +178,6 @@ void ATopPlayerController::ToggleTacticalMode()
 	if (UIHandlerComp) UIHandlerComp->ToggleTacticalWidget();
 }
 
-// 换人系统总线的最终执行者：接收 UI 传来的“目标角色”并执行灵魂交接
-// 核心职责：处理角色附身逻辑，并安全清理残留的 UI 状态与输入焦点
 void ATopPlayerController::SwitchToSpecificCharacter(ATopCharacter* TargetCharacter)
 {
 	// 防御验证：目标为空，或者点的正是自己

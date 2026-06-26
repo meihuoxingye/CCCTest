@@ -22,6 +22,8 @@
 #include "CommonInputModeTypes.h"
 // 在 UE 5.8 中，不再需要引入 MVVMViewModelBase.h，因为底层 Widget 已原生支持
 
+#include "Engine/Engine.h"
+
 
 // ==============================================================================
 // MVVM 双轨渲染驱动源 (MVVM Dual-Track Drive Source)
@@ -248,10 +250,25 @@ void UMyActivatableWidgetBase::NativeOnFocusLost(const FFocusEvent& InFocusEvent
 
 void UMyActivatableWidgetBase::NativeOnActivated()
 {
+	// ！！！【新增日志 3：底层状态机照妖镜】！！！
+	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 20.f, FColor::Red, FString::Printf(TEXT("[3. UI底层] NativeOnActivated 触发！| 刚进来的 State: %d (0=Idle, 1=Opening, 2=Closing) | 进度: %f"),
+		(int32)CurrentState, TransitionProgress));
+
 	Super::NativeOnActivated();
 
 	// 防御 1 - 设计时拦截。防止 UMG 编辑器在预览/编译时运行逻辑，这是 90% 编辑器崩溃的原因。
 	if (IsDesignTime()) return;
+
+	// ==============================================================================
+	// 【绝对执行优先级：状态机强行清算】
+	// 必须在防连按 Return 之前执行！识别预热引发的满进度假死并强行破局。
+	// NativeTick 会将播放完动画的 UI 设为空闲状态，开启且进度条满的状态绝对是异常状态
+	// ==============================================================================
+	if (CurrentState == EUIState::Opening && TransitionProgress >= 1.0f)
+	{
+		// 剥夺预热残留的虚假 Opening 状态，打回原型
+		CurrentState = EUIState::Idle;
+	}
 
 	// 如果已经在打开的过程中，直接返回，避免重复触发激活逻辑
 	// 【架构注】：此处的拦截已经完美防御了玩家在 0.1 秒内连按造成的“重复压栈”风险！
