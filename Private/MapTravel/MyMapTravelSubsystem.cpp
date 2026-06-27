@@ -82,30 +82,22 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 		return;
 	}
 
-	// ==============================================================================
-	// 【终极病灶切除 1：焦土政策 (Scorched Earth Cleanup)】
-	// ==============================================================================
+	// 1. 制造引擎级输入黑洞 (Engine Viewport Isolation)
 	if (GEngine && GEngine->GameViewport)
 	{
-		// 1. 强行把引擎焦点砸回 3D 视口，无情剥夺所有旧 UI 的焦点权
-		FSlateApplication::Get().SetAllUserFocusToGameViewport();
-		FSlateApplication::Get().ClearKeyboardFocus(EFocusCause::Cleared);
+		GEngine->GameViewport->SetIgnoreInput(true);
 
-		// 2. 拔掉当前屏幕上的所有 UI，使其随旧世界一起火化
+		FSlateApplication::Get().ClearKeyboardFocus(EFocusCause::Cleared);
+		FSlateApplication::Get().ReleaseMouseCapture();
 		GEngine->GameViewport->RemoveAllViewportWidgets();
 	}
 
-	// ==============================================================================
-	// 【终极病灶切除 2：异步任务大清洗 (Timer Purgatory)】
-	// ==============================================================================
+	// 2. 逻辑隔离取代物理拆除 (Isolation vs. Destruction)
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
 		if (APlayerController* PC = It->Get())
 		{
-			// 1. 清理 PC 本身所有的计时器
 			World->GetTimerManager().ClearAllTimersForObject(PC);
-
-			// 2. 遍历并清理该 PC 身上挂载的所有组件的计时器（彻底斩断 MyUIHandlerComponent 的 NextTick 诈尸）
 			TArray<UActorComponent*> UIComponents;
 			PC->GetComponents(UIComponents);
 			for (UActorComponent* Comp : UIComponents)
@@ -113,16 +105,35 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 				World->GetTimerManager().ClearAllTimersForObject(Comp);
 			}
 
-			// 3. 常规输入清理
+			if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
+			{
+				Subsystem->ClearAllMappings();
+			}
+
+			// 合法冲刷后，彻底软禁控制器
 			PC->FlushPressedKeys();
 			PC->DisableInput(PC);
+			PC->SetIgnoreMoveInput(true);
+			PC->SetIgnoreLookInput(true);
 
-			FInputModeGameOnly GameOnlyMode;
-			PC->SetInputMode(GameOnlyMode);
+			FInputModeUIOnly NullInputMode;
+			PC->SetInputMode(NullInputMode);
+
+			if (UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(PC->InputComponent))
+			{
+				EIC->ClearActionBindings();
+			}
 
 			if (APawn* PlayerPawn = PC->GetPawn())
 			{
 				PlayerPawn->SetActorEnableCollision(false);
+
+				if (UEnhancedInputComponent* PawnEIC = Cast<UEnhancedInputComponent>(PlayerPawn->InputComponent))
+				{
+					PawnEIC->ClearActionBindings();
+				}
+
+				PC->UnPossess();
 			}
 		}
 	}
@@ -156,30 +167,12 @@ void UMyMapTravelSubsystem::RegisterZoneSequence(const TArray<FZoneDataLayerPair
 
 void UMyMapTravelSubsystem::RefreshSlidingWindow(UDataLayerAsset* TriggeredLayer)
 {
-	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Cyan, TEXT("[管家收到] 雷达信号已接入，开始流送前置检查..."));
-
-	// 【破案防线 1】：动态获取 Manager，抛弃 Initialize 里的缓存，它经常失效！
 	UDataLayerManager* DLManager = UDataLayerManager::GetDataLayerManager(GetWorld());
-	if (!DLManager)
-	{
-		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.f, FColor::Red, TEXT("[严重致命] 管家罢工：DataLayerManager 无效！关卡没开启世界分区？"));
-		return;
-	}
+	if (!DLManager || ZoneSequence.Num() == 0 || !TriggeredLayer) return;
 
-	// 【破案防线 2】：关卡蓝图有没有把数据送进来？
-	if (ZoneSequence.Num() == 0)
-	{
-		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 15.f, FColor::Red, TEXT("[严重致命] 管家罢工：ZoneSequence 数组为空！你的关卡蓝图(Level Blueprint)连线断了，或者根本没执行 Register 节点！"));
-		return;
-	}
-
-	if (!TriggeredLayer) return;
-
-	// 极端回溯防抖
 	if (LastActiveZone == TriggeredLayer) return;
 	LastActiveZone = TriggeredLayer;
 
-	// 定位当前所在关卡的索引
 	int32 CurrentIdx = INDEX_NONE;
 	for (int32 i = 0; i < ZoneSequence.Num(); ++i)
 	{
@@ -190,16 +183,9 @@ void UMyMapTravelSubsystem::RefreshSlidingWindow(UDataLayerAsset* TriggeredLayer
 		}
 	}
 
-	// 【破案防线 3】：填的资产和蓝图里的对不上号？
-	if (CurrentIdx == INDEX_NONE)
-	{
-		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.f, FColor::Red, FString::Printf(TEXT("[严重致命] 雷达传来的资产 [%s] 根本不在关卡蓝图的数组里！两边填的不是同一个文件！"), *TriggeredLayer->GetName()));
-		return;
-	}
+	if (CurrentIdx == INDEX_NONE) return;
 
-	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, FString::Printf(TEXT("[总管执行] 身份核对成功！锁定为第 %d 关，开始调度内存..."), CurrentIdx));
-
-	// 双轨滑动窗口调度
+	// 极简状态机调度：不再进行死循环名册校验，交由底层事件总线完成
 	for (int32 i = 0; i < ZoneSequence.Num(); ++i)
 	{
 		const FZoneDataLayerPair& Zone = ZoneSequence[i];
@@ -213,22 +199,12 @@ void UMyMapTravelSubsystem::RefreshSlidingWindow(UDataLayerAsset* TriggeredLayer
 		else if (Distance == 1)
 		{
 			if (Zone.ArtLayer) DLManager->SetDataLayerRuntimeState(Zone.ArtLayer, EDataLayerRuntimeState::Loaded);
-
-			if (Zone.GameplayLayer)
-			{
-				SanitizeActorsForUnload(Zone.GameplayLayer);
-				DLManager->SetDataLayerRuntimeState(Zone.GameplayLayer, EDataLayerRuntimeState::Unloaded);
-			}
+			if (Zone.GameplayLayer) DLManager->SetDataLayerRuntimeState(Zone.GameplayLayer, EDataLayerRuntimeState::Unloaded);
 		}
 		else
 		{
 			if (Zone.ArtLayer) DLManager->SetDataLayerRuntimeState(Zone.ArtLayer, EDataLayerRuntimeState::Unloaded);
-
-			if (Zone.GameplayLayer)
-			{
-				SanitizeActorsForUnload(Zone.GameplayLayer);
-				DLManager->SetDataLayerRuntimeState(Zone.GameplayLayer, EDataLayerRuntimeState::Unloaded);
-			}
+			if (Zone.GameplayLayer) DLManager->SetDataLayerRuntimeState(Zone.GameplayLayer, EDataLayerRuntimeState::Unloaded);
 		}
 	}
 
@@ -242,51 +218,47 @@ void UMyMapTravelSubsystem::RefreshSlidingWindow(UDataLayerAsset* TriggeredLayer
 
 void UMyMapTravelSubsystem::SanitizeActorsForUnload(const UDataLayerAsset* ZoneToUnload)
 {
+	// 增加自保检查，防止在 Travel 过程中再次触发滑动窗口清理
+	if (bIsTraveling) return;
+
 	UWorld* World = GetWorld();
 	if (!World || !ZoneToUnload) return;
 
 	if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(World->GetAuthGameMode()))
 	{
+		// 使用局部副本暂存弱指针，防止在后续的注销过程中数组内存发生重组导致的越界崩溃
+		TArray<TWeakObjectPtr<ATopCharacter>> PendingElimination;
+
+		// 倒序遍历名册，筛选出挂载在即将卸载的 physical/solid assets 数据层上的受害者
 		for (int32 i = GM->FriendlyRoster.Num() - 1; i >= 0; --i)
 		{
 			ATopCharacter* Victim = Cast<ATopCharacter>(GM->FriendlyRoster[i]);
 
 			if (Victim && Victim->GetDataLayerAssets().Contains(ZoneToUnload))
 			{
-				// -------------------------------------------------------------
-				// 【硬核追踪日志 1：即将被献祭的角色状态】
-				// -------------------------------------------------------------
-				FString VictimName = Victim->GetName();
-				UE_LOG(LogTemp, Warning, TEXT(">>> [卸载清扫] 目标角色: %s, 即将被 Zone 吞噬！"), *VictimName);
-				if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.f, FColor::Magenta, FString::Printf(TEXT(">>> [卸载清扫] 正在处理被吞噬角色: %s"), *VictimName));
+				PendingElimination.Add(Victim);
 
+				// 切断 UI 的数据源绑定：从全局名单中剔除
+				GM->FriendlyRoster.RemoveAt(i);
+			}
+		}
+
+		// 安全地对隔离名单中的实体进行“神经阻断”
+		for (TWeakObjectPtr<ATopCharacter> WeakVictim : PendingElimination)
+		{
+			if (WeakVictim.IsValid())
+			{
+				ATopCharacter* Victim = WeakVictim.Get();
 				if (APlayerController* PC = Cast<APlayerController>(Victim->GetController()))
 				{
-					if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
-					{
-						// 记录当前子系统里还残留多少个 IMC
-						TArray<UInputMappingContext*> ActiveIMCs;
-						// UE5 较新版本获取上下文方式，直接强转或使用自带方法
-						UE_LOG(LogTemp, Warning, TEXT(">>> [卸载清扫] 子系统正常获取！该玩家目前拥有增强输入权限。"));
-					}
-					else
-					{
-						UE_LOG(LogTemp, Error, TEXT(">>> [卸载清扫] 致命警告：获取不到 LocalPlayer 的输入子系统！"));
-					}
-
 					if (UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(Victim->InputComponent))
 					{
 						EIC->ClearActionBindings();
-						UE_LOG(LogTemp, Warning, TEXT(">>> [卸载清扫] 已成功调用 EIC->ClearActionBindings()"));
 					}
-					else
-					{
-						UE_LOG(LogTemp, Error, TEXT(">>> [卸载清扫] 致命警告：角色 %s 身上没有 EnhancedInputComponent！"), *VictimName);
-					}
-					PC->FlushPressedKeys();
-				}
 
-				GM->FriendlyRoster.RemoveAt(i);
+					PC->FlushPressedKeys();
+					PC->DisableInput(PC);
+				}
 			}
 		}
 	}
