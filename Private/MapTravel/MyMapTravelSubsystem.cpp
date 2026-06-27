@@ -18,6 +18,13 @@
 #include "GameFramework/Pawn.h"
 #include "Engine/Engine.h"
 
+#include "Engine/LocalPlayer.h"
+#include "EnhancedInputSubsystems.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Engine/GameViewportClient.h"
+
+#include "TimerManager.h"
+
 
 // ==============================================================================
 // 生命周期与初始化 (Lifecycle & Initialization)
@@ -73,14 +80,48 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 		return;
 	}
 
-	if (APlayerController* PC = World->GetFirstPlayerController())
+	// ==============================================================================
+	// 【终极病灶切除 1：焦土政策 (Scorched Earth Cleanup)】
+	// ==============================================================================
+	if (GEngine && GEngine->GameViewport)
 	{
-		PC->FlushPressedKeys();
+		// 1. 强行把引擎焦点砸回 3D 视口，无情剥夺所有旧 UI 的焦点权
+		FSlateApplication::Get().SetAllUserFocusToGameViewport();
+		FSlateApplication::Get().ClearKeyboardFocus(EFocusCause::Cleared);
 
-		// 物理线程的安全阻断 (Physics Scene Safety)
-		if (APawn* PlayerPawn = PC->GetPawn())
+		// 2. 拔掉当前屏幕上的所有 UI，使其随旧世界一起火化
+		GEngine->GameViewport->RemoveAllViewportWidgets();
+	}
+
+	// ==============================================================================
+	// 【终极病灶切除 2：异步任务大清洗 (Timer Purgatory)】
+	// ==============================================================================
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		if (APlayerController* PC = It->Get())
 		{
-			PlayerPawn->SetActorEnableCollision(false);
+			// 1. 清理 PC 本身所有的计时器
+			World->GetTimerManager().ClearAllTimersForObject(PC);
+
+			// 2. 遍历并清理该 PC 身上挂载的所有组件的计时器（彻底斩断 MyUIHandlerComponent 的 NextTick 诈尸）
+			TArray<UActorComponent*> UIComponents;
+			PC->GetComponents(UIComponents);
+			for (UActorComponent* Comp : UIComponents)
+			{
+				World->GetTimerManager().ClearAllTimersForObject(Comp);
+			}
+
+			// 3. 常规输入清理
+			PC->FlushPressedKeys();
+			PC->DisableInput(PC);
+
+			FInputModeGameOnly GameOnlyMode;
+			PC->SetInputMode(GameOnlyMode);
+
+			if (APawn* PlayerPawn = PC->GetPawn())
+			{
+				PlayerPawn->SetActorEnableCollision(false);
+			}
 		}
 	}
 
@@ -100,6 +141,7 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 
 #pragma endregion
 
+
 // ==============================================================================
 // 动态滑动窗口与流送管线 (Dynamic Sliding Window & Streaming Pipeline)
 // ==============================================================================
@@ -112,16 +154,27 @@ void UMyMapTravelSubsystem::RegisterZoneSequence(const TArray<FZoneDataLayerPair
 
 void UMyMapTravelSubsystem::RefreshSlidingWindow(UDataLayerAsset* TriggeredLayer)
 {
-	if (!CachedDataLayerManager.IsValid() || ZoneSequence.Num() == 0 || !TriggeredLayer)
+	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Cyan, TEXT("[管家收到] 雷达信号已接入，开始流送前置检查..."));
+
+	// 【破案防线 1】：动态获取 Manager，抛弃 Initialize 里的缓存，它经常失效！
+	UDataLayerManager* DLManager = UDataLayerManager::GetDataLayerManager(GetWorld());
+	if (!DLManager)
 	{
+		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.f, FColor::Red, TEXT("[严重致命] 管家罢工：DataLayerManager 无效！关卡没开启世界分区？"));
 		return;
 	}
 
-	// 极端回溯防抖
-	if (LastActiveZone == TriggeredLayer)
+	// 【破案防线 2】：关卡蓝图有没有把数据送进来？
+	if (ZoneSequence.Num() == 0)
 	{
+		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 15.f, FColor::Red, TEXT("[严重致命] 管家罢工：ZoneSequence 数组为空！你的关卡蓝图(Level Blueprint)连线断了，或者根本没执行 Register 节点！"));
 		return;
 	}
+
+	if (!TriggeredLayer) return;
+
+	// 极端回溯防抖
+	if (LastActiveZone == TriggeredLayer) return;
 	LastActiveZone = TriggeredLayer;
 
 	// 定位当前所在关卡的索引
@@ -134,7 +187,15 @@ void UMyMapTravelSubsystem::RefreshSlidingWindow(UDataLayerAsset* TriggeredLayer
 			break;
 		}
 	}
-	if (CurrentIdx == INDEX_NONE) return;
+
+	// 【破案防线 3】：填的资产和蓝图里的对不上号？
+	if (CurrentIdx == INDEX_NONE)
+	{
+		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.f, FColor::Red, FString::Printf(TEXT("[严重致命] 雷达传来的资产 [%s] 根本不在关卡蓝图的数组里！两边填的不是同一个文件！"), *TriggeredLayer->GetName()));
+		return;
+	}
+
+	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, FString::Printf(TEXT("[总管执行] 身份核对成功！锁定为第 %d 关，开始调度内存..."), CurrentIdx));
 
 	// 双轨滑动窗口调度
 	for (int32 i = 0; i < ZoneSequence.Num(); ++i)
@@ -144,30 +205,27 @@ void UMyMapTravelSubsystem::RefreshSlidingWindow(UDataLayerAsset* TriggeredLayer
 
 		if (Distance == 0)
 		{
-			if (Zone.ArtLayer) CachedDataLayerManager->SetDataLayerRuntimeState(Zone.ArtLayer, EDataLayerRuntimeState::Activated);
-			if (Zone.GameplayLayer) CachedDataLayerManager->SetDataLayerRuntimeState(Zone.GameplayLayer, EDataLayerRuntimeState::Activated);
+			if (Zone.ArtLayer) DLManager->SetDataLayerRuntimeState(Zone.ArtLayer, EDataLayerRuntimeState::Activated);
+			if (Zone.GameplayLayer) DLManager->SetDataLayerRuntimeState(Zone.GameplayLayer, EDataLayerRuntimeState::Activated);
 		}
 		else if (Distance == 1)
 		{
-			// 相邻区域仅预热美术，玩法层保持卸载
-			if (Zone.ArtLayer) CachedDataLayerManager->SetDataLayerRuntimeState(Zone.ArtLayer, EDataLayerRuntimeState::Loaded);
-			if (Zone.GameplayLayer) CachedDataLayerManager->SetDataLayerRuntimeState(Zone.GameplayLayer, EDataLayerRuntimeState::Unloaded);
+			if (Zone.ArtLayer) DLManager->SetDataLayerRuntimeState(Zone.ArtLayer, EDataLayerRuntimeState::Loaded);
+			if (Zone.GameplayLayer) DLManager->SetDataLayerRuntimeState(Zone.GameplayLayer, EDataLayerRuntimeState::Unloaded);
 		}
 		else
 		{
-			// 极远区域彻底剔除
-			if (Zone.ArtLayer) CachedDataLayerManager->SetDataLayerRuntimeState(Zone.ArtLayer, EDataLayerRuntimeState::Unloaded);
-			if (Zone.GameplayLayer) CachedDataLayerManager->SetDataLayerRuntimeState(Zone.GameplayLayer, EDataLayerRuntimeState::Unloaded);
+			if (Zone.ArtLayer) DLManager->SetDataLayerRuntimeState(Zone.ArtLayer, EDataLayerRuntimeState::Unloaded);
+			if (Zone.GameplayLayer) DLManager->SetDataLayerRuntimeState(Zone.GameplayLayer, EDataLayerRuntimeState::Unloaded);
 		}
 	}
 
-	// 内存池的“削峰填谷” (Texture Streaming Source Override)
 	if (GEngine && GetWorld())
 	{
 		GEngine->Exec(GetWorld(), TEXT("r.TextureStreaming.ForceUpdate"));
 	}
 
-	// 【新增】：每次切图或初始化完毕后，强制在屏幕上打印体检报告
+	// 执行完毕后，调用你放在最底下的那段完美的打印代码
 	DebugPrintDataLayerStates();
 }
 

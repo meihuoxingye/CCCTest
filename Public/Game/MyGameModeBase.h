@@ -26,6 +26,9 @@ public:
 	// 重写 StartPlay，作为后台基建预热的触发点
 	virtual void StartPlay() override;
 
+	// 重写 EndPlay，作为关卡销毁前的最后一道防线
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
 
 	// ==============================================================================
 	// 队伍名册系统 (Squad Roster System)

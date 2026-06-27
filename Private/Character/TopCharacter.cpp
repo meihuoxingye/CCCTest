@@ -243,14 +243,20 @@ void ATopCharacter::OnInteractSphereBeginOverlap(UPrimitiveComponent* Overlapped
 
 void ATopCharacter::OnInteractSphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
 {
-	if (OtherActor)
+	// 1. 增加接口验证：只有真正带交互接口的物体脱离，才配进入逻辑
+	if (OtherActor && OtherActor != this && OtherActor->Implements<UMyInteractableInterface>())
 	{
-		InteractableActorsInRange.Remove(OtherActor);
+		// 2. 增加防抖验证：Remove 会返回成功移除的数量。
+		// 只有它之前真的在我们的待选队列里，现在被移除了，才打印日志！
+		int32 RemovedCount = InteractableActorsInRange.Remove(OtherActor);
 
-		// 【测谎仪节点 2 - 红色】：验证物体离开
-		if (GEngine)
+		if (RemovedCount > 0)
 		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString::Printf(TEXT("[雷达目标撤销] 目标物体: %s 离开了范围，已将其从待选队列移出。"), *OtherActor->GetName()));
+			// 【测谎仪节点 2 - 红色】：验证合法交互物体离开
+			if (GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString::Printf(TEXT("[雷达目标撤销] 目标物体: %s 离开了范围，已将其从待选队列移出。"), *OtherActor->GetName()));
+			}
 		}
 	}
 }

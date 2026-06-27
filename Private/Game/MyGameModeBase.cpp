@@ -86,6 +86,27 @@ void AMyGameModeBase::StartPlay()
 		}, 2.0f, false); // 2.0f 代表延时 2 秒执行，false 代表不循环（仅触发一次）
 }
 
+void AMyGameModeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// 关卡卸载或点击编辑器停止按钮时触发：彻底消除所有挂起的 Timer
+	if (UWorld* World = GetWorld())
+	{
+		// 1. 清除 GameMode 自身挂起的计时器（比如 2 秒的后台基建预热任务）
+		World->GetTimerManager().ClearAllTimersForObject(this);
+
+		// 2. 遍历清理所有控制器的残留异步任务
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			if (APlayerController* PC = It->Get())
+			{
+				World->GetTimerManager().ClearAllTimersForObject(PC);
+			}
+		}
+	}
+
+	Super::EndPlay(EndPlayReason);
+}
+
 #pragma endregion
 
 
