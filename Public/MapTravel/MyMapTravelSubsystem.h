@@ -77,6 +77,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void UpdateEnvironment(UMyBiomeConfig* NewBiome, ADirectionalLight* MainLight, AExponentialHeightFog* MainFog);
 
+	// 【新增】：一键扫描并打印所有数据层的真实内存状态
+	UFUNCTION(BlueprintCallable, Category = "MapTravel|Debug")
+	void DebugPrintDataLayerStates();
+
+
 	// ==============================================================================
 	// 内部状态锁 (Internal State Locks)
 	// ==============================================================================

@@ -36,7 +36,13 @@ void UMyUIHandlerComponent::BeginPlay()
 	// 【进阶优化】：在 BeginPlay 阶段即刻获取并锁定控制器指针
 	// 避免后续在每一帧或每次按键高频交互时进行昂贵的 Cast 转换
 	CachedPC = Cast<ATopPlayerController>(GetOwner());
-	if (!CachedPC) return;
+
+	// ==============================================================================
+	// 【架构防线：物理屏幕隔离 (Local Player Isolation)】
+	// 如果获取不到控制器，或者该控制器【不是本地玩家】（例如跑在专用服务器上，或联机时的远程分身）
+	// 绝对不允许创建任何 UI！直接切断后续所有排版、建仓与预热逻辑，防止内存泄漏与服务器报错！
+	// ==============================================================================
+	if (!CachedPC || !CachedPC->IsLocalController()) return;
 
 	// 【架构核心】：主动监听 GameMode 的名册更新频道，实现真正的事件驱动
 	if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(GetWorld()->GetAuthGameMode()))

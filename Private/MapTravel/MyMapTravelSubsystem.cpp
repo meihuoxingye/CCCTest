@@ -18,6 +18,7 @@
 #include "GameFramework/Pawn.h"
 #include "Engine/Engine.h"
 
+
 // ==============================================================================
 // 生命周期与初始化 (Lifecycle & Initialization)
 // ==============================================================================
@@ -165,6 +166,9 @@ void UMyMapTravelSubsystem::RefreshSlidingWindow(UDataLayerAsset* TriggeredLayer
 	{
 		GEngine->Exec(GetWorld(), TEXT("r.TextureStreaming.ForceUpdate"));
 	}
+
+	// 【新增】：每次切图或初始化完毕后，强制在屏幕上打印体检报告
+	DebugPrintDataLayerStates();
 }
 
 void UMyMapTravelSubsystem::PreheatZoneBackground(const UDataLayerAsset* ArtLayerAsset)
@@ -229,6 +233,56 @@ void UMyMapTravelSubsystem::UpdateEnvironment(UMyBiomeConfig* NewBiome, ADirecti
 	StartSunColor = MainLight->GetComponent()->LightColor;
 
 	World->GetTimerManager().SetTimer(BiomeLerpTimer, this, &UMyMapTravelSubsystem::ProcessBiomeLerpTick, 0.05f, true);
+}
+
+void UMyMapTravelSubsystem::DebugPrintDataLayerStates()
+{
+	UDataLayerManager* DLManager = UDataLayerManager::GetDataLayerManager(GetWorld());
+	if (!DLManager) return;
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 15.f, FColor::Yellow, TEXT("========== 数据层真实内存状态诊断 =========="));
+	}
+
+	for (int32 i = ZoneSequence.Num() - 1; i >= 0; --i)
+	{
+		const FZoneDataLayerPair& Zone = ZoneSequence[i];
+
+		// 检查玩法层 (Gameplay)
+		if (Zone.GameplayLayer)
+		{
+			EDataLayerRuntimeState GPState = EDataLayerRuntimeState::Unloaded;
+			// 【正确的 UE 5.8 写法】：先获取 Instance，再查 State
+			if (const UDataLayerInstance* GPInstance = DLManager->GetDataLayerInstance(Zone.GameplayLayer))
+			{
+				GPState = GPInstance->GetRuntimeState();
+			}
+
+			FString StateStr = (GPState == EDataLayerRuntimeState::Activated) ? TEXT("已激活 (Activated)") :
+				(GPState == EDataLayerRuntimeState::Loaded) ? TEXT("仅加载 (Loaded)") : TEXT("已卸载 (Unloaded)");
+
+			FColor MsgColor = (GPState == EDataLayerRuntimeState::Activated) ? FColor::Red : FColor::White;
+			if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 15.f, MsgColor, FString::Printf(TEXT("Zone %d [玩法 Gameplay]: %s"), i, *StateStr));
+		}
+
+		// 检查美术层 (Art)
+		if (Zone.ArtLayer)
+		{
+			EDataLayerRuntimeState ArtState = EDataLayerRuntimeState::Unloaded;
+			// 【正确的 UE 5.8 写法】：先获取 Instance，再查 State
+			if (const UDataLayerInstance* ArtInstance = DLManager->GetDataLayerInstance(Zone.ArtLayer))
+			{
+				ArtState = ArtInstance->GetRuntimeState();
+			}
+
+			FString StateStr = (ArtState == EDataLayerRuntimeState::Activated) ? TEXT("已激活 (Activated)") :
+				(ArtState == EDataLayerRuntimeState::Loaded) ? TEXT("仅加载 (Loaded)") : TEXT("已卸载 (Unloaded)");
+
+			FColor MsgColor = (ArtState == EDataLayerRuntimeState::Activated) ? FColor::Green : FColor::White;
+			if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 15.f, MsgColor, FString::Printf(TEXT("Zone %d [美术 Art]:      %s"), i, *StateStr));
+		}
+	}
 }
 
 void UMyMapTravelSubsystem::ProcessBiomeLerpTick()
