@@ -43,20 +43,25 @@ class CCC_API UMyMapTravelSubsystem : public UWorldSubsystem
 	// 生命周期与初始化 (Lifecycle & Initialization)
 	// ==============================================================================
 public:
+
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
+
 
 	// ==============================================================================
 	// 核心跳转管线 (Core Travel Pipeline)
 	// ==============================================================================
 public:
+
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void ExecuteMapTravel(FName TargetLevelName);
+
 
 	// ==============================================================================
 	// 动态滑动窗口与流送管线 (Dynamic Sliding Window & Streaming Pipeline)
 	// ==============================================================================
 public:
+
 	// 注册双轨清单
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void RegisterZoneSequence(const TArray<FZoneDataLayerPair>& InSequence);
@@ -74,6 +79,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void EliminateZone(const UDataLayerAsset* LayerToUnload);
 
+	// 【新增】：在卸载数据层前的安全清洗
+	void SanitizeActorsForUnload(const UDataLayerAsset* ZoneToUnload);
+
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void UpdateEnvironment(UMyBiomeConfig* NewBiome, ADirectionalLight* MainLight, AExponentialHeightFog* MainFog);
 
@@ -86,6 +94,7 @@ public:
 	// 内部状态锁 (Internal State Locks)
 	// ==============================================================================
 private:
+
 	UPROPERTY()
 	bool bIsTraveling = false;
 

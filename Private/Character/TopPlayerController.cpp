@@ -56,6 +56,26 @@ void ATopPlayerController::BeginPlay()
 	SetInputMode(InputModeData);
 }
 
+void ATopPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// 【终极防御】：无论是按下停止按钮关闭PIE，还是因为数据层误卸载导致控制器死亡
+	// 在死亡瞬间，必须强行切断增强输入系统与操作系统的绑定，防止后续鼠标滑动引发 PlayerInput 的 World 断言崩溃
+	if (IsLocalPlayerController())
+	{
+		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
+		{
+			Subsystem->ClearAllMappings();
+		}
+
+		FlushPressedKeys();
+
+		FInputModeUIOnly MuteInput;
+		SetInputMode(MuteInput);
+	}
+
+	Super::EndPlay(EndPlayReason);
+}
+
 #pragma endregion
 
 // ==============================================================================

@@ -23,7 +23,9 @@
 #include "Framework/Application/SlateApplication.h"
 #include "Engine/GameViewportClient.h"
 
-#include "TimerManager.h"
+#include "Game/MyGameModeBase.h"
+#include "Character/TopCharacter.h"
+#include "EnhancedInputComponent.h"
 
 
 // ==============================================================================
@@ -211,12 +213,24 @@ void UMyMapTravelSubsystem::RefreshSlidingWindow(UDataLayerAsset* TriggeredLayer
 		else if (Distance == 1)
 		{
 			if (Zone.ArtLayer) DLManager->SetDataLayerRuntimeState(Zone.ArtLayer, EDataLayerRuntimeState::Loaded);
-			if (Zone.GameplayLayer) DLManager->SetDataLayerRuntimeState(Zone.GameplayLayer, EDataLayerRuntimeState::Unloaded);
+
+			if (Zone.GameplayLayer)
+			{
+				// 【精准植入：双保险清洗】在引擎强杀该层 Actor 之前，手动切断神经！
+				SanitizeActorsForUnload(Zone.GameplayLayer);
+				DLManager->SetDataLayerRuntimeState(Zone.GameplayLayer, EDataLayerRuntimeState::Unloaded);
+			}
 		}
 		else
 		{
 			if (Zone.ArtLayer) DLManager->SetDataLayerRuntimeState(Zone.ArtLayer, EDataLayerRuntimeState::Unloaded);
-			if (Zone.GameplayLayer) DLManager->SetDataLayerRuntimeState(Zone.GameplayLayer, EDataLayerRuntimeState::Unloaded);
+
+			if (Zone.GameplayLayer)
+			{
+				// 【精准植入：双保险清洗】在引擎强杀该层 Actor 之前，手动切断神经！
+				SanitizeActorsForUnload(Zone.GameplayLayer);
+				DLManager->SetDataLayerRuntimeState(Zone.GameplayLayer, EDataLayerRuntimeState::Unloaded);
+			}
 		}
 	}
 
@@ -227,6 +241,39 @@ void UMyMapTravelSubsystem::RefreshSlidingWindow(UDataLayerAsset* TriggeredLayer
 
 	// 执行完毕后，调用你放在最底下的那段完美的打印代码
 	DebugPrintDataLayerStates();
+}
+
+void UMyMapTravelSubsystem::SanitizeActorsForUnload(const UDataLayerAsset* ZoneToUnload)
+{
+	UWorld* World = GetWorld();
+	if (!World || !ZoneToUnload) return;
+
+	if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(World->GetAuthGameMode()))
+	{
+		// 倒序遍历名册，因为我们要随时将死人踢出数组
+		for (int32 i = GM->FriendlyRoster.Num() - 1; i >= 0; --i)
+		{
+			ATopCharacter* Victim = Cast<ATopCharacter>(GM->FriendlyRoster[i]);
+
+			// 如果角色存在，并且他身上烙印着即将被卸载的那个数据层
+			if (Victim && Victim->GetDataLayerAssets().Contains(ZoneToUnload))
+			{
+				// 1. 物理切断输入：彻底注销增强输入绑定，清空按键残留。
+				// 完美解决 PlayerInput.cpp [Line: 182] 断言崩溃！
+				if (APlayerController* PC = Cast<APlayerController>(Victim->GetController()))
+				{
+					if (UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(Victim->InputComponent))
+					{
+						EIC->ClearActionBindings();
+					}
+					PC->FlushPressedKeys();
+				}
+
+				// 2. 切断 UI 引用：从全局存活名单中抹除，防止 UI 在下一帧去读取死人的血量数据引发崩溃
+				GM->FriendlyRoster.RemoveAt(i);
+			}
+		}
+	}
 }
 
 void UMyMapTravelSubsystem::PreheatZoneBackground(const UDataLayerAsset* ArtLayerAsset)

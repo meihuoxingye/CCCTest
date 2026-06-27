@@ -29,6 +29,8 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override; // <--- 新增这行
+
 	// 【核心挂件】：时空枢纽组件，全权负责平滑子弹时间与渲染同步
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UTimeDilationHubComponent> TimeDilationHub;
