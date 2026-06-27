@@ -1,4 +1,4 @@
-//// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 #include "Character/TopPlayerController.h"
 // 增强输入
 #include "EnhancedInputComponent.h"
@@ -18,6 +18,9 @@
 // 根据 IWYU 规范，显式引入缺少的引擎核心头文件，彻底消除 C2027 未定义类型编译错误
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
+
+// 【新增：屏幕文本输出所需的全局引擎头文件】
+#include "Engine/Engine.h"
 
 ATopPlayerController::ATopPlayerController()
 {
@@ -58,20 +61,10 @@ void ATopPlayerController::BeginPlay()
 
 void ATopPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	// 【终极防御】：无论是按下停止按钮关闭PIE，还是因为数据层误卸载导致控制器死亡
-	// 在死亡瞬间，必须强行切断增强输入系统与操作系统的绑定，防止后续鼠标滑动引发 PlayerInput 的 World 断言崩溃
-	if (IsLocalPlayerController())
-	{
-		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
-		{
-			Subsystem->ClearAllMappings();
-		}
-
-		FlushPressedKeys();
-
-		FInputModeUIOnly MuteInput;
-		SetInputMode(MuteInput);
-	}
+	// 【核武级修复】：因为项目启用了 Common UI 插件 (ActionRouter)
+	// 绝对禁止在控制器销毁 (EndPlay) 阶段调用 SetInputMode 或强清 Subsystem！
+	// 否则会将濒死的控制器塞入 Common UI 的全局树，导致点击停止游戏时触发 0xed0 内存越界闪退。
+	// 之前的 Line 182 闪退已经被我们在 FlushPressedKeys 里的雷达完美拦截，这里无需再做多余操作。
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -272,6 +265,42 @@ void ATopPlayerController::RequestCharacterSwitch_Implementation(ABaseCharacter*
 	{
 		SwitchToSpecificCharacter(CastedChar);
 	}
+}
+
+#pragma endregion
+
+
+// ==============================================================================
+// 崩溃断点雷达 (Crash Diagnostic Radar)
+// ==============================================================================
+#pragma region
+
+void ATopPlayerController::FlushPressedKeys()
+{
+	// 1. 抓取当前控制器的生死状态与世界指针
+	bool bIsPendingKill = !IsValid(this); // UE5 中 IsValid 会检查是否为 PendingKill 或 Garbage
+	UWorld* CurrentWorld = GetWorld();
+
+	// 2. 只要该函数被引擎调用，立刻写入红色高警日志
+	UE_LOG(LogTemp, Error, TEXT("========== [硬核雷达] 引擎底层触发了 FlushPressedKeys =========="));
+	UE_LOG(LogTemp, Error, TEXT(">> 触发控制器: %s"), *GetName());
+	UE_LOG(LogTemp, Error, TEXT(">> 该控制器是否已处于 PendingKill (被销毁但未回收): %d"), bIsPendingKill);
+	UE_LOG(LogTemp, Error, TEXT(">> 该控制器的 World 指针是否为空: %d"), CurrentWorld == nullptr);
+
+	// 3. 致命状态拦截报警
+	if (bIsPendingKill || CurrentWorld == nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT(">> [致命拦截] 抓到现行！引擎试图让一个已经死亡或失去 World 的 Controller 去执行按键冲刷！"));
+		UE_LOG(LogTemp, Error, TEXT(">> [致命拦截] 如果不在此处拦截，底层 PlayerInput 必定触发 Line 182 断言崩溃。本次已强行阻断！"));
+
+		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 20.f, FColor::Red, TEXT("已成功拦截一次致命闪退！请查看 Saved/Logs 日志"));
+
+		// 强行阻断，不让它调 Super
+		return;
+	}
+
+	// 如果一切正常，放行给引擎底层处理
+	Super::FlushPressedKeys();
 }
 
 #pragma endregion

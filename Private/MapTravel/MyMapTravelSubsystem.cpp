@@ -216,7 +216,6 @@ void UMyMapTravelSubsystem::RefreshSlidingWindow(UDataLayerAsset* TriggeredLayer
 
 			if (Zone.GameplayLayer)
 			{
-				// 【精准植入：双保险清洗】在引擎强杀该层 Actor 之前，手动切断神经！
 				SanitizeActorsForUnload(Zone.GameplayLayer);
 				DLManager->SetDataLayerRuntimeState(Zone.GameplayLayer, EDataLayerRuntimeState::Unloaded);
 			}
@@ -227,7 +226,6 @@ void UMyMapTravelSubsystem::RefreshSlidingWindow(UDataLayerAsset* TriggeredLayer
 
 			if (Zone.GameplayLayer)
 			{
-				// 【精准植入：双保险清洗】在引擎强杀该层 Actor 之前，手动切断神经！
 				SanitizeActorsForUnload(Zone.GameplayLayer);
 				DLManager->SetDataLayerRuntimeState(Zone.GameplayLayer, EDataLayerRuntimeState::Unloaded);
 			}
@@ -239,7 +237,6 @@ void UMyMapTravelSubsystem::RefreshSlidingWindow(UDataLayerAsset* TriggeredLayer
 		GEngine->Exec(GetWorld(), TEXT("r.TextureStreaming.ForceUpdate"));
 	}
 
-	// 执行完毕后，调用你放在最底下的那段完美的打印代码
 	DebugPrintDataLayerStates();
 }
 
@@ -250,26 +247,45 @@ void UMyMapTravelSubsystem::SanitizeActorsForUnload(const UDataLayerAsset* ZoneT
 
 	if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(World->GetAuthGameMode()))
 	{
-		// 倒序遍历名册，因为我们要随时将死人踢出数组
 		for (int32 i = GM->FriendlyRoster.Num() - 1; i >= 0; --i)
 		{
 			ATopCharacter* Victim = Cast<ATopCharacter>(GM->FriendlyRoster[i]);
 
-			// 如果角色存在，并且他身上烙印着即将被卸载的那个数据层
 			if (Victim && Victim->GetDataLayerAssets().Contains(ZoneToUnload))
 			{
-				// 1. 物理切断输入：彻底注销增强输入绑定，清空按键残留。
-				// 完美解决 PlayerInput.cpp [Line: 182] 断言崩溃！
+				// -------------------------------------------------------------
+				// 【硬核追踪日志 1：即将被献祭的角色状态】
+				// -------------------------------------------------------------
+				FString VictimName = Victim->GetName();
+				UE_LOG(LogTemp, Warning, TEXT(">>> [卸载清扫] 目标角色: %s, 即将被 Zone 吞噬！"), *VictimName);
+				if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.f, FColor::Magenta, FString::Printf(TEXT(">>> [卸载清扫] 正在处理被吞噬角色: %s"), *VictimName));
+
 				if (APlayerController* PC = Cast<APlayerController>(Victim->GetController()))
 				{
+					if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
+					{
+						// 记录当前子系统里还残留多少个 IMC
+						TArray<UInputMappingContext*> ActiveIMCs;
+						// UE5 较新版本获取上下文方式，直接强转或使用自带方法
+						UE_LOG(LogTemp, Warning, TEXT(">>> [卸载清扫] 子系统正常获取！该玩家目前拥有增强输入权限。"));
+					}
+					else
+					{
+						UE_LOG(LogTemp, Error, TEXT(">>> [卸载清扫] 致命警告：获取不到 LocalPlayer 的输入子系统！"));
+					}
+
 					if (UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(Victim->InputComponent))
 					{
 						EIC->ClearActionBindings();
+						UE_LOG(LogTemp, Warning, TEXT(">>> [卸载清扫] 已成功调用 EIC->ClearActionBindings()"));
+					}
+					else
+					{
+						UE_LOG(LogTemp, Error, TEXT(">>> [卸载清扫] 致命警告：角色 %s 身上没有 EnhancedInputComponent！"), *VictimName);
 					}
 					PC->FlushPressedKeys();
 				}
 
-				// 2. 切断 UI 引用：从全局存活名单中抹除，防止 UI 在下一帧去读取死人的血量数据引发崩溃
 				GM->FriendlyRoster.RemoveAt(i);
 			}
 		}

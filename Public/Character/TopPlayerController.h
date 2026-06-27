@@ -111,4 +111,12 @@ private:
 	// 绑定给 Tab 键的输入动作，绑定的回调函数在时间膨胀组件中
 	UPROPERTY(EditAnywhere, Category = "Input")
 	TObjectPtr<UInputAction> SwitchModeAction;
+
+
+	// ==============================================================================
+	// 崩溃断点雷达 (Crash Diagnostic Radar)
+	// ==============================================================================
+public:
+	// 用于排查失去焦点时的底层强制调用
+	virtual void FlushPressedKeys() override;
 };
