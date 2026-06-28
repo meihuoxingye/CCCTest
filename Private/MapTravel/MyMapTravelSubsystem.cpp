@@ -27,6 +27,8 @@
 #include "Character/TopCharacter.h"
 #include "EnhancedInputComponent.h"
 
+#include "GameFramework/PlayerState.h" // 必须添加这一行
+
 
 // ==============================================================================
 // 生命周期与初始化 (Lifecycle & Initialization)
@@ -76,9 +78,14 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 		return;
 	}
 
+	// 【核心修复 1】：立刻上锁！
+	// Standalone模式下物理步长极易导致同一帧多次碰撞重叠，必须在第一行就封死重入！
+	bIsTraveling = true;
+
 	UWorld* World = GetWorld();
 	if (!IsValid(World) || TargetLevelName.IsNone())
 	{
+		bIsTraveling = false; // 如果跳转条件不满足，记得解锁
 		return;
 	}
 
@@ -88,9 +95,11 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 		GEngine->GameViewport->SetIgnoreInput(true);
 
 		FSlateApplication::Get().ClearKeyboardFocus(EFocusCause::Cleared);
-		// 【修复 UE5.8 警告】：过时的 ReleaseMouseCapture 已变更为 ReleaseAllPointerCapture
 		FSlateApplication::Get().ReleaseAllPointerCapture();
-		GEngine->GameViewport->RemoveAllViewportWidgets();
+
+		// 【核心修复 2】：删除了 GEngine->GameViewport->RemoveAllViewportWidgets();
+		// 理由：你是 CommonUI 用户。暴力撕掉 UI 会让 ActionRouter 底层访问 0x30 空指针。
+		// 在 ServerTravel 时，UE5 底层会自动、安全地析构所有旧地图的 UI。
 	}
 
 	// 2. 逻辑隔离取代物理拆除 (Isolation vs. Destruction)
@@ -117,8 +126,8 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 			PC->SetIgnoreMoveInput(true);
 			PC->SetIgnoreLookInput(true);
 
-			FInputModeUIOnly NullInputMode;
-			PC->SetInputMode(NullInputMode);
+			// 【核心修复 3】：删除了 FInputModeUIOnly 和 PC->SetInputMode();
+			// 理由：绝不在切换地图/销毁前夕更改 InputMode，否则立刻触发 CommonUI 夺权并导致空指针崩溃！
 
 			if (UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(PC->InputComponent))
 			{
@@ -136,6 +145,25 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 
 				PC->UnPossess();
 			}
+
+			// ==============================================================================
+			// 【终极防线：物理偷渡持久关卡 (Standalone 0x30 闪退救星)】
+			// 如果在独立进程中，引擎底层依然犯病把控制器误判进了流送层，
+			// 我们在 ServerTravel 装车前的最后一瞬间，使用 Rename 强行修改其 Outer，
+			// 把控制器“物理偷渡”回当前世界的持久关卡，强行通过无缝传送的安全审查！
+			// ==============================================================================
+			// 1. 偷渡玩家控制器 (你已经加了，完美生效)
+			if (PC->GetLevel() != World->PersistentLevel)
+			{
+				PC->Rename(nullptr, World->PersistentLevel);
+			}
+
+			// 2. 【核心补充】：一并偷渡伴生的 PlayerState！
+			// PlayerState 是无缝传送中必带的资产，如果不拉回持久关卡，它依然会被销毁并引发 0x30！
+			if (PC->PlayerState && PC->PlayerState->GetLevel() != World->PersistentLevel)
+			{
+				PC->PlayerState->Rename(nullptr, World->PersistentLevel);
+			}
 		}
 	}
 
@@ -149,7 +177,6 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 		GetMoviePlayer()->SetupLoadingScreen(LoadingScreen);
 	}
 
-	bIsTraveling = true;
 	World->ServerTravel(TargetLevelName.ToString());
 }
 

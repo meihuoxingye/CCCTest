@@ -26,6 +26,14 @@ ATopPlayerController::ATopPlayerController()
 {
 	bReplicates = false;
 
+	// ==============================================================================
+	// 【核心修复：防 0x30 闪退的最高豁免权】
+	// 强制声明为非空间加载！
+	// 赋予控制器“外交豁免权”，防止它在 Standalone 独立进程下被 World Partition 强行吸入流送层，
+	// 从而在 Seamless Travel 时被引擎当作流送垃圾销毁，引发空指针 0x30 崩溃。
+	// ==============================================================================
+	bIsSpatiallyLoaded = false;
+
 	// 出生时，给自己挂上时空枢纽组件背包
 	TimeDilationHub = CreateDefaultSubobject<UTimeDilationHubComponent>(TEXT("TimeDilationHubComponent"));
 
@@ -41,6 +49,20 @@ ATopPlayerController::ATopPlayerController()
 void ATopPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// ==============================================================================
+	// 【核心破案：清除初始空间的幽灵控制器残留】
+	// 初始关卡加载时，系统必定因为 GameMode 和 AutoPossess 的双重生成机制产生幽灵控制器。
+	// 如果当前控制器没有本地玩家 (LocalPlayer) 附身，直接剥夺它身上时间枢纽的 Tick 权力！
+	// 彻底终结初始空间的“双向拔河”！
+	// ==============================================================================
+	if (!IsLocalPlayerController())
+	{
+		if (TimeDilationHub)
+		{
+			TimeDilationHub->SetComponentTickEnabled(false);
+		}
+	}
 
 	// 显示鼠标
 	bShowMouseCursor = true;
