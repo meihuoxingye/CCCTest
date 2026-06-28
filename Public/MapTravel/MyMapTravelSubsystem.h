@@ -79,9 +79,6 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void EliminateZone(const UDataLayerAsset* LayerToUnload);
 
-	// 【新增】：在卸载数据层前的安全清洗
-	void SanitizeActorsForUnload(const UDataLayerAsset* ZoneToUnload);
-
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void UpdateEnvironment(UMyBiomeConfig* NewBiome, ADirectionalLight* MainLight, AExponentialHeightFog* MainFog);
 

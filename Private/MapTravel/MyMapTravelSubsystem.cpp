@@ -88,7 +88,8 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 		GEngine->GameViewport->SetIgnoreInput(true);
 
 		FSlateApplication::Get().ClearKeyboardFocus(EFocusCause::Cleared);
-		FSlateApplication::Get().ReleaseMouseCapture();
+		// 【修复 UE5.8 警告】：过时的 ReleaseMouseCapture 已变更为 ReleaseAllPointerCapture
+		FSlateApplication::Get().ReleaseAllPointerCapture();
 		GEngine->GameViewport->RemoveAllViewportWidgets();
 	}
 
@@ -214,54 +215,6 @@ void UMyMapTravelSubsystem::RefreshSlidingWindow(UDataLayerAsset* TriggeredLayer
 	}
 
 	DebugPrintDataLayerStates();
-}
-
-void UMyMapTravelSubsystem::SanitizeActorsForUnload(const UDataLayerAsset* ZoneToUnload)
-{
-	// 增加自保检查，防止在 Travel 过程中再次触发滑动窗口清理
-	if (bIsTraveling) return;
-
-	UWorld* World = GetWorld();
-	if (!World || !ZoneToUnload) return;
-
-	if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(World->GetAuthGameMode()))
-	{
-		// 使用局部副本暂存弱指针，防止在后续的注销过程中数组内存发生重组导致的越界崩溃
-		TArray<TWeakObjectPtr<ATopCharacter>> PendingElimination;
-
-		// 倒序遍历名册，筛选出挂载在即将卸载的 physical/solid assets 数据层上的受害者
-		for (int32 i = GM->FriendlyRoster.Num() - 1; i >= 0; --i)
-		{
-			ATopCharacter* Victim = Cast<ATopCharacter>(GM->FriendlyRoster[i]);
-
-			if (Victim && Victim->GetDataLayerAssets().Contains(ZoneToUnload))
-			{
-				PendingElimination.Add(Victim);
-
-				// 切断 UI 的数据源绑定：从全局名单中剔除
-				GM->FriendlyRoster.RemoveAt(i);
-			}
-		}
-
-		// 安全地对隔离名单中的实体进行“神经阻断”
-		for (TWeakObjectPtr<ATopCharacter> WeakVictim : PendingElimination)
-		{
-			if (WeakVictim.IsValid())
-			{
-				ATopCharacter* Victim = WeakVictim.Get();
-				if (APlayerController* PC = Cast<APlayerController>(Victim->GetController()))
-				{
-					if (UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(Victim->InputComponent))
-					{
-						EIC->ClearActionBindings();
-					}
-
-					PC->FlushPressedKeys();
-					PC->DisableInput(PC);
-				}
-			}
-		}
-	}
 }
 
 void UMyMapTravelSubsystem::PreheatZoneBackground(const UDataLayerAsset* ArtLayerAsset)

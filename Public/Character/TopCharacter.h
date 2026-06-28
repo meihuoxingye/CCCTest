@@ -9,6 +9,7 @@
 // 定义了 FInputActionValue 结构体
 // 专门用来装载按键、鼠标位移或手柄摇杆产生的具体数值
 #include "InputActionValue.h"
+#include "WorldPartition/DataLayer/DataLayerInstance.h"
 
 #include "TopCharacter.generated.h"
 
@@ -34,6 +35,13 @@ protected:
 	virtual void BeginPlay() override;
 
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	// 【响应式架构】：监听 physical/solid assets 数据层状态改变的回调函数
+	UFUNCTION()
+	void OnDataLayerStateChanged(const UDataLayerInstance* DataLayer, EDataLayerRuntimeState State);
+
+	// 自我清理的执行逻辑
+	void ExecuteSelfSanitization();
 
 
 	// ==============================================================================

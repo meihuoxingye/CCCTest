@@ -32,6 +32,9 @@
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
 
+// 【修复 UE5.8】：替换为 Manager，DataLayer 状态改变委托已被移至此处
+#include "WorldPartition/DataLayer/DataLayerManager.h"
+
 
 // Sets default values
 ATopCharacter::ATopCharacter()
@@ -114,6 +117,15 @@ void ATopCharacter::BeginPlay()
 
 void ATopCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	// 【修复 UE5.8】：从管理器 (Manager) 注销警报，防止引擎在 GC 前给野指针发消息
+	if (UWorld* World = GetWorld())
+	{
+		if (UDataLayerManager* DLManager = UDataLayerManager::GetDataLayerManager(World))
+		{
+			DLManager->OnDataLayerInstanceRuntimeStateChanged.RemoveDynamic(this, &ATopCharacter::OnDataLayerStateChanged);
+		}
+	}
+
 	// 使用局部的 const 原始指针来接取配置资产（推荐的最佳实践）
 	// 这样可以确保在当前的 BeginPlay 逻辑里，没有任何人能意外修改 Config 内部的数值
 	const UCharacterAttributeDataAsset* Config = AttributeConfig.Get();
@@ -131,6 +143,67 @@ void ATopCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 
 	Super::EndPlay(EndPlayReason);
+}
+
+void ATopCharacter::OnDataLayerStateChanged(const UDataLayerInstance* DataLayer, EDataLayerRuntimeState State)
+{
+	// 【终极加固】：如果对象正在销毁或世界正在关闭，拒绝响应
+	if (!IsValid(this) || !GetWorld() || GetWorld()->bIsTearingDown)
+	{
+		return;
+	}
+
+	if (!DataLayer || State != EDataLayerRuntimeState::Unloaded)
+	{
+		return;
+	}
+
+	// 自我裁决：检查崩塌的数据层是否在自身的依赖列表中
+	bool bIsMyLayerCollapsing = false;
+	const UDataLayerAsset* CollapsingAsset = DataLayer->GetAsset();
+
+	for (const UDataLayerAsset* MyAsset : GetDataLayerAssets())
+	{
+		if (MyAsset == CollapsingAsset)
+		{
+			bIsMyLayerCollapsing = true;
+			break;
+		}
+	}
+
+	if (bIsMyLayerCollapsing)
+	{
+		ExecuteSelfSanitization();
+	}
+}
+
+void ATopCharacter::ExecuteSelfSanitization()
+{
+	UE_LOG(LogTemp, Warning, TEXT(">>> [响应式自治] 角色 %s 侦测到所在 physical/solid assets 数据层即将卸载，开始自我净化！"), *GetName());
+
+	// 从总线名册中自首注销
+	if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(GetWorld()->GetAuthGameMode()))
+	{
+		GM->FriendlyRoster.Remove(this);
+	}
+
+	// 只有在输入组件有效时才执行阻断
+	if (InputComponent)
+	{
+		if (UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(InputComponent))
+		{
+			EIC->ClearActionBindings();
+		}
+	}
+
+	// 执行“完美软禁”，保留组件结构但封死一切接收路径
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		PC->FlushPressedKeys();
+		PC->DisableInput(PC);
+		PC->SetIgnoreMoveInput(true);
+		PC->SetIgnoreLookInput(true);
+	}
 }
 
 #pragma endregion
