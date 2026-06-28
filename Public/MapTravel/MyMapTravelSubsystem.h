@@ -53,8 +53,9 @@ public:
 	// ==============================================================================
 public:
 
+	// CustomLoadingUI 为空时使用项目设置的默认 UI，传入时则使用传入的定制 UI
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
-	void ExecuteMapTravel(FName TargetLevelName);
+	void ExecuteMapTravel(FName TargetLevelName, TSoftClassPtr<class UUserWidget> CustomLoadingUI = nullptr);
 
 
 	// ==============================================================================

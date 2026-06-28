@@ -28,6 +28,9 @@
 #include "EnhancedInputComponent.h"
 
 #include "GameFramework/PlayerState.h" // 必须添加这一行
+#include "Blueprint/UserWidget.h"
+
+#include "MapTravel/MyTravelSessionSubsystem.h"
 
 
 // ==============================================================================
@@ -71,7 +74,7 @@ void UMyMapTravelSubsystem::Deinitialize()
 // ==============================================================================
 #pragma region
 
-void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
+void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPtr<class UUserWidget> CustomLoadingUI)
 {
 	if (bIsTraveling)
 	{
@@ -96,10 +99,6 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 
 		FSlateApplication::Get().ClearKeyboardFocus(EFocusCause::Cleared);
 		FSlateApplication::Get().ReleaseAllPointerCapture();
-
-		// 【核心修复 2】：删除了 GEngine->GameViewport->RemoveAllViewportWidgets();
-		// 理由：你是 CommonUI 用户。暴力撕掉 UI 会让 ActionRouter 底层访问 0x30 空指针。
-		// 在 ServerTravel 时，UE5 底层会自动、安全地析构所有旧地图的 UI。
 	}
 
 	// 2. 逻辑隔离取代物理拆除 (Isolation vs. Destruction)
@@ -126,9 +125,6 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 			PC->SetIgnoreMoveInput(true);
 			PC->SetIgnoreLookInput(true);
 
-			// 【核心修复 3】：删除了 FInputModeUIOnly 和 PC->SetInputMode();
-			// 理由：绝不在切换地图/销毁前夕更改 InputMode，否则立刻触发 CommonUI 夺权并导致空指针崩溃！
-
 			if (UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(PC->InputComponent))
 			{
 				EIC->ClearActionBindings();
@@ -148,18 +144,12 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 
 			// ==============================================================================
 			// 【终极防线：物理偷渡持久关卡 (Standalone 0x30 闪退救星)】
-			// 如果在独立进程中，引擎底层依然犯病把控制器误判进了流送层，
-			// 我们在 ServerTravel 装车前的最后一瞬间，使用 Rename 强行修改其 Outer，
-			// 把控制器“物理偷渡”回当前世界的持久关卡，强行通过无缝传送的安全审查！
 			// ==============================================================================
-			// 1. 偷渡玩家控制器 (你已经加了，完美生效)
 			if (PC->GetLevel() != World->PersistentLevel)
 			{
 				PC->Rename(nullptr, World->PersistentLevel);
 			}
 
-			// 2. 【核心补充】：一并偷渡伴生的 PlayerState！
-			// PlayerState 是无缝传送中必带的资产，如果不拉回持久关卡，它依然会被销毁并引发 0x30！
 			if (PC->PlayerState && PC->PlayerState->GetLevel() != World->PersistentLevel)
 			{
 				PC->PlayerState->Rename(nullptr, World->PersistentLevel);
@@ -167,14 +157,32 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 		}
 	}
 
-	if (IsMoviePlayerEnabled())
+	// ==============================================================================
+	// 把触发器传进来的 UI 存入跨关卡的 Session 中 (不论是有效类还是 nullptr)
+	// ==============================================================================
+	if (UGameInstance* GI = World->GetGameInstance())
 	{
-		FLoadingScreenAttributes LoadingScreen;
-		LoadingScreen.bAutoCompleteWhenLoadingCompletes = true;
-		LoadingScreen.bWaitForManualStop = false;
-		LoadingScreen.bAllowEngineTick = false;
-		LoadingScreen.WidgetLoadingScreen = FLoadingScreenAttributes::NewTestLoadingScreenWidget();
-		GetMoviePlayer()->SetupLoadingScreen(LoadingScreen);
+		if (UMyTravelSessionSubsystem* TravelSession = GI->GetSubsystem<UMyTravelSessionSubsystem>())
+		{
+			TravelSession->PendingLoadingWidgetClass = CustomLoadingUI;
+		}
+	}
+
+	// ==============================================================================
+	// 【第一棒视觉兜底】：只有在明确传入了 UI 时才遮盖屏幕
+	// ==============================================================================
+	if (!CustomLoadingUI.IsNull())
+	{
+		if (UClass* LoadedWidgetClass = CustomLoadingUI.LoadSynchronous())
+		{
+			if (APlayerController* PC = World->GetFirstPlayerController())
+			{
+				if (UUserWidget* PreLoadingUI = CreateWidget<UUserWidget>(PC, LoadedWidgetClass))
+				{
+					PreLoadingUI->AddToViewport(9999);
+				}
+			}
+		}
 	}
 
 	World->ServerTravel(TargetLevelName.ToString());

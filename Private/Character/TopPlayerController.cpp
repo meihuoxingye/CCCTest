@@ -22,6 +22,8 @@
 // 【新增：屏幕文本输出所需的全局引擎头文件】
 #include "Engine/Engine.h"
 
+#include "Engine/GameViewportClient.h"
+
 ATopPlayerController::ATopPlayerController()
 {
 	bReplicates = false;
@@ -131,6 +133,32 @@ void ATopPlayerController::OnPossess(APawn* InPawn)
 	// 缓存角色
 	CachedMyCharacter = Cast<ATopCharacter>(InPawn);
 	if (!CachedMyCharacter) return;
+
+	// ==============================================================================
+	// 【核心修复：无缝传送后的“解封”与“焦点夺回”】
+	// ==============================================================================
+	if (IsLocalPlayerController())
+	{
+		// 1. 解除地图流转前制造的“全局视口输入黑洞”
+		if (GEngine && GEngine->GameViewport)
+		{
+			GEngine->GameViewport->SetIgnoreInput(false);
+		}
+
+		// 2. 解除控制器的软禁状态
+		EnableInput(this);
+		SetIgnoreMoveInput(false);
+		SetIgnoreLookInput(false);
+
+		// 3. 强行夺回操作系统的输入焦点（完美解决“必须点一下鼠标”的根本原因）
+		FSlateApplication::Get().SetAllUserFocusToGameViewport();
+
+		// 4. 重新应用一次输入模式，因为 BeginPlay 不会在无缝传送后再次执行！
+		FInputModeGameAndUI InputModeData;
+		InputModeData.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		InputModeData.SetHideCursorDuringCapture(false);
+		SetInputMode(InputModeData);
+	}
 
 	// 控制器拥有了新肉体后，主动通过子系统总线向全宇宙广播
 	if (UCharacterSwitchSubsystem* SwitchSub = GetWorld()->GetSubsystem<UCharacterSwitchSubsystem>())

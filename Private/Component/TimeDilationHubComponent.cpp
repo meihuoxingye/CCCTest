@@ -29,10 +29,13 @@ void UTimeDilationHubComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	// 安全检查：检查我们在蓝图里配置的 MPC（全局材质参数集合）资产是否有效
 	if (GlobalUIMPC.Get())
 	{
+		// 【优化】：使用 static const，确保哈希查表在整个游戏运行期间只执行一次，避免 Tick 性能损耗
+		static const FName GameTimeParamName(TEXT("GlobalGameTime"));
+
 		UKismetMaterialLibrary::SetScalarParameterValue(
 			World,
 			GlobalUIMPC.Get(),
-			FName("GlobalGameTime"),
+			GameTimeParamName, // 使用缓存的静态 FName
 			World->GetTimeSeconds()
 		);
 	}
