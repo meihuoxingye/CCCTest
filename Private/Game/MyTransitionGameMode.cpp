@@ -1,7 +1,9 @@
 #include "Game/MyTransitionGameMode.h" 
 #include "Kismet/GameplayStatics.h"
-#include "MapTravel/MyTravelSessionSubsystem.h" // 【新增】：引入跨图会话桥梁
-#include "Engine/GameInstance.h" // 【新增】：引入 GameInstance 的完整定义
+#include "MapTravel/MyTravelSessionSubsystem.h" 
+#include "Engine/GameInstance.h" 
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 
 // ==============================================================================
 // 构造与初始化 (Construction & Initialization)
@@ -14,7 +16,6 @@ AMyTransitionGameMode::AMyTransitionGameMode()
 	PrimaryActorTick.bCanEverTick = false;
 
 	// 【核心配置】：强制玩家以“观察者(Spectator)”身份进入！
-	// 防止引擎在过场世界里傻乎乎地去生成玩家主角的 Pawn，避免模型一闪而过并节省内存
 	bStartPlayersAsSpectators = true;
 }
 
@@ -31,34 +32,34 @@ void AMyTransitionGameMode::BeginPlay()
 
 	UClass* TargetUIClass = nullptr;
 
-	// 1. 【核心改造】：优先去全局桥梁中截获旧世界传过来的“定制版 UI”
+	// 1. 纯粹且唯一的数据源：从全局中继子系统中“消费”触发器传来的定制 UI
 	if (UGameInstance* GI = GetGameInstance())
 	{
 		if (UMyTravelSessionSubsystem* TravelSession = GI->GetSubsystem<UMyTravelSessionSubsystem>())
 		{
-			TargetUIClass = TravelSession->GetValidLoadingClassAndCleanup();
+			TargetUIClass = TravelSession->ConsumeLoadingClass();
 		}
 	}
 
-	// 2. 如果旧世界没有传定制 UI 过来，回退使用过场地图本地配置的 UI
-	if (!TargetUIClass && LoadingWidgetClass)
-	{
-		TargetUIClass = LoadingWidgetClass;
-	}
-
-	// 3. 拉起最终决定的【第二棒绝对主力 UI】（有则拉起，无则纯黑屏静默流送）
+	// 2. 极致的参数驱动：有则拉起，无则纯黑屏静默流送，绝不自作聪明兜底
 	if (TargetUIClass)
 	{
-		APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-		if (PC && PC->IsLocalController())
+		// 【核心优化】：使用遍历器替代 GetPlayerController(0)，确保只在本地客户端拉起 UI，完美支持多玩家环境
+		for (FConstPlayerControllerIterator Iterator = GetWorld()->GetPlayerControllerIterator(); Iterator; ++Iterator)
 		{
-			ActiveLoadingWidget = CreateWidget<UUserWidget>(PC, TargetUIClass);
-			if (ActiveLoadingWidget)
+			if (APlayerController* PC = Iterator->Get())
 			{
-				// 使用 9999 超高层级 (ZOrder)，确保它能盖住过场关卡里的任何 3D 杂质
-				ActiveLoadingWidget->AddToViewport(9999);
+				if (PC->IsLocalController())
+				{
+					ActiveLoadingWidget = CreateWidget<UUserWidget>(PC, TargetUIClass);
+					if (ActiveLoadingWidget)
+					{
+						// 9999 ZOrder 确保盖住任何可能残留在 Viewport 渲染缓冲中的无效内容
+						ActiveLoadingWidget->AddToViewport(9999);
 
-				UE_LOG(LogTemp, Log, TEXT(">>> [过场世界] Loading UI 已部署，正在全速流送目标地图..."));
+						UE_LOG(LogTemp, Log, TEXT(">>> [过场世界] 成功为本地玩家 [%s] 部署动态 Loading UI, 正在全速流送目标地图..."), *PC->GetName());
+					}
+				}
 			}
 		}
 	}

@@ -22,7 +22,9 @@ public:
 	UPROPERTY(Transient)
 	TSoftClassPtr<class UUserWidget> PendingLoadingWidgetClass;
 
-	// 获取有效的 Loading UI 类，并在获取后自动清理暂存状态，彻底消除状态残留
+	/** * 获取并清理挂起的 Loading UI 类
+	 * 注意：此函数会“消费”掉数据，调用后 Pending 类会被置空
+	 */
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
-	UClass* GetValidLoadingClassAndCleanup();
+	UClass* ConsumeLoadingClass();
 };

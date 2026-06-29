@@ -20,10 +20,6 @@ protected:
 	virtual void BeginPlay() override;
 
 protected:
-	// 在编辑器（或蓝图子类）中指定你的 Loading Widget 类 (比如 WBP_LoadingScreen)
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Loading")
-	TSubclassOf<UUserWidget> LoadingWidgetClass;
-
 	// 内部引用：随过场世界一起灰飞烟灭，无需手动销毁
 	UPROPERTY(Transient)
 	UUserWidget* ActiveLoadingWidget;

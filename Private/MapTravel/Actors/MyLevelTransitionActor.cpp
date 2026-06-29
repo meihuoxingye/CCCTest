@@ -8,6 +8,7 @@
 #include "Components/BoxComponent.h"
 // 【新增：屏幕文本输出所需的全局引擎头文件】
 #include "Engine/Engine.h"
+#include "Blueprint/UserWidget.h" // 【新增】：引入 UUserWidget
 
 // ==============================================================================
 // 生命周期与初始化 (Lifecycle & Initialization)
@@ -80,7 +81,8 @@ void AMyLevelTransitionActor::OnOverlapBegin(UPrimitiveComponent* OverlappedComp
 			{
 				if (UMyMapTravelSubsystem* TravelSubsystem = World->GetSubsystem<UMyMapTravelSubsystem>())
 				{
-					TravelSubsystem->ExecuteMapTravel(TargetLevelName);
+					// 【核心修正】：将该传送门配置的专属 UI 喂给大管家！
+					TravelSubsystem->ExecuteMapTravel(TargetLevelName, TransitionSpecificUI);
 				}
 			}
 		}

@@ -35,6 +35,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LevelTravel")
 	FName TargetLevelName;
 
+	// 【新增】：这个特定过渡演出（如进特定区域）对应的专属 UI
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LevelTravel")
+	TSoftClassPtr<class UUserWidget> TransitionSpecificUI;
+
 	// ==============================================================================
 	// 碰撞触发逻辑 (Collision Events)
 	// ==============================================================================
