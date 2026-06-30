@@ -5,23 +5,25 @@
 // ==============================================================================
 #pragma region
 
-UClass* UMyTravelSessionSubsystem::ConsumeLoadingClass()
+UClass* UMyTravelSessionSubsystem::PeekLoadingClass()
 {
-	if (PendingLoadingWidgetClass.IsNull())
-	{
-		return nullptr;
-	}
+	if (PendingLoadingWidgetClass.IsNull()) return nullptr;
 
-	// 1. 尝试从软引用中直接获取已加载的类（极大缓解同步加载引起的掉帧）
 	UClass* LoadedClass = PendingLoadingWidgetClass.Get();
-
-	// 2. 如果资产尚未载入（比如从内存中被剔除了），执行同步加载作为最后保险
 	if (!LoadedClass)
 	{
 		LoadedClass = PendingLoadingWidgetClass.LoadSynchronous();
 	}
 
-	// 3. 执行“消费”逻辑，确保状态不残留，彻底消除状态污染风险
+	return LoadedClass;
+}
+
+UClass* UMyTravelSessionSubsystem::ConsumeLoadingClass()
+{
+	// 内部复用 Peek 逻辑
+	UClass* LoadedClass = PeekLoadingClass();
+
+	// 拿完立刻清空，绝不残留
 	PendingLoadingWidgetClass = nullptr;
 
 	return LoadedClass;

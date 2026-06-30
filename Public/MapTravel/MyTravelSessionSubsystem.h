@@ -18,13 +18,21 @@ class CCC_API UMyTravelSessionSubsystem : public UGameInstanceSubsystem
 	// ==============================================================================
 public:
 
-	// 存放由发起方指定的动态 Loading UI（使用软引用防硬加载卡顿并支持改名重定向）
+	// 存放由发起方指定的动态 Loading UI
 	UPROPERTY(Transient)
 	TSoftClassPtr<class UUserWidget> PendingLoadingWidgetClass;
 
-	/** * 获取并清理挂起的 Loading UI 类
-	 * 注意：此函数会“消费”掉数据，调用后 Pending 类会被置空
-	 */
+	// 【核心】：记录传送发起的绝对时刻
+	double TravelStartTime = 0.0;
+
+	// 【核心】：3A 级标准的最短等待时间 (秒)。你可以随时在这里修改它！
+	float MinimumLoadingTime = 2.0f;
+
+	// 过场地图调用：只看不删，让 UI 数据能继续存活到新地图
+	UFUNCTION(BlueprintCallable, Category = "MapTravel")
+	UClass* PeekLoadingClass();
+
+	// 新地图调用：拿走并彻底销毁记录
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	UClass* ConsumeLoadingClass();
 };

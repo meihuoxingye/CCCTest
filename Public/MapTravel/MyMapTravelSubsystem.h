@@ -47,6 +47,9 @@ public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 
+	// 【新增】：新地图加载完毕后的第一帧钩子
+	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
+
 
 	// ==============================================================================
 	// 核心跳转管线 (Core Travel Pipeline)
@@ -120,4 +123,19 @@ private:
 	FLinearColor StartSunColor;
 
 	void ProcessBiomeLerpTick();
+
+	// ==============================================================================
+	// 目标世界到达与强制等待 (Arrival & Artificial Wait)
+	// ==============================================================================
+private:
+
+	// 到达新地图后的 UI 句柄
+	UPROPERTY()
+	class UUserWidget* ArrivalLoadingWidget = nullptr;
+
+	FTimerHandle ArrivalTimerHandle;
+
+	// 【关键】：必须是 UFUNCTION，否则计时器无法执行！
+	UFUNCTION()
+	void FinishMapTravel();
 };

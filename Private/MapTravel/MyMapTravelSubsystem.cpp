@@ -17,6 +17,7 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
 #include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
 
 #include "Engine/LocalPlayer.h"
 #include "EnhancedInputSubsystems.h"
@@ -68,6 +69,7 @@ void UMyMapTravelSubsystem::Deinitialize()
 }
 
 #pragma endregion
+
 
 // ==============================================================================
 // 核心跳转管线 (Core Travel Pipeline)
@@ -165,6 +167,9 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 		if (UMyTravelSessionSubsystem* TravelSession = GI->GetSubsystem<UMyTravelSessionSubsystem>())
 		{
 			TravelSession->PendingLoadingWidgetClass = CustomLoadingUI;
+
+			// 【核心新增】：记录飞机起飞的绝对引擎时间！
+			TravelSession->TravelStartTime = FPlatformTime::Seconds();
 		}
 	}
 
@@ -186,6 +191,90 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 	}
 
 	World->ServerTravel(TargetLevelName.ToString());
+}
+
+#pragma endregion
+
+
+// ==============================================================================
+// 目标世界到达与强制等待 (Arrival & Artificial Wait)
+// ==============================================================================
+#pragma region
+
+void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
+{
+	Super::OnWorldBeginPlay(InWorld);
+
+	UGameInstance* GI = InWorld.GetGameInstance();
+	if (!GI) return;
+
+	UMyTravelSessionSubsystem* TravelSession = GI->GetSubsystem<UMyTravelSessionSubsystem>();
+	if (!TravelSession) return;
+
+	// 1. 尝试从黑匣子拿走 UI（Stage 3 拦截，彻底消费数据）
+	UClass* TargetUIClass = TravelSession->ConsumeLoadingClass();
+	if (TargetUIClass)
+	{
+		if (APlayerController* PC = InWorld.GetFirstPlayerController())
+		{
+			// 2. 双重锁定：禁用输入并强制切换到 UI 模式，彻底消除按键与鼠标穿透
+			PC->DisableInput(PC);
+			FInputModeUIOnly InputMode;
+			PC->SetInputMode(InputMode);
+
+			// 3. 【第三棒拉起】：在新世界继续掩护
+			ArrivalLoadingWidget = CreateWidget<UUserWidget>(PC, TargetUIClass);
+			if (ArrivalLoadingWidget)
+			{
+				ArrivalLoadingWidget->AddToViewport(9999);
+			}
+		}
+
+		// 4. 精准补时：计算从旧世界起飞到现在流逝的真实时间
+		double ElapsedTime = FPlatformTime::Seconds() - TravelSession->TravelStartTime;
+		float RemainingTime = FMath::Max(0.2f, TravelSession->MinimumLoadingTime - static_cast<float>(ElapsedTime));
+
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, RemainingTime, FColor::Yellow, FString::Printf(TEXT(">>> [目标世界] 落地过快！强制补足 %.2f 秒最小等待时间..."), RemainingTime));
+		}
+
+		// 5. 设置解锁倒计时 (此时有了 UFUNCTION，SetTimer 将完美生效)
+		InWorld.GetTimerManager().SetTimer(ArrivalTimerHandle, this, &UMyMapTravelSubsystem::FinishMapTravel, RemainingTime, false);
+	}
+}
+
+void UMyMapTravelSubsystem::FinishMapTravel()
+{
+	// 1. 彻底恢复输入焦点与游戏内输入模式
+	if (UWorld* World = GetWorld())
+	{
+		if (APlayerController* PC = World->GetFirstPlayerController())
+		{
+			PC->EnableInput(PC);
+			FInputModeGameOnly InputMode;
+			PC->SetInputMode(InputMode);
+
+			if (APawn* Pawn = PC->GetPawn())
+			{
+				Pawn->EnableInput(PC);
+			}
+		}
+	}
+
+	// 2. 彻底销毁过场 UI，把视野还给玩家
+	if (ArrivalLoadingWidget)
+	{
+		ArrivalLoadingWidget->RemoveFromParent();
+		ArrivalLoadingWidget = nullptr;
+	}
+
+	bIsTraveling = false;
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT(">>> [目标世界] 过场掩护结束，流送完毕，允许游玩！"));
+	}
 }
 
 #pragma endregion
