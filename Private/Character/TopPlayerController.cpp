@@ -337,10 +337,17 @@ void ATopPlayerController::FlushPressedKeys()
 	UE_LOG(LogTemp, Error, TEXT(">> 该控制器是否已处于 PendingKill (被销毁但未回收): %d"), bIsPendingKill);
 	UE_LOG(LogTemp, Error, TEXT(">> 该控制器的 World 指针是否为空: %d"), CurrentWorld == nullptr);
 
-	// 3. 致命状态拦截报警
-	if (bIsPendingKill || CurrentWorld == nullptr)
+	if (CurrentWorld != nullptr)
 	{
-		UE_LOG(LogTemp, Error, TEXT(">> [致命拦截] 抓到现行！引擎试图让一个已经死亡或失去 World 的 Controller 去执行按键冲刷！"));
+		UE_LOG(LogTemp, Error, TEXT(">> 该物理世界是否已失效: %d"), !IsValid(CurrentWorld));
+		// 【修正为真实的 UE 底层 API】
+		UE_LOG(LogTemp, Error, TEXT(">> 该物理世界是否正在被销毁 (bIsTearingDown): %d"), CurrentWorld->bIsTearingDown);
+	}
+
+	// 3. 致命状态拦截报警 (融入了真实的真空期双重防御)
+	if (bIsPendingKill || CurrentWorld == nullptr || !IsValid(CurrentWorld) || CurrentWorld->bIsTearingDown)
+	{
+		UE_LOG(LogTemp, Error, TEXT(">> [致命拦截] 抓到现行！引擎试图让一个已经死亡、失去 World 或处于切图销毁期的 Controller 去执行按键冲刷！"));
 		UE_LOG(LogTemp, Error, TEXT(">> [致命拦截] 如果不在此处拦截，底层 PlayerInput 必定触发 Line 182 断言崩溃。本次已强行阻断！"));
 
 		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 20.f, FColor::Red, TEXT("已成功拦截一次致命闪退！请查看 Saved/Logs 日志"));

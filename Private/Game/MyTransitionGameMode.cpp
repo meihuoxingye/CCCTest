@@ -30,14 +30,19 @@ void AMyTransitionGameMode::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// 【安全防线】：专用服务器（后台主机）绝对禁止运行任何 UI 渲染逻辑，节省内存防崩溃
+	if (IsNetMode(NM_DedicatedServer)) return;
+
 	UClass* TargetUIClass = nullptr;
 
-	// 1. 纯粹且唯一的数据源：从全局中继子系统中“消费”触发器传来的定制 UI
+	// 1. 纯粹且唯一的数据源：从全局中继子系统中获取 UI
 	if (UGameInstance* GI = GetGameInstance())
 	{
 		if (UMyTravelSessionSubsystem* TravelSession = GI->GetSubsystem<UMyTravelSessionSubsystem>())
 		{
-			TargetUIClass = TravelSession->ConsumeLoadingClass();
+			// 【致命修复】：过场地图只允许“查阅 (Peek)”，绝对不能“消费 (Consume)”！
+			// 必须把数据留给目标新地图，让新地图完成那 2 秒钟的强制掩护！
+			TargetUIClass = TravelSession->PeekLoadingClass();
 		}
 	}
 

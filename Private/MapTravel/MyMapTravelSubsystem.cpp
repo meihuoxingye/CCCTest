@@ -33,6 +33,28 @@
 #include "MapTravel/MyTravelSessionSubsystem.h"
 
 // ==============================================================================
+// 【新增】：内部安全获取真实玩家控制器的工具函数 (防无缝传送假身)
+// ==============================================================================
+namespace
+{
+	APlayerController* GetRealPlayerController(UWorld* World)
+	{
+		if (!World) return nullptr;
+		// 遍历所有控制器，只抓取真正拥有本地玩家 (LocalPlayer) 的“真身”
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			APlayerController* PC = It->Get();
+			if (PC && PC->IsLocalController() && PC->GetLocalPlayer())
+			{
+				return PC;
+			}
+		}
+		return nullptr;
+	}
+}
+
+
+// ==============================================================================
 // 生命周期与初始化 (Lifecycle & Initialization)
 // ==============================================================================
 #pragma region
@@ -159,7 +181,8 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 	{
 		if (UClass* LoadedWidgetClass = CustomLoadingUI.LoadSynchronous())
 		{
-			if (APlayerController* PC = World->GetFirstPlayerController())
+			// 【修改 1】：从 GetFirstPlayerController 换成了 GetRealPlayerController
+			if (APlayerController* PC = GetRealPlayerController(World))
 			{
 				if (UUserWidget* PreLoadingUI = CreateWidget<UUserWidget>(PC, LoadedWidgetClass))
 				{
@@ -199,7 +222,8 @@ void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	UClass* TargetUIClass = TravelSession->ConsumeLoadingClass();
 	if (TargetUIClass)
 	{
-		if (APlayerController* PC = InWorld.GetFirstPlayerController())
+		// 【修改 2】：从 GetFirstPlayerController 换成了 GetRealPlayerController
+		if (APlayerController* PC = GetRealPlayerController(&InWorld))
 		{
 			PC->DisableInput(PC);
 
@@ -237,7 +261,8 @@ void UMyMapTravelSubsystem::FinishMapTravel()
 
 	if (UWorld* World = GetWorld())
 	{
-		if (APlayerController* PC = World->GetFirstPlayerController())
+		// 【修改 3】：从 GetFirstPlayerController 换成了 GetRealPlayerController
+		if (APlayerController* PC = GetRealPlayerController(World))
 		{
 			PC->EnableInput(PC);
 
@@ -281,7 +306,8 @@ void UMyMapTravelSubsystem::ExecuteZoneTravelWithWait(UDataLayerAsset* TargetZon
 		return;
 	}
 
-	if (APlayerController* PC = World->GetFirstPlayerController())
+	// 【修改 4】：从 GetFirstPlayerController 换成了 GetRealPlayerController
+	if (APlayerController* PC = GetRealPlayerController(World))
 	{
 		PC->DisableInput(PC);
 		FInputModeUIOnly InputMode;
@@ -321,7 +347,8 @@ void UMyMapTravelSubsystem::FinishZoneTravel()
 
 	if (UWorld* World = GetWorld())
 	{
-		if (APlayerController* PC = World->GetFirstPlayerController())
+		// 【修改 5】：从 GetFirstPlayerController 换成了 GetRealPlayerController
+		if (APlayerController* PC = GetRealPlayerController(World))
 		{
 			PC->EnableInput(PC);
 

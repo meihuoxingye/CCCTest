@@ -24,6 +24,9 @@ class CCC_API AMyZoneTriggerActor : public AActor
 public:
 	AMyZoneTriggerActor();
 
+protected:
+	virtual void BeginPlay() override;
+
 	// ==============================================================================
 	// 组件与属性 (Components & Properties)
 	// ==============================================================================
@@ -44,6 +47,27 @@ protected:
 	// 大于 0：锁死输入，拉起黑屏 UI 进行掩护等待（同一地图不同关卡）。
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MapTravel", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float WaitTime = 0.0f;
+
+	// 静默流送时的防抖冷却时间 (秒)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MapTravel", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float TriggerCooldown = 1.0f;
+
+	// ==============================================================================
+	// 内部防抖状态锁 (Internal Debounce State)
+	// ==============================================================================
+private:
+	// 用于静默刷新的循环防抖
+	UPROPERTY()
+	bool bIsOnCooldown = false;
+
+	// 用于同地图硬切换的绝对死锁 (触发一次即失效)
+	UPROPERTY()
+	bool bHasTriggeredHardTravel = false;
+
+	FTimerHandle CooldownTimerHandle;
+
+	UFUNCTION()
+	void ResetTriggerCooldown();
 
 	// ==============================================================================
 	// 碰撞事件 (Collision Events)

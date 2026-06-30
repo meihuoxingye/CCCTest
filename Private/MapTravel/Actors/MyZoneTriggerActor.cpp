@@ -7,6 +7,7 @@
 #include "GameFramework/Pawn.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "TimerManager.h" // 必须包含以支持定时器
 #include "Blueprint/UserWidget.h" // 必须包含以支持 UI 软指针
 
 // ==============================================================================
@@ -28,6 +29,32 @@ AMyZoneTriggerActor::AMyZoneTriggerActor()
 
 	TargetZone = nullptr;
 	WaitTime = 0.0f;
+	TriggerCooldown = 1.0f;
+	bIsOnCooldown = false;
+	bHasTriggeredHardTravel = false;
+}
+
+void AMyZoneTriggerActor::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// 【预热防线】：只有在开启了硬切换 (WaitTime > 0) 时，才提前加载 UI 进内存
+	if (WaitTime > 0.0f && !TransitionSpecificUI.IsNull())
+	{
+		TransitionSpecificUI.LoadSynchronous();
+	}
+}
+
+#pragma endregion
+
+// ==============================================================================
+// 内部防抖状态锁 (Internal Debounce State)
+// ==============================================================================
+#pragma region
+
+void AMyZoneTriggerActor::ResetTriggerCooldown()
+{
+	bIsOnCooldown = false;
 }
 
 #pragma endregion
@@ -39,7 +66,8 @@ AMyZoneTriggerActor::AMyZoneTriggerActor()
 
 void AMyZoneTriggerActor::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
-	if (!OtherActor) return;
+	// 【物理门控】：过滤无效实体、冷却期、以及已触发的硬切换
+	if (bHasTriggeredHardTravel || bIsOnCooldown || !OtherActor) return;
 
 	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow, FString::Printf(TEXT("[物理雷达] 检测到 %s 撞击了雷达边缘！"), *OtherActor->GetName()));
 
@@ -50,7 +78,8 @@ void AMyZoneTriggerActor::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AA
 	}
 
 	APawn* OverlappingPawn = Cast<APawn>(OtherActor);
-	if (OverlappingPawn && OverlappingPawn->IsPlayerControlled())
+	// 【本地网络防御】：只有当前客户端控制的角色撞线才算数！
+	if (OverlappingPawn && OverlappingPawn->IsPlayerControlled() && OverlappingPawn->IsLocallyControlled())
 	{
 		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, FString::Printf(TEXT("[跃迁雷达触发] 玩家已撞线！正在命令总管预热区域: %s"), *TargetZone->GetName()));
 
@@ -62,11 +91,14 @@ void AMyZoneTriggerActor::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AA
 				if (WaitTime > 0.0f)
 				{
 					// 需求 2：同一地图不同关卡 -> 需要拉黑屏、锁按键、强制等待！
+					bHasTriggeredHardTravel = true; // 钉死状态，一生只进一次
 					TravelSubsystem->ExecuteZoneTravelWithWait(TargetZone, TransitionSpecificUI, WaitTime);
 				}
 				else
 				{
 					// 需求 1：同一关卡不同区域 -> 瞬间静默加载
+					bIsOnCooldown = true; // 启动防抖冷却，屏蔽后续几百毫秒内的物理摩擦重入
+					World->GetTimerManager().SetTimer(CooldownTimerHandle, this, &AMyZoneTriggerActor::ResetTriggerCooldown, TriggerCooldown, false);
 					TravelSubsystem->RefreshSlidingWindow(TargetZone);
 				}
 			}

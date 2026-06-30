@@ -23,6 +23,9 @@ class CCC_API AMyLevelTransitionActor : public AActor
 public:
 	AMyLevelTransitionActor();
 
+protected:
+	virtual void BeginPlay() override;
+
 	// ==============================================================================
 	// 组件与属性 (Components & Properties)
 	// ==============================================================================
@@ -42,6 +45,14 @@ protected:
 	// 【新增】：该传送门专属的人工最小黑屏/UI等待时间 (秒)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LevelTravel", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float MinimumLoadingTime = 1.5f;
+
+	// ==============================================================================
+	// 内部状态锁 (Internal State Locks)
+	// ==============================================================================
+private:
+	// 【核心防御】：物理门控，防止单帧多次重入
+	UPROPERTY()
+	bool bHasTriggered = false;
 
 	// ==============================================================================
 	// 碰撞触发逻辑 (Collision Events)
