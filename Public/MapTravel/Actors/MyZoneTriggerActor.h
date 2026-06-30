@@ -35,6 +35,16 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MapTravel")
 	TObjectPtr<UDataLayerAsset> TargetZone;
 
+	// 【你要求的过场配置】：区域专属过渡 UI
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MapTravel")
+	TSoftClassPtr<class UUserWidget> TransitionSpecificUI;
+
+	// 【你要求的时间等待】：强制等待时间 (秒)。
+	// 设为 0：静默无缝流送（同一关卡不同区域）。
+	// 大于 0：锁死输入，拉起黑屏 UI 进行掩护等待（同一地图不同关卡）。
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MapTravel", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float WaitTime = 0.0f;
+
 	// ==============================================================================
 	// 碰撞事件 (Collision Events)
 	// ==============================================================================

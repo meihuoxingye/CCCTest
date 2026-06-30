@@ -21,18 +21,16 @@
 
 #include "Engine/LocalPlayer.h"
 #include "EnhancedInputSubsystems.h"
-#include "Framework/Application/SlateApplication.h"
+#include "Framework/Application/SlateApplication.h" // 解决吞噬点击的核心组件
 #include "Engine/GameViewportClient.h"
 
 #include "Game/MyGameModeBase.h"
 #include "Character/TopCharacter.h"
 #include "EnhancedInputComponent.h"
 
-#include "GameFramework/PlayerState.h" // 必须添加这一行
+#include "GameFramework/PlayerState.h"
 #include "Blueprint/UserWidget.h"
-
 #include "MapTravel/MyTravelSessionSubsystem.h"
-
 
 // ==============================================================================
 // 生命周期与初始化 (Lifecycle & Initialization)
@@ -76,34 +74,29 @@ void UMyMapTravelSubsystem::Deinitialize()
 // ==============================================================================
 #pragma region
 
-void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPtr<class UUserWidget> CustomLoadingUI)
+void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPtr<class UUserWidget> CustomLoadingUI, float MinLoadingTime)
 {
-	if (bIsTraveling)
-	{
-		return;
-	}
+	if (bIsTraveling) return;
 
-	// 【核心修复 1】：立刻上锁！
-	// Standalone模式下物理步长极易导致同一帧多次碰撞重叠，必须在第一行就封死重入！
+	// 立刻上锁！
 	bIsTraveling = true;
 
 	UWorld* World = GetWorld();
 	if (!IsValid(World) || TargetLevelName.IsNone())
 	{
-		bIsTraveling = false; // 如果跳转条件不满足，记得解锁
+		bIsTraveling = false;
 		return;
 	}
 
-	// 1. 制造引擎级输入黑洞 (Engine Viewport Isolation)
+	// 1. 制造引擎级输入黑洞
 	if (GEngine && GEngine->GameViewport)
 	{
 		GEngine->GameViewport->SetIgnoreInput(true);
-
 		FSlateApplication::Get().ClearKeyboardFocus(EFocusCause::Cleared);
 		FSlateApplication::Get().ReleaseAllPointerCapture();
 	}
 
-	// 2. 逻辑隔离取代物理拆除 (Isolation vs. Destruction)
+	// 2. 逻辑隔离取代物理拆除
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
 		if (APlayerController* PC = It->Get())
@@ -121,7 +114,6 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 				Subsystem->ClearAllMappings();
 			}
 
-			// 合法冲刷后，彻底软禁控制器
 			PC->FlushPressedKeys();
 			PC->DisableInput(PC);
 			PC->SetIgnoreMoveInput(true);
@@ -140,18 +132,14 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 				{
 					PawnEIC->ClearActionBindings();
 				}
-
 				PC->UnPossess();
 			}
 
-			// ==============================================================================
-			// 【终极防线：物理偷渡持久关卡 (Standalone 0x30 闪退救星)】
-			// ==============================================================================
+			// 【终极防线：物理偷渡持久关卡 (0x30 闪退救星)】
 			if (PC->GetLevel() != World->PersistentLevel)
 			{
 				PC->Rename(nullptr, World->PersistentLevel);
 			}
-
 			if (PC->PlayerState && PC->PlayerState->GetLevel() != World->PersistentLevel)
 			{
 				PC->PlayerState->Rename(nullptr, World->PersistentLevel);
@@ -160,7 +148,7 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 	}
 
 	// ==============================================================================
-	// 把触发器传进来的 UI 存入跨关卡的 Session 中 (不论是有效类还是 nullptr)
+	// 将数据存入跨关卡的 Session 中
 	// ==============================================================================
 	if (UGameInstance* GI = World->GetGameInstance())
 	{
@@ -168,14 +156,14 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 		{
 			TravelSession->PendingLoadingWidgetClass = CustomLoadingUI;
 
-			// 【核心新增】：记录飞机起飞的绝对引擎时间！
+			// 【核心修复】：记录目标地图名、设定的等待时间，以及起飞时间！
+			TravelSession->TargetMapName = TargetLevelName;
+			TravelSession->MinimumLoadingTime = MinLoadingTime;
 			TravelSession->TravelStartTime = FPlatformTime::Seconds();
 		}
 	}
 
-	// ==============================================================================
-	// 【第一棒视觉兜底】：只有在明确传入了 UI 时才遮盖屏幕
-	// ==============================================================================
+	// 【第一棒视觉兜底】
 	if (!CustomLoadingUI.IsNull())
 	{
 		if (UClass* LoadedWidgetClass = CustomLoadingUI.LoadSynchronous())
@@ -211,18 +199,29 @@ void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	UMyTravelSessionSubsystem* TravelSession = GI->GetSubsystem<UMyTravelSessionSubsystem>();
 	if (!TravelSession) return;
 
-	// 1. 尝试从黑匣子拿走 UI（Stage 3 拦截，彻底消费数据）
+	// 【修复：根除抢跑Bug】
+	// 只在玩家真正抵达最终的“目标地图”时才执行拦截，忽略过渡地图
+	FString CurrentMapName = InWorld.GetMapName();
+	if (TravelSession->TargetMapName.IsNone() || !CurrentMapName.Contains(TravelSession->TargetMapName.ToString()))
+	{
+		return;
+	}
+
+	// 此时绝对已经身处新地图
 	UClass* TargetUIClass = TravelSession->ConsumeLoadingClass();
 	if (TargetUIClass)
 	{
 		if (APlayerController* PC = InWorld.GetFirstPlayerController())
 		{
-			// 2. 双重锁定：禁用输入并强制切换到 UI 模式，彻底消除按键与鼠标穿透
 			PC->DisableInput(PC);
+
+			// 【修复：解除鼠标窗口锁死Bug】
+			// 使用UIOnly模式遮蔽操作，但明确允许鼠标越界 (DoNotLock)
 			FInputModeUIOnly InputMode;
+			InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 			PC->SetInputMode(InputMode);
 
-			// 3. 【第三棒拉起】：在新世界继续掩护
+			// 【第三棒拉起】
 			ArrivalLoadingWidget = CreateWidget<UUserWidget>(PC, TargetUIClass);
 			if (ArrivalLoadingWidget)
 			{
@@ -230,50 +229,57 @@ void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 			}
 		}
 
-		// 4. 精准补时：计算从旧世界起飞到现在流逝的真实时间
+		// 精准补时：此时的 elapsedTime 代表真实的黑屏流送 + IO加载耗时
 		double ElapsedTime = FPlatformTime::Seconds() - TravelSession->TravelStartTime;
-		float RemainingTime = FMath::Max(0.2f, TravelSession->MinimumLoadingTime - static_cast<float>(ElapsedTime));
+		float RemainingTime = FMath::Max(0.1f, TravelSession->MinimumLoadingTime - static_cast<float>(ElapsedTime));
 
 		if (GEngine)
 		{
-			GEngine->AddOnScreenDebugMessage(-1, RemainingTime, FColor::Yellow, FString::Printf(TEXT(">>> [目标世界] 落地过快！强制补足 %.2f 秒最小等待时间..."), RemainingTime));
+			GEngine->AddOnScreenDebugMessage(-1, RemainingTime, FColor::Yellow, FString::Printf(TEXT(">>> [目标世界] 真实加载耗时: %.2f秒，补足等待: %.2f秒..."), ElapsedTime, RemainingTime));
 		}
 
-		// 5. 设置解锁倒计时 (此时有了 UFUNCTION，SetTimer 将完美生效)
 		InWorld.GetTimerManager().SetTimer(ArrivalTimerHandle, this, &UMyMapTravelSubsystem::FinishMapTravel, RemainingTime, false);
 	}
 }
 
 void UMyMapTravelSubsystem::FinishMapTravel()
 {
-	// 1. 彻底恢复输入焦点与游戏内输入模式
-	if (UWorld* World = GetWorld())
-	{
-		if (APlayerController* PC = World->GetFirstPlayerController())
-		{
-			PC->EnableInput(PC);
-			FInputModeGameOnly InputMode;
-			PC->SetInputMode(InputMode);
-
-			if (APawn* Pawn = PC->GetPawn())
-			{
-				Pawn->EnableInput(PC);
-			}
-		}
-	}
-
-	// 2. 彻底销毁过场 UI，把视野还给玩家
+	// 1. 彻底销毁过场 UI，把视野还给玩家
 	if (ArrivalLoadingWidget)
 	{
 		ArrivalLoadingWidget->RemoveFromParent();
 		ArrivalLoadingWidget = nullptr;
 	}
 
+	// 2. 恢复输入焦点与游戏模式
+	if (UWorld* World = GetWorld())
+	{
+		if (APlayerController* PC = World->GetFirstPlayerController())
+		{
+			PC->EnableInput(PC);
+
+			// 【完美修正】：使用 GameAndUI 替代 GameOnly，并显式解除鼠标锁死！
+			FInputModeGameAndUI InputMode;
+			InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+			InputMode.SetHideCursorDuringCapture(false); // 防止点击时鼠标突然隐藏
+			PC->SetInputMode(InputMode);
+
+			if (APawn* Pawn = PC->GetPawn())
+			{
+				Pawn->EnableInput(PC);
+			}
+
+			// 【修复：根除双击开枪的焦点丢失Bug】
+			// UI销毁后，强制将 Slate 焦点踹回给 3D 游戏视口
+			FSlateApplication::Get().SetAllUserFocusToGameViewport();
+		}
+	}
+
 	bIsTraveling = false;
 
 	if (GEngine)
 	{
-		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT(">>> [目标世界] 过场掩护结束，流送完毕，允许游玩！"));
+		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT(">>> [目标世界] 过场掩护结束，焦点已归还，允许游玩！"));
 	}
 }
 
@@ -310,7 +316,6 @@ void UMyMapTravelSubsystem::RefreshSlidingWindow(UDataLayerAsset* TriggeredLayer
 
 	if (CurrentIdx == INDEX_NONE) return;
 
-	// 极简状态机调度：不再进行死循环名册校验，交由底层事件总线完成
 	for (int32 i = 0; i < ZoneSequence.Num(); ++i)
 	{
 		const FZoneDataLayerPair& Zone = ZoneSequence[i];
@@ -337,8 +342,6 @@ void UMyMapTravelSubsystem::RefreshSlidingWindow(UDataLayerAsset* TriggeredLayer
 	{
 		GEngine->Exec(GetWorld(), TEXT("r.TextureStreaming.ForceUpdate"));
 	}
-
-	DebugPrintDataLayerStates();
 }
 
 void UMyMapTravelSubsystem::PreheatZoneBackground(const UDataLayerAsset* ArtLayerAsset)
@@ -374,11 +377,7 @@ void UMyMapTravelSubsystem::EliminateZone(const UDataLayerAsset* LayerToUnload)
 
 void UMyMapTravelSubsystem::UpdateEnvironment(UMyBiomeConfig* NewBiome, ADirectionalLight* MainLight, AExponentialHeightFog* MainFog)
 {
-	if (!NewBiome || !MainLight || !MainLight->GetComponent())
-	{
-		return;
-	}
-
+	if (!NewBiome || !MainLight || !MainLight->GetComponent()) return;
 	UWorld* World = GetWorld();
 	if (!World) return;
 
@@ -419,11 +418,9 @@ void UMyMapTravelSubsystem::DebugPrintDataLayerStates()
 	{
 		const FZoneDataLayerPair& Zone = ZoneSequence[i];
 
-		// 检查玩法层 (Gameplay)
 		if (Zone.GameplayLayer)
 		{
 			EDataLayerRuntimeState GPState = EDataLayerRuntimeState::Unloaded;
-			// 【正确的 UE 5.8 写法】：先获取 Instance，再查 State
 			if (const UDataLayerInstance* GPInstance = DLManager->GetDataLayerInstance(Zone.GameplayLayer))
 			{
 				GPState = GPInstance->GetRuntimeState();
@@ -436,11 +433,9 @@ void UMyMapTravelSubsystem::DebugPrintDataLayerStates()
 			if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 15.f, MsgColor, FString::Printf(TEXT("Zone %d [玩法 Gameplay]: %s"), i, *StateStr));
 		}
 
-		// 检查美术层 (Art)
 		if (Zone.ArtLayer)
 		{
 			EDataLayerRuntimeState ArtState = EDataLayerRuntimeState::Unloaded;
-			// 【正确的 UE 5.8 写法】：先获取 Instance，再查 State
 			if (const UDataLayerInstance* ArtInstance = DLManager->GetDataLayerInstance(Zone.ArtLayer))
 			{
 				ArtState = ArtInstance->GetRuntimeState();
@@ -485,6 +480,97 @@ void UMyMapTravelSubsystem::ProcessBiomeLerpTick()
 	{
 		if (UWorld* World = GetWorld()) World->GetTimerManager().ClearTimer(BiomeLerpTimer);
 	}
+}
+
+#pragma endregion
+
+
+// ==============================================================================
+// 同地图硬切换管线 (Intra-Map Hard Travel)
+// ==============================================================================
+#pragma region
+
+void UMyMapTravelSubsystem::ExecuteZoneTravelWithWait(UDataLayerAsset* TargetZone, TSoftClassPtr<class UUserWidget> CustomLoadingUI, float WaitTime)
+{
+	if (bIsTraveling || !TargetZone) return;
+	bIsTraveling = true;
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		bIsTraveling = false;
+		return;
+	}
+
+	// 1. 制造引擎级输入黑洞，拔除鼠标限制
+	if (APlayerController* PC = World->GetFirstPlayerController())
+	{
+		PC->DisableInput(PC);
+		FInputModeUIOnly InputMode;
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		PC->SetInputMode(InputMode);
+
+		if (APawn* Pawn = PC->GetPawn())
+		{
+			Pawn->DisableInput(PC);
+		}
+
+		// 2. 拉起过场 UI 强行掩护数据层突变
+		if (!CustomLoadingUI.IsNull())
+		{
+			if (UClass* LoadedClass = CustomLoadingUI.LoadSynchronous())
+			{
+				ZoneLoadingWidget = CreateWidget<UUserWidget>(PC, LoadedClass);
+				if (ZoneLoadingWidget)
+				{
+					ZoneLoadingWidget->AddToViewport(9999);
+				}
+			}
+		}
+	}
+
+	// 3. 后台极其暴力地硬切数据层
+	RefreshSlidingWindow(TargetZone);
+
+	// 4. 强制锁定等待，直到你设置的时间耗尽
+	World->GetTimerManager().SetTimer(ZoneTravelTimerHandle, this, &UMyMapTravelSubsystem::FinishZoneTravel, WaitTime, false);
+}
+
+void UMyMapTravelSubsystem::FinishZoneTravel()
+{
+	// 1. 物理撕碎过场 UI
+	if (ZoneLoadingWidget)
+	{
+		ZoneLoadingWidget->RemoveFromParent();
+		ZoneLoadingWidget = nullptr;
+	}
+
+	// 2. 完美归还控制权与焦点
+	if (UWorld* World = GetWorld())
+	{
+		if (APlayerController* PC = World->GetFirstPlayerController())
+		{
+			PC->EnableInput(PC);
+
+			// 【完美修正】：使用 GameAndUI 替代 GameOnly，并显式解除鼠标锁死！
+			FInputModeGameAndUI InputMode;
+			InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+			InputMode.SetHideCursorDuringCapture(false);
+			PC->SetInputMode(InputMode);
+
+			if (APawn* Pawn = PC->GetPawn())
+			{
+				Pawn->EnableInput(PC);
+			}
+
+			// 【核心修复】：强行一脚把底层的输入焦点踢回给 3D 游戏视口，彻底干掉双击开枪的 Bug
+			FSlateApplication::Get().SetAllUserFocusToGameViewport();
+		}
+	}
+
+	bIsTraveling = false;
+
+	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT(">>> [同地图关卡跃迁] 数据层重构完毕，掩护结束，焦点回归！"));
 }
 
 #pragma endregion

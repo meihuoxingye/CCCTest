@@ -7,6 +7,7 @@
 #include "GameFramework/Pawn.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Blueprint/UserWidget.h" // 必须包含以支持 UI 软指针
 
 // ==============================================================================
 // 生命周期与初始化 (Lifecycle & Initialization)
@@ -20,15 +21,13 @@ AMyZoneTriggerActor::AMyZoneTriggerActor()
 	CollisionComponent = CreateDefaultSubobject<UBoxComponent>(TEXT("CollisionComponent"));
 	RootComponent = CollisionComponent;
 
-	// 纯碰撞体，无需物理模拟
 	CollisionComponent->SetCollisionProfileName(TEXT("Trigger"));
-
-	// 强制开启底层重叠事件生成，确保肉身撞线必定触发
 	CollisionComponent->SetGenerateOverlapEvents(true);
 
 	CollisionComponent->OnComponentBeginOverlap.AddDynamic(this, &AMyZoneTriggerActor::OnOverlapBegin);
 
 	TargetZone = nullptr;
+	WaitTime = 0.0f;
 }
 
 #pragma endregion
@@ -42,10 +41,8 @@ void AMyZoneTriggerActor::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AA
 {
 	if (!OtherActor) return;
 
-	// 【防线 1】：只要有物理实体切过，先亮黄灯！证明物理碰撞是没问题的！
 	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow, FString::Printf(TEXT("[物理雷达] 检测到 %s 撞击了雷达边缘！"), *OtherActor->GetName()));
 
-	// 【防线 2】：拔除静默杀手！如果没填资产，直接大红字报警！
 	if (!TargetZone)
 	{
 		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 10.f, FColor::Red, TEXT("[严重致命] 雷达罢工：TargetZone 为空！你绝对是忘了在编辑器细节面板里给这个雷达填入绿色资产了！"));
@@ -55,14 +52,23 @@ void AMyZoneTriggerActor::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AA
 	APawn* OverlappingPawn = Cast<APawn>(OtherActor);
 	if (OverlappingPawn && OverlappingPawn->IsPlayerControlled())
 	{
-		// 【防线 3】：确认是主角，向管家发信号
 		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, FString::Printf(TEXT("[跃迁雷达触发] 玩家已撞线！正在命令总管预热区域: %s"), *TargetZone->GetName()));
 
 		if (UWorld* World = GetWorld())
 		{
 			if (UMyMapTravelSubsystem* TravelSubsystem = World->GetSubsystem<UMyMapTravelSubsystem>())
 			{
-				TravelSubsystem->RefreshSlidingWindow(TargetZone);
+				// 【完美区分你的两种情况】
+				if (WaitTime > 0.0f)
+				{
+					// 需求 2：同一地图不同关卡 -> 需要拉黑屏、锁按键、强制等待！
+					TravelSubsystem->ExecuteZoneTravelWithWait(TargetZone, TransitionSpecificUI, WaitTime);
+				}
+				else
+				{
+					// 需求 1：同一关卡不同区域 -> 瞬间静默加载
+					TravelSubsystem->RefreshSlidingWindow(TargetZone);
+				}
 			}
 		}
 	}

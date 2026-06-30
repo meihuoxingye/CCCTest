@@ -35,9 +35,13 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LevelTravel")
 	FName TargetLevelName;
 
-	// 【新增】：这个特定过渡演出（如进特定区域）对应的专属 UI
+	// 这个特定过渡演出（如进特定区域）对应的专属 UI
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LevelTravel")
 	TSoftClassPtr<class UUserWidget> TransitionSpecificUI;
+
+	// 【新增】：该传送门专属的人工最小黑屏/UI等待时间 (秒)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LevelTravel", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float MinimumLoadingTime = 2.0f;
 
 	// ==============================================================================
 	// 碰撞触发逻辑 (Collision Events)

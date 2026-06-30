@@ -22,10 +22,14 @@ public:
 	UPROPERTY(Transient)
 	TSoftClassPtr<class UUserWidget> PendingLoadingWidgetClass;
 
-	// 【核心】：记录传送发起的绝对时刻
+	// 【新增】：记录目标地图名，防止过场地图错误拦截！
+	UPROPERTY(Transient)
+	FName TargetMapName;
+
+	// 记录传送发起的绝对时刻
 	double TravelStartTime = 0.0;
 
-	// 【核心】：3A 级标准的最短等待时间 (秒)。你可以随时在这里修改它！
+	// 从传送门传过来的最短等待时间
 	float MinimumLoadingTime = 2.0f;
 
 	// 过场地图调用：只看不删，让 UI 数据能继续存活到新地图

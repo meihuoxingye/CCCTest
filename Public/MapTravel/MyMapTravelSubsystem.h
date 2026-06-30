@@ -47,30 +47,26 @@ public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 
-	// 【新增】：新地图加载完毕后的第一帧钩子
+	// 新地图加载完毕后的第一帧钩子
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
-
 
 	// ==============================================================================
 	// 核心跳转管线 (Core Travel Pipeline)
 	// ==============================================================================
 public:
 
-	// CustomLoadingUI 为空时使用项目设置的默认 UI，传入时则使用传入的定制 UI
+	// 增加等待时间参数
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
-	void ExecuteMapTravel(FName TargetLevelName, TSoftClassPtr<class UUserWidget> CustomLoadingUI = nullptr);
-
+	void ExecuteMapTravel(FName TargetLevelName, TSoftClassPtr<class UUserWidget> CustomLoadingUI = nullptr, float MinLoadingTime = 2.0f);
 
 	// ==============================================================================
 	// 动态滑动窗口与流送管线 (Dynamic Sliding Window & Streaming Pipeline)
 	// ==============================================================================
 public:
 
-	// 注册双轨清单
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void RegisterZoneSequence(const TArray<FZoneDataLayerPair>& InSequence);
 
-	// 传入美术层或玩法层均可，系统会自动定位所在大区
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void RefreshSlidingWindow(UDataLayerAsset* TriggeredLayer);
 
@@ -86,10 +82,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void UpdateEnvironment(UMyBiomeConfig* NewBiome, ADirectionalLight* MainLight, AExponentialHeightFog* MainFog);
 
-	// 【新增】：一键扫描并打印所有数据层的真实内存状态
 	UFUNCTION(BlueprintCallable, Category = "MapTravel|Debug")
 	void DebugPrintDataLayerStates();
-
 
 	// ==============================================================================
 	// 内部状态锁 (Internal State Locks)
@@ -99,13 +93,11 @@ private:
 	UPROPERTY()
 	bool bIsTraveling = false;
 
-	// 区域状态防抖锁，处理玩家在交界处反复横跳的极端边缘情况
 	UPROPERTY()
 	UDataLayerAsset* LastActiveZone = nullptr;
 
 	TWeakObjectPtr<UDataLayerManager> CachedDataLayerManager;
 
-	// 双轨关卡序列
 	UPROPERTY()
 	TArray<FZoneDataLayerPair> ZoneSequence;
 
@@ -135,7 +127,27 @@ private:
 
 	FTimerHandle ArrivalTimerHandle;
 
-	// 【关键】：必须是 UFUNCTION，否则计时器无法执行！
+	// 必须是 UFUNCTION，否则计时器无法执行！
 	UFUNCTION()
 	void FinishMapTravel();
+
+
+	// ==============================================================================
+	// 同地图硬切换管线 (Intra-Map Hard Travel)
+	// ==============================================================================
+public:
+
+	// 带有 UI 与强制等待的数据层切换（用于同地图内进 Boss 房等重度切换）
+	UFUNCTION(BlueprintCallable, Category = "MapTravel")
+	void ExecuteZoneTravelWithWait(UDataLayerAsset* TargetZone, TSoftClassPtr<class UUserWidget> CustomLoadingUI, float WaitTime);
+
+private:
+
+	UPROPERTY()
+	class UUserWidget* ZoneLoadingWidget = nullptr;
+
+	FTimerHandle ZoneTravelTimerHandle;
+
+	UFUNCTION()
+	void FinishZoneTravel();
 };
