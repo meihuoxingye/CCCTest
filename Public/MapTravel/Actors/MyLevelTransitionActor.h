@@ -41,7 +41,7 @@ protected:
 
 	// 【新增】：该传送门专属的人工最小黑屏/UI等待时间 (秒)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LevelTravel", meta = (ClampMin = "0.0", UIMin = "0.0"))
-	float MinimumLoadingTime = 2.0f;
+	float MinimumLoadingTime = 1.5f;
 
 	// ==============================================================================
 	// 碰撞触发逻辑 (Collision Events)

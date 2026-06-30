@@ -21,7 +21,7 @@
 
 #include "Engine/LocalPlayer.h"
 #include "EnhancedInputSubsystems.h"
-#include "Framework/Application/SlateApplication.h" // 解决吞噬点击的核心组件
+#include "Framework/Application/SlateApplication.h" 
 #include "Engine/GameViewportClient.h"
 
 #include "Game/MyGameModeBase.h"
@@ -60,7 +60,8 @@ void UMyMapTravelSubsystem::Deinitialize()
 
 	if (UWorld* World = GetWorld())
 	{
-		World->GetTimerManager().ClearTimer(BiomeLerpTimer);
+		// 【实用修复 1】：一键清理当前管家身上的所有定时器（天气过渡、硬切延迟等），根除由于地图销毁引发的空指针闪退
+		World->GetTimerManager().ClearAllTimersForObject(this);
 	}
 
 	Super::Deinitialize();
@@ -78,7 +79,6 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 {
 	if (bIsTraveling) return;
 
-	// 立刻上锁！
 	bIsTraveling = true;
 
 	UWorld* World = GetWorld();
@@ -88,7 +88,6 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 		return;
 	}
 
-	// 1. 制造引擎级输入黑洞
 	if (GEngine && GEngine->GameViewport)
 	{
 		GEngine->GameViewport->SetIgnoreInput(true);
@@ -96,7 +95,6 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 		FSlateApplication::Get().ReleaseAllPointerCapture();
 	}
 
-	// 2. 逻辑隔离取代物理拆除
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
 		if (APlayerController* PC = It->Get())
@@ -135,7 +133,6 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 				PC->UnPossess();
 			}
 
-			// 【终极防线：物理偷渡持久关卡 (0x30 闪退救星)】
 			if (PC->GetLevel() != World->PersistentLevel)
 			{
 				PC->Rename(nullptr, World->PersistentLevel);
@@ -147,23 +144,17 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 		}
 	}
 
-	// ==============================================================================
-	// 将数据存入跨关卡的 Session 中
-	// ==============================================================================
 	if (UGameInstance* GI = World->GetGameInstance())
 	{
 		if (UMyTravelSessionSubsystem* TravelSession = GI->GetSubsystem<UMyTravelSessionSubsystem>())
 		{
 			TravelSession->PendingLoadingWidgetClass = CustomLoadingUI;
-
-			// 【核心修复】：记录目标地图名、设定的等待时间，以及起飞时间！
 			TravelSession->TargetMapName = TargetLevelName;
 			TravelSession->MinimumLoadingTime = MinLoadingTime;
 			TravelSession->TravelStartTime = FPlatformTime::Seconds();
 		}
 	}
 
-	// 【第一棒视觉兜底】
 	if (!CustomLoadingUI.IsNull())
 	{
 		if (UClass* LoadedWidgetClass = CustomLoadingUI.LoadSynchronous())
@@ -199,15 +190,12 @@ void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	UMyTravelSessionSubsystem* TravelSession = GI->GetSubsystem<UMyTravelSessionSubsystem>();
 	if (!TravelSession) return;
 
-	// 【修复：根除抢跑Bug】
-	// 只在玩家真正抵达最终的“目标地图”时才执行拦截，忽略过渡地图
 	FString CurrentMapName = InWorld.GetMapName();
 	if (TravelSession->TargetMapName.IsNone() || !CurrentMapName.Contains(TravelSession->TargetMapName.ToString()))
 	{
 		return;
 	}
 
-	// 此时绝对已经身处新地图
 	UClass* TargetUIClass = TravelSession->ConsumeLoadingClass();
 	if (TargetUIClass)
 	{
@@ -215,13 +203,10 @@ void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		{
 			PC->DisableInput(PC);
 
-			// 【修复：解除鼠标窗口锁死Bug】
-			// 使用UIOnly模式遮蔽操作，但明确允许鼠标越界 (DoNotLock)
 			FInputModeUIOnly InputMode;
 			InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 			PC->SetInputMode(InputMode);
 
-			// 【第三棒拉起】
 			ArrivalLoadingWidget = CreateWidget<UUserWidget>(PC, TargetUIClass);
 			if (ArrivalLoadingWidget)
 			{
@@ -229,14 +214,8 @@ void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 			}
 		}
 
-		// 精准补时：此时的 elapsedTime 代表真实的黑屏流送 + IO加载耗时
 		double ElapsedTime = FPlatformTime::Seconds() - TravelSession->TravelStartTime;
 		float RemainingTime = FMath::Max(0.1f, TravelSession->MinimumLoadingTime - static_cast<float>(ElapsedTime));
-
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, RemainingTime, FColor::Yellow, FString::Printf(TEXT(">>> [目标世界] 真实加载耗时: %.2f秒，补足等待: %.2f秒..."), ElapsedTime, RemainingTime));
-		}
 
 		InWorld.GetTimerManager().SetTimer(ArrivalTimerHandle, this, &UMyMapTravelSubsystem::FinishMapTravel, RemainingTime, false);
 	}
@@ -244,24 +223,30 @@ void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 void UMyMapTravelSubsystem::FinishMapTravel()
 {
-	// 1. 彻底销毁过场 UI，把视野还给玩家
+	// 【实用修复 2】：彻底解除引擎视口的物理级死锁，否则鼠标在某些全屏模式下会完全失效
+	if (GEngine && GEngine->GameViewport)
+	{
+		GEngine->GameViewport->SetIgnoreInput(false);
+	}
+
 	if (ArrivalLoadingWidget)
 	{
 		ArrivalLoadingWidget->RemoveFromParent();
 		ArrivalLoadingWidget = nullptr;
 	}
 
-	// 2. 恢复输入焦点与游戏模式
 	if (UWorld* World = GetWorld())
 	{
 		if (APlayerController* PC = World->GetFirstPlayerController())
 		{
 			PC->EnableInput(PC);
 
-			// 【完美修正】：使用 GameAndUI 替代 GameOnly，并显式解除鼠标锁死！
+			// 【实用修复 3】：杀掉“吞输入/幽灵点击” Bug。强制清空玩家在黑屏期间狂点的残余按键。
+			PC->FlushPressedKeys();
+
 			FInputModeGameAndUI InputMode;
 			InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-			InputMode.SetHideCursorDuringCapture(false); // 防止点击时鼠标突然隐藏
+			InputMode.SetHideCursorDuringCapture(false);
 			PC->SetInputMode(InputMode);
 
 			if (APawn* Pawn = PC->GetPawn())
@@ -269,18 +254,95 @@ void UMyMapTravelSubsystem::FinishMapTravel()
 				Pawn->EnableInput(PC);
 			}
 
-			// 【修复：根除双击开枪的焦点丢失Bug】
-			// UI销毁后，强制将 Slate 焦点踹回给 3D 游戏视口
 			FSlateApplication::Get().SetAllUserFocusToGameViewport();
 		}
 	}
 
 	bIsTraveling = false;
+}
 
-	if (GEngine)
+#pragma endregion
+
+
+// ==============================================================================
+// 同地图硬切换管线 (Intra-Map Hard Travel)
+// ==============================================================================
+#pragma region
+
+void UMyMapTravelSubsystem::ExecuteZoneTravelWithWait(UDataLayerAsset* TargetZone, TSoftClassPtr<class UUserWidget> CustomLoadingUI, float WaitTime)
+{
+	if (bIsTraveling || !TargetZone) return;
+	bIsTraveling = true;
+
+	UWorld* World = GetWorld();
+	if (!World)
 	{
-		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT(">>> [目标世界] 过场掩护结束，焦点已归还，允许游玩！"));
+		bIsTraveling = false;
+		return;
 	}
+
+	if (APlayerController* PC = World->GetFirstPlayerController())
+	{
+		PC->DisableInput(PC);
+		FInputModeUIOnly InputMode;
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		PC->SetInputMode(InputMode);
+
+		if (APawn* Pawn = PC->GetPawn())
+		{
+			Pawn->DisableInput(PC);
+		}
+
+		if (!CustomLoadingUI.IsNull())
+		{
+			if (UClass* LoadedClass = CustomLoadingUI.LoadSynchronous())
+			{
+				ZoneLoadingWidget = CreateWidget<UUserWidget>(PC, LoadedClass);
+				if (ZoneLoadingWidget)
+				{
+					ZoneLoadingWidget->AddToViewport(9999);
+				}
+			}
+		}
+	}
+
+	RefreshSlidingWindow(TargetZone);
+
+	World->GetTimerManager().SetTimer(ZoneTravelTimerHandle, this, &UMyMapTravelSubsystem::FinishZoneTravel, WaitTime, false);
+}
+
+void UMyMapTravelSubsystem::FinishZoneTravel()
+{
+	if (ZoneLoadingWidget)
+	{
+		ZoneLoadingWidget->RemoveFromParent();
+		ZoneLoadingWidget = nullptr;
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		if (APlayerController* PC = World->GetFirstPlayerController())
+		{
+			PC->EnableInput(PC);
+
+			// 【同上清理残余输入】
+			PC->FlushPressedKeys();
+
+			FInputModeGameAndUI InputMode;
+			InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+			InputMode.SetHideCursorDuringCapture(false);
+			PC->SetInputMode(InputMode);
+
+			if (APawn* Pawn = PC->GetPawn())
+			{
+				Pawn->EnableInput(PC);
+			}
+
+			FSlateApplication::Get().SetAllUserFocusToGameViewport();
+		}
+	}
+
+	bIsTraveling = false;
 }
 
 #pragma endregion
@@ -452,7 +514,8 @@ void UMyMapTravelSubsystem::DebugPrintDataLayerStates()
 
 void UMyMapTravelSubsystem::ProcessBiomeLerpTick()
 {
-	if (!CurrentBiomeTarget || !CachedSunLight.IsValid() || !CachedSunLight->GetComponent())
+	// 增加有效性判断，防止关卡销毁时触发 Tick 导致闪退
+	if (!IsValid(GetWorld()) || !CurrentBiomeTarget || !CachedSunLight.IsValid() || !CachedSunLight->GetComponent())
 	{
 		if (UWorld* World = GetWorld()) World->GetTimerManager().ClearTimer(BiomeLerpTimer);
 		return;
@@ -480,97 +543,6 @@ void UMyMapTravelSubsystem::ProcessBiomeLerpTick()
 	{
 		if (UWorld* World = GetWorld()) World->GetTimerManager().ClearTimer(BiomeLerpTimer);
 	}
-}
-
-#pragma endregion
-
-
-// ==============================================================================
-// 同地图硬切换管线 (Intra-Map Hard Travel)
-// ==============================================================================
-#pragma region
-
-void UMyMapTravelSubsystem::ExecuteZoneTravelWithWait(UDataLayerAsset* TargetZone, TSoftClassPtr<class UUserWidget> CustomLoadingUI, float WaitTime)
-{
-	if (bIsTraveling || !TargetZone) return;
-	bIsTraveling = true;
-
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		bIsTraveling = false;
-		return;
-	}
-
-	// 1. 制造引擎级输入黑洞，拔除鼠标限制
-	if (APlayerController* PC = World->GetFirstPlayerController())
-	{
-		PC->DisableInput(PC);
-		FInputModeUIOnly InputMode;
-		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-		PC->SetInputMode(InputMode);
-
-		if (APawn* Pawn = PC->GetPawn())
-		{
-			Pawn->DisableInput(PC);
-		}
-
-		// 2. 拉起过场 UI 强行掩护数据层突变
-		if (!CustomLoadingUI.IsNull())
-		{
-			if (UClass* LoadedClass = CustomLoadingUI.LoadSynchronous())
-			{
-				ZoneLoadingWidget = CreateWidget<UUserWidget>(PC, LoadedClass);
-				if (ZoneLoadingWidget)
-				{
-					ZoneLoadingWidget->AddToViewport(9999);
-				}
-			}
-		}
-	}
-
-	// 3. 后台极其暴力地硬切数据层
-	RefreshSlidingWindow(TargetZone);
-
-	// 4. 强制锁定等待，直到你设置的时间耗尽
-	World->GetTimerManager().SetTimer(ZoneTravelTimerHandle, this, &UMyMapTravelSubsystem::FinishZoneTravel, WaitTime, false);
-}
-
-void UMyMapTravelSubsystem::FinishZoneTravel()
-{
-	// 1. 物理撕碎过场 UI
-	if (ZoneLoadingWidget)
-	{
-		ZoneLoadingWidget->RemoveFromParent();
-		ZoneLoadingWidget = nullptr;
-	}
-
-	// 2. 完美归还控制权与焦点
-	if (UWorld* World = GetWorld())
-	{
-		if (APlayerController* PC = World->GetFirstPlayerController())
-		{
-			PC->EnableInput(PC);
-
-			// 【完美修正】：使用 GameAndUI 替代 GameOnly，并显式解除鼠标锁死！
-			FInputModeGameAndUI InputMode;
-			InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-			InputMode.SetHideCursorDuringCapture(false);
-			PC->SetInputMode(InputMode);
-
-			if (APawn* Pawn = PC->GetPawn())
-			{
-				Pawn->EnableInput(PC);
-			}
-
-			// 【核心修复】：强行一脚把底层的输入焦点踢回给 3D 游戏视口，彻底干掉双击开枪的 Bug
-			FSlateApplication::Get().SetAllUserFocusToGameViewport();
-		}
-	}
-
-	bIsTraveling = false;
-
-	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT(">>> [同地图关卡跃迁] 数据层重构完毕，掩护结束，焦点回归！"));
 }
 
 #pragma endregion
