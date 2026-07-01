@@ -12,27 +12,22 @@ class UMyBiomeConfig;
 class ADirectionalLight;
 class AExponentialHeightFog;
 
-// ==============================================================================
-// 关卡双轨数据结构 (Dual-Track Zone Structure)
-// ==============================================================================
 USTRUCT(BlueprintType)
 struct FZoneDataLayerPair
 {
 	GENERATED_BODY()
 
 public:
-	// 负责视觉：静态网格体、地形、灯光
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MapTravel")
 	UDataLayerAsset* ArtLayer = nullptr;
 
-	// 负责玩法：敌人生成器、触发器、动态物理物件
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MapTravel")
 	UDataLayerAsset* GameplayLayer = nullptr;
 };
 
 /**
  * 负责 2.5D 横版关卡的无缝流转
- * 统筹 DataLayer 预热，深度集成 LSP 流转与独立加载蒙版
+ * 采用 GameViewport 顶级注入与跨界托管，实现绝对无缝
  */
 UCLASS()
 class CCC_API UMyMapTravelSubsystem : public UWorldSubsystem
@@ -40,30 +35,27 @@ class CCC_API UMyMapTravelSubsystem : public UWorldSubsystem
 	GENERATED_BODY()
 
 	// ==============================================================================
-	// 生命周期与初始化 (Lifecycle & Initialization)
+	// 生命周期与初始化
 	// ==============================================================================
 public:
-
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
-
-	// 新地图加载完毕后的第一帧钩子
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 
 	// ==============================================================================
-	// 核心跳转管线 (Core Travel Pipeline)
+	// 核心跳转管线
 	// ==============================================================================
 public:
-
-	// 增加等待时间参数
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void ExecuteMapTravel(FName TargetLevelName, TSoftClassPtr<class UUserWidget> CustomLoadingUI = nullptr, float MinLoadingTime = 2.0f);
 
+	UFUNCTION(BlueprintCallable, Category = "MapTravel")
+	void ExecuteZoneTravelWithWait(UDataLayerAsset* TargetZone, TSoftClassPtr<class UUserWidget> CustomLoadingUI, float WaitTime);
+
 	// ==============================================================================
-	// 动态滑动窗口与流送管线 (Dynamic Sliding Window & Streaming Pipeline)
+	// 动态滑动窗口与流送管线
 	// ==============================================================================
 public:
-
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void RegisterZoneSequence(const TArray<FZoneDataLayerPair>& InSequence);
 
@@ -86,19 +78,15 @@ public:
 	void DebugPrintDataLayerStates();
 
 	// ==============================================================================
-	// 内部工具函数 (Internal Utilities)
+	// 内部工具函数
 	// ==============================================================================
 private:
-
-	// 内部安全获取真实玩家控制器的工具函数 (防无缝传送假身)
 	APlayerController* GetRealPlayerController(UWorld* World) const;
 
-
 	// ==============================================================================
-	// 内部状态锁 (Internal State Locks)
+	// 内部状态锁与流送资产
 	// ==============================================================================
 private:
-
 	UPROPERTY()
 	bool bIsTraveling = false;
 
@@ -126,36 +114,19 @@ private:
 	void ProcessBiomeLerpTick();
 
 	// ==============================================================================
-	// 目标世界到达与强制等待 (Arrival & Artificial Wait)
+	// 物理视口管理与落地回调
 	// ==============================================================================
 private:
-
-	// 到达新地图后的 UI 句柄
-	UPROPERTY()
-	class UUserWidget* ArrivalLoadingWidget = nullptr;
-
 	FTimerHandle ArrivalTimerHandle;
+	FTimerHandle ZoneTravelTimerHandle;
 
-	// 必须是 UFUNCTION，否则计时器无法执行！
-	UFUNCTION()
-	void FinishMapTravel();
-
-
-	// ==============================================================================
-	// 同地图硬切换管线 (Intra-Map Hard Travel)
-	// ==============================================================================
-public:
-
-	// 带有 UI 与强制等待的数据层切换（用于同地图内进 Boss 房等重度切换）
-	UFUNCTION(BlueprintCallable, Category = "MapTravel")
-	void ExecuteZoneTravelWithWait(UDataLayerAsset* TargetZone, TSoftClassPtr<class UUserWidget> CustomLoadingUI, float WaitTime);
-
-private:
-
+	// 仅用于同地图内的硬切 UI 缓存 (不经历跨界清洗)
 	UPROPERTY()
 	class UUserWidget* ZoneLoadingWidget = nullptr;
+	TSharedPtr<class SWidget> ZoneSlateWidget;
 
-	FTimerHandle ZoneTravelTimerHandle;
+	UFUNCTION()
+	void FinishMapTravel();
 
 	UFUNCTION()
 	void FinishZoneTravel();

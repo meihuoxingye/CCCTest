@@ -7,27 +7,15 @@
 #include "Blueprint/UserWidget.h"
 #include "MyGameInstance.generated.h"
 
-class FMyPreLoadScreen;
-
-/**
- * 全局游戏实例，负责剥离动态 UMG 灵魂并将其跨越生命周期托管
- */
 UCLASS()
 class CCC_API UMyGameInstance : public UGameInstance
 {
 	GENERATED_BODY()
 
-	// ==============================================================================
-	// 引擎生命周期 (Engine Lifecycle)
-	// ==============================================================================
 public:
 	virtual void Init() override;
 	virtual void Shutdown() override;
 
-	// ==============================================================================
-	// 物理层加载遮罩控制 (Physical Loading Screen Control)
-	// ==============================================================================
-public:
 	// 动态接收大管家平移过来的过场 UI 资产
 	UFUNCTION(BlueprintCallable, Category = "LoadingScreen")
 	void ShowGlobalBlackScreen(TSoftClassPtr<UUserWidget> DynamicLoadingUI = nullptr);
@@ -35,12 +23,23 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "LoadingScreen")
 	void HideGlobalBlackScreen();
 
-	// ==============================================================================
-	// 内存生命周期管理 (Internal Memory Management)
-	// ==============================================================================
 private:
+	// 穿防弹衣的 UMG 实体
 	UPROPERTY()
 	UUserWidget* PersistentLoadingWidget = nullptr;
 
-	TSharedPtr<FMyPreLoadScreen> ActivePreLoadScreen;
+	// 被抽离出来，挂在主窗口上的物理 Slate 灵魂
+	TSharedPtr<class SWidget> ActiveLoadingWidget;
+
+
+	// ==============================================================================
+	// [雷达探针]：供外部随时查询 UI 的存活状态
+	// ==============================================================================
+public:
+
+	UFUNCTION(BlueprintCallable, Category = "LoadingScreen|Debug")
+	bool IsLoadingScreenActive() const
+	{
+		return ActiveLoadingWidget.IsValid();
+	}
 };

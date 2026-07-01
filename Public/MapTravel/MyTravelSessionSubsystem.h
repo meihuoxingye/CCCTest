@@ -39,4 +39,15 @@ public:
 	// 新地图调用：拿走并彻底销毁记录
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	UClass* ConsumeLoadingClass();
+
+	// ==============================================================================
+	// 物理视口跨界护盾 (Physical Viewport Shield)
+	// ==============================================================================
+public:
+	// 携带脱壳后的 Slate 灵魂，由 GameInstance 永久庇护
+	TSharedPtr<class SWidget> CrossLevelSafeWidget;
+
+	// 携带 UMG 原体免受 GC
+	UPROPERTY()
+	class UUserWidget* CrossLevelLoadingWidget = nullptr;
 };
