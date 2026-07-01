@@ -32,26 +32,28 @@
 #include "Blueprint/UserWidget.h"
 #include "MapTravel/MyTravelSessionSubsystem.h"
 
+#include "Widgets/SOverlay.h"
+#include "Widgets/Colors/SColorBlock.h"
+
+#include "Game/MyGameInstance.h"
+
+
 // ==============================================================================
-// 【新增】：内部安全获取真实玩家控制器的工具函数 (防无缝传送假身)
+// 内部工具函数 (Internal Utilities)
 // ==============================================================================
-namespace
+#pragma region
+
+APlayerController* UMyMapTravelSubsystem::GetRealPlayerController(UWorld* World) const
 {
-	APlayerController* GetRealPlayerController(UWorld* World)
+	// 放弃不稳定的迭代器，直接向生命周期最长、绝不销毁的 GameInstance 索要本地真身
+	if (World && World->GetGameInstance())
 	{
-		if (!World) return nullptr;
-		// 遍历所有控制器，只抓取真正拥有本地玩家 (LocalPlayer) 的“真身”
-		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-		{
-			APlayerController* PC = It->Get();
-			if (PC && PC->IsLocalController() && PC->GetLocalPlayer())
-			{
-				return PC;
-			}
-		}
-		return nullptr;
+		return World->GetGameInstance()->GetFirstLocalPlayerController();
 	}
+	return nullptr;
 }
+
+#pragma endregion
 
 
 // ==============================================================================
@@ -100,6 +102,25 @@ void UMyMapTravelSubsystem::Deinitialize()
 void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPtr<class UUserWidget> CustomLoadingUI, float MinLoadingTime)
 {
 	if (bIsTraveling) return;
+
+	// ==============================================================================
+	// [硬核雷达 1]：起飞前状态抓取（查子弹时间）
+	// ==============================================================================
+	if (UWorld* ValidWorld = GetWorld())
+	{
+		float GlobalTD = UGameplayStatics::GetGlobalTimeDilation(ValidWorld);
+		float PawnTD = 1.0f;
+		if (APlayerController* PC = GetRealPlayerController(ValidWorld))
+		{
+			if (APawn* Pawn = PC->GetPawn()) PawnTD = Pawn->CustomTimeDilation;
+		}
+
+		FString Msg = FString::Printf(TEXT("[雷达-起飞] 去往: %s | 当前全局时间流速: %f | 玩家时间流速: %f"),
+			*TargetLevelName.ToString(), GlobalTD, PawnTD);
+		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 15.f, FColor::Yellow, Msg);
+		UE_LOG(LogTemp, Warning, TEXT("================================================="));
+		UE_LOG(LogTemp, Warning, TEXT("%s"), *Msg);
+	}
 
 	bIsTraveling = true;
 
@@ -170,26 +191,19 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 	{
 		if (UMyTravelSessionSubsystem* TravelSession = GI->GetSubsystem<UMyTravelSessionSubsystem>())
 		{
-			TravelSession->PendingLoadingWidgetClass = CustomLoadingUI;
 			TravelSession->TargetMapName = TargetLevelName;
 			TravelSession->MinimumLoadingTime = MinLoadingTime;
 			TravelSession->TravelStartTime = FPlatformTime::Seconds();
 		}
 	}
 
-	if (!CustomLoadingUI.IsNull())
+	// ==============================================================================
+	// 【单点真相】：抛弃原先暂存 Session 并于落地重复构建的冗余思维。
+	// 直接把当前物理门所配置的专属过场 UI 动态推往长生避难所，启动物理抗清洗绘制。
+	// ==============================================================================
+	if (UMyGameInstance* MyGI = Cast<UMyGameInstance>(World->GetGameInstance()))
 	{
-		if (UClass* LoadedWidgetClass = CustomLoadingUI.LoadSynchronous())
-		{
-			// 【修改 1】：从 GetFirstPlayerController 换成了 GetRealPlayerController
-			if (APlayerController* PC = GetRealPlayerController(World))
-			{
-				if (UUserWidget* PreLoadingUI = CreateWidget<UUserWidget>(PC, LoadedWidgetClass))
-				{
-					PreLoadingUI->AddToViewport(9999);
-				}
-			}
-		}
+		MyGI->ShowGlobalBlackScreen(CustomLoadingUI);
 	}
 
 	World->ServerTravel(TargetLevelName.ToString());
@@ -207,6 +221,20 @@ void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
 
+	// ==============================================================================
+	// [硬核雷达 2]：World 降落时序抓取 (查 UI 闪烁)
+	// ==============================================================================
+	FString MapName = InWorld.GetMapName();
+	FString WorldTypeStr = (InWorld.WorldType == EWorldType::Game) ? TEXT("Game(正式游戏)") :
+		(InWorld.WorldType == EWorldType::Inactive) ? TEXT("Inactive(休眠/过渡)") :
+		(InWorld.WorldType == EWorldType::PIE) ? TEXT("PIE(编辑器)") : TEXT("Other(其他)");
+
+	FString Msg = FString::Printf(TEXT("[雷达-落地钩子] 触发! 物理地图名: %s | 世界类型: %s"),
+		*MapName, *WorldTypeStr);
+
+	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 15.f, FColor::Red, Msg);
+	UE_LOG(LogTemp, Error, TEXT("%s"), *Msg);
+
 	UGameInstance* GI = InWorld.GetGameInstance();
 	if (!GI) return;
 
@@ -219,68 +247,92 @@ void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		return;
 	}
 
-	UClass* TargetUIClass = TravelSession->ConsumeLoadingClass();
-	if (TargetUIClass)
+	double ElapsedTime = FPlatformTime::Seconds() - TravelSession->TravelStartTime;
+	float RemainingTime = FMath::Max(0.1f, TravelSession->MinimumLoadingTime - static_cast<float>(ElapsedTime));
+
+	// 【清理干净】：由于抽离了灵魂的 Slate 遮罩依然正在不受外界干扰地独立绘制，此处绝不需要二次创建任何视口 UMG 
+	if (APlayerController* PC = GetRealPlayerController(&InWorld))
 	{
-		// 【修改 2】：从 GetFirstPlayerController 换成了 GetRealPlayerController
-		if (APlayerController* PC = GetRealPlayerController(&InWorld))
-		{
-			PC->DisableInput(PC);
+		PC->DisableInput(PC);
 
-			FInputModeUIOnly InputMode;
-			InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-			PC->SetInputMode(InputMode);
-
-			ArrivalLoadingWidget = CreateWidget<UUserWidget>(PC, TargetUIClass);
-			if (ArrivalLoadingWidget)
-			{
-				ArrivalLoadingWidget->AddToViewport(9999);
-			}
-		}
-
-		double ElapsedTime = FPlatformTime::Seconds() - TravelSession->TravelStartTime;
-		float RemainingTime = FMath::Max(0.1f, TravelSession->MinimumLoadingTime - static_cast<float>(ElapsedTime));
-
-		InWorld.GetTimerManager().SetTimer(ArrivalTimerHandle, this, &UMyMapTravelSubsystem::FinishMapTravel, RemainingTime, false);
+		FInputModeUIOnly InputMode;
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		PC->SetInputMode(InputMode);
 	}
+
+	InWorld.GetTimerManager().SetTimer(ArrivalTimerHandle, this, &UMyMapTravelSubsystem::FinishMapTravel, RemainingTime, false);
 }
 
 void UMyMapTravelSubsystem::FinishMapTravel()
 {
-	// 【实用修复 2】：彻底解除引擎视口的物理级死锁，否则鼠标在某些全屏模式下会完全失效
 	if (GEngine && GEngine->GameViewport)
 	{
 		GEngine->GameViewport->SetIgnoreInput(false);
 	}
 
-	if (ArrivalLoadingWidget)
-	{
-		ArrivalLoadingWidget->RemoveFromParent();
-		ArrivalLoadingWidget = nullptr;
-	}
-
 	if (UWorld* World = GetWorld())
 	{
-		// 【修改 3】：从 GetFirstPlayerController 换成了 GetRealPlayerController
-		if (APlayerController* PC = GetRealPlayerController(World))
+		// ==============================================================================
+		// 【单轨终点】：直接命令不灭的 GameInstance 彻底拆卸掉顶层的物理级 PreLoad 屏障
+		// ==============================================================================
+		if (UMyGameInstance* MyGI = Cast<UMyGameInstance>(World->GetGameInstance()))
 		{
-			PC->EnableInput(PC);
+			MyGI->HideGlobalBlackScreen();
+		}
 
-			// 【实用修复 3】：杀掉“吞输入/幽灵点击” Bug。强制清空玩家在黑屏期间狂点的残余按键。
-			PC->FlushPressedKeys();
+		APlayerController* RealPC = GetRealPlayerController(World);
+
+		if (RealPC)
+		{
+			RealPC->EnableInput(RealPC);
+
+			// [实用修复 3]：杀掉“吞输入/幽灵点击” Bug。强制清空玩家在黑屏期间狂点的残余按键。
+			RealPC->FlushPressedKeys();
 
 			FInputModeGameAndUI InputMode;
 			InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 			InputMode.SetHideCursorDuringCapture(false);
-			PC->SetInputMode(InputMode);
+			RealPC->SetInputMode(InputMode);
 
-			if (APawn* Pawn = PC->GetPawn())
+			if (APawn* Pawn = RealPC->GetPawn())
 			{
-				Pawn->EnableInput(PC);
+				Pawn->EnableInput(RealPC);
 			}
 
 			FSlateApplication::Get().SetAllUserFocusToGameViewport();
 		}
+
+		// [物理超度]：猎杀无缝传送残留的“幽灵控制器” (修复子弹时间被中和的问题)
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			APlayerController* PC = It->Get();
+			if (PC && PC != RealPC)
+			{
+				if (PC->IsLocalController() || PC->GetLocalPlayer() == nullptr)
+				{
+					PC->Destroy();
+				}
+			}
+		}
+	}
+
+	// ==============================================================================
+	// [硬核雷达 3]：落地解禁后状态抓取（对比子弹时间）
+	// ==============================================================================
+	if (UWorld* ValidWorld = GetWorld())
+	{
+		float GlobalTD = UGameplayStatics::GetGlobalTimeDilation(ValidWorld);
+		float PawnTD = 1.0f;
+		if (APlayerController* PC = GetRealPlayerController(ValidWorld))
+		{
+			if (APawn* Pawn = PC->GetPawn()) PawnTD = Pawn->CustomTimeDilation;
+		}
+
+		FString Msg = FString::Printf(TEXT("[雷达-完全解禁] 当前全局时间流速: %f | 玩家时间流速: %f"),
+			GlobalTD, PawnTD);
+		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 15.f, FColor::Green, Msg);
+		UE_LOG(LogTemp, Warning, TEXT("%s"), *Msg);
+		UE_LOG(LogTemp, Warning, TEXT("================================================="));
 	}
 
 	bIsTraveling = false;
@@ -306,9 +358,16 @@ void UMyMapTravelSubsystem::ExecuteZoneTravelWithWait(UDataLayerAsset* TargetZon
 		return;
 	}
 
-	// 【修改 4】：从 GetFirstPlayerController 换成了 GetRealPlayerController
 	if (APlayerController* PC = GetRealPlayerController(World))
 	{
+		// ==============================================================================
+		// 【单点真相】：直接把函数接收到的 UI 扔给 GameInstance
+		// ==============================================================================
+		if (UMyGameInstance* MyGI = Cast<UMyGameInstance>(World->GetGameInstance()))
+		{
+			MyGI->ShowGlobalBlackScreen(CustomLoadingUI);
+		}
+
 		PC->DisableInput(PC);
 		FInputModeUIOnly InputMode;
 		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
@@ -317,18 +376,6 @@ void UMyMapTravelSubsystem::ExecuteZoneTravelWithWait(UDataLayerAsset* TargetZon
 		if (APawn* Pawn = PC->GetPawn())
 		{
 			Pawn->DisableInput(PC);
-		}
-
-		if (!CustomLoadingUI.IsNull())
-		{
-			if (UClass* LoadedClass = CustomLoadingUI.LoadSynchronous())
-			{
-				ZoneLoadingWidget = CreateWidget<UUserWidget>(PC, LoadedClass);
-				if (ZoneLoadingWidget)
-				{
-					ZoneLoadingWidget->AddToViewport(9999);
-				}
-			}
 		}
 	}
 
@@ -347,12 +394,15 @@ void UMyMapTravelSubsystem::FinishZoneTravel()
 
 	if (UWorld* World = GetWorld())
 	{
-		// 【修改 5】：从 GetFirstPlayerController 换成了 GetRealPlayerController
+		// 【架构升级】：呼叫 GameInstance 砸碎防弹玻璃
+		if (UMyGameInstance* MyGI = Cast<UMyGameInstance>(World->GetGameInstance()))
+		{
+			MyGI->HideGlobalBlackScreen();
+		}
+
 		if (APlayerController* PC = GetRealPlayerController(World))
 		{
 			PC->EnableInput(PC);
-
-			// 【同上清理残余输入】
 			PC->FlushPressedKeys();
 
 			FInputModeGameAndUI InputMode;
@@ -541,7 +591,6 @@ void UMyMapTravelSubsystem::DebugPrintDataLayerStates()
 
 void UMyMapTravelSubsystem::ProcessBiomeLerpTick()
 {
-	// 增加有效性判断，防止关卡销毁时触发 Tick 导致闪退
 	if (!IsValid(GetWorld()) || !CurrentBiomeTarget || !CachedSunLight.IsValid() || !CachedSunLight->GetComponent())
 	{
 		if (UWorld* World = GetWorld()) World->GetTimerManager().ClearTimer(BiomeLerpTimer);
