@@ -99,6 +99,33 @@ void UMyMapTravelSubsystem::Deinitialize()
 
 void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPtr<class UUserWidget> CustomLoadingUI, float MinLoadingTime)
 {
+	// 在函数开头加入
+	if (FSlateApplication::IsInitialized())
+	{
+		TArray<TSharedRef<SWindow>> AllWindows;
+		FSlateApplication::Get().GetAllVisibleWindowsOrdered(AllWindows);
+
+		UE_LOG(LogTemp, Warning, TEXT("=== 正在探测物理窗口 (共 %d 个) ==="), AllWindows.Num());
+
+		for (int32 i = 0; i < AllWindows.Num(); ++i)
+		{
+			TSharedRef<SWindow> Win = AllWindows[i];
+			FString WinTitle = Win->GetTitle().ToString();
+			// 抓取这个窗口里的内容类名
+			FString ContentType = Win->GetContent()->GetTypeAsString();
+
+			UE_LOG(LogTemp, Warning, TEXT("窗口 [%d]: 标题='%s', 内容类名='%s'"), i, *WinTitle, *ContentType);
+
+			// 如果你找到了那个带点和文字的窗口，可以用下面这行物理干掉它
+			if (ContentType.Contains(TEXT("PreLoad")) || ContentType.Contains(TEXT("Loading")))
+			{
+				// 临时测试：直接物理隐藏这个挡路的东西
+				Win->SetOpacity(0.0f);
+				UE_LOG(LogTemp, Error, TEXT("已物理隐藏幽灵窗口: %s"), *ContentType);
+			}
+		}
+	}
+
 	if (bIsTraveling) return;
 
 	bIsTraveling = true;
@@ -570,6 +597,56 @@ void UMyMapTravelSubsystem::ProcessBiomeLerpTick()
 	{
 		if (UWorld* World = GetWorld()) World->GetTimerManager().ClearTimer(BiomeLerpTimer);
 	}
+}
+
+#pragma endregion
+
+
+// ==============================================================================
+// 硬核雷达监控 (Hardcore Radar)
+// ==============================================================================
+#pragma region
+
+void UMyMapTravelSubsystem::HardcoreRadarTick()
+{
+	UWorld* World = GetWorld();
+	// 如果 World 正在销毁或已失效，立即停止探测，防止访问空指针
+	if (!World || World->bIsTearingDown)
+	{
+		return;
+	}
+
+	// 安全获取 LocalPlayer 对应的 PC
+	APlayerController* PC = nullptr;
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		APlayerController* TempPC = It->Get();
+		// 关键防护：不仅判空，还要通过 IsValidLowLevel 确保对象没被回收，且 Player 指针有效
+		if (IsValid(TempPC) && TempPC->Player != nullptr)
+		{
+			PC = TempPC;
+			break;
+		}
+	}
+
+	FString UIMsg = TEXT("UI: 丢失");
+	if (UGameInstance* GI = World->GetGameInstance())
+	{
+		if (UMyTravelSessionSubsystem* TS = GI->GetSubsystem<UMyTravelSessionSubsystem>())
+		{
+			if (TS->CrossLevelSafeWidget.IsValid()) UIMsg = TEXT("UI: 正常");
+		}
+	}
+
+	FString CamMsg = TEXT("Cam: 无效");
+	if (PC && PC->PlayerCameraManager)
+	{
+		FVector Loc = PC->PlayerCameraManager->GetCameraLocation();
+		CamMsg = FString::Printf(TEXT("Cam: %.0f,%.0f"), Loc.X, Loc.Y);
+	}
+
+	FString FinalMsg = FString::Printf(TEXT("[雷达] %s | %s | %s"), *World->GetMapName(), *UIMsg, *CamMsg);
+	if (GEngine) GEngine->AddOnScreenDebugMessage(19999, 0.06f, FColor::Cyan, FinalMsg);
 }
 
 #pragma endregion
