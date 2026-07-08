@@ -3,6 +3,7 @@
 #include "MapTravel/MyTravelSessionSubsystem.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/SWindow.h"
+#include "Slate/SObjectWidget.h" // 【新增】：物理提取蓝图内存的钥匙
 
 // ==============================================================================
 // 生命周期
@@ -12,6 +13,8 @@
 void UMyTravelSessionSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+
+	StartSlateRadar();
 }
 
 void UMyTravelSessionSubsystem::Deinitialize()
@@ -45,7 +48,7 @@ UClass* UMyTravelSessionSubsystem::ConsumeLoadingClass()
 #pragma endregion
 
 // ==============================================================================
-// 【硬核雷达】：全局 Slate 物理层级深度扫描
+// 【硬核雷达】：全局 Slate 物理层级深度扫描与物理溯源
 // ==============================================================================
 #pragma region
 
@@ -56,7 +59,7 @@ void UMyTravelSessionSubsystem::StartSlateRadar()
 		SlateRadarAccumulator = 0.0f;
 		// 挂载到 Slate 全局 Tick，无视 World 的毁灭
 		SlateRadarHandle = FSlateApplication::Get().OnPostTick().AddUObject(this, &UMyTravelSessionSubsystem::SlateRadarTick);
-		UE_LOG(LogTemp, Error, TEXT("--- 物理层级深度扫描雷达已在 GameInstance [启动] ---"));
+		UE_LOG(LogTemp, Error, TEXT("--- 物理层级深度溯源雷达已在 GameInstance [启动] ---"));
 	}
 }
 
@@ -66,20 +69,32 @@ void UMyTravelSessionSubsystem::StopSlateRadar()
 	{
 		FSlateApplication::Get().OnPostTick().Remove(SlateRadarHandle);
 		SlateRadarHandle.Reset();
-		UE_LOG(LogTemp, Error, TEXT("--- 物理层级深度扫描雷达已 [关闭] ---"));
+		UE_LOG(LogTemp, Error, TEXT("--- 物理层级深度溯源雷达已 [关闭] ---"));
 	}
 }
 
 void UMyTravelSessionSubsystem::SlateRadarTick(float DeltaTime)
 {
+	/*
 	// 限制扫描频率，每 0.5 秒扫一次
 	SlateRadarAccumulator += DeltaTime;
 	if (SlateRadarAccumulator < 0.5f) return;
 	SlateRadarAccumulator = 0.0f;
+	*/
+
+	//---------
+	// 解除频率锁，开启每帧疯狂打字模式。通过高频日志的突然中断，精确定位主线程卡死（断层开始）的时间戳。
+	if (FSlateApplication::IsInitialized())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[UI雷达疯狂打字] --- Loading UI 正常存活中 --- 物理高精度时间戳: %f"), FPlatformTime::Seconds());
+	}
+	//---------
 
 	if (!FSlateApplication::IsInitialized()) return;
-	TSharedPtr<SWindow> MainWindow = FSlateApplication::Get().GetActiveTopLevelWindow();
-	if (!MainWindow.IsValid()) return;
+
+	// 【致命修正】：不再只盯住主窗口！把引擎在后台偷偷生成的所有可见窗口全部抓出来！
+	TArray<TSharedRef<SWindow>> AllWindows;
+	FSlateApplication::Get().GetAllVisibleWindowsOrdered(AllWindows);
 
 	TFunction<void(TSharedRef<SWidget>, int32)> Inspector;
 	Inspector = [&](TSharedRef<SWidget> Current, int32 Depth)
@@ -91,17 +106,11 @@ void UMyTravelSessionSubsystem::SlateRadarTick(float DeltaTime)
 
 			FString TypeName = Current->GetTypeAsString();
 
-			// 只打印有效的 UI
-			if (Current->GetVisibility().IsVisible() || !Current->GetVisibility().IsHitTestVisible())
-			{
-				UE_LOG(LogTemp, Warning, TEXT("%s[层级 %d] 类名: %s"), *Indent, Depth, *TypeName);
-			}
-
-			// 【暴力物理消除指令】
+			// 【敏感词消除】
 			if (TypeName.Contains(TEXT("PreLoad")) || TypeName.Contains(TEXT("Loading")) || TypeName.Contains(TEXT("Throbber")) || TypeName.Contains(TEXT("Compil")))
 			{
 				Current->SetVisibility(EVisibility::Collapsed);
-				UE_LOG(LogTemp, Error, TEXT("！！！已精准拦截并物理消除 (Eliminate) 幽灵控件: %s ！！！"), *TypeName);
+				UE_LOG(LogTemp, Error, TEXT("%s！！！已物理消除可疑控件: %s ！！！"), *Indent, *TypeName);
 			}
 
 			if (FChildren* Children = Current->GetChildren())
@@ -113,10 +122,13 @@ void UMyTravelSessionSubsystem::SlateRadarTick(float DeltaTime)
 			}
 		};
 
-	UE_LOG(LogTemp, Warning, TEXT("=== [Slate 物理层级深度扫描] ==="));
-
-	// 【已修复】：GetContent() 本身就是 TSharedRef，直接传进去即可
-	Inspector(MainWindow->GetContent(), 0);
+	// 挨个强行扒开所有窗口的底裤
+	for (int32 i = 0; i < AllWindows.Num(); ++i)
+	{
+		FString WinTitle = AllWindows[i]->GetTitle().ToString();
+		/*UE_LOG(LogTemp, Warning, TEXT(">> 正在暴力扫描窗口 [%d]: 标题='%s'"), i, *WinTitle);*/
+		Inspector(AllWindows[i], 0);
+	}
 }
 
 #pragma endregion

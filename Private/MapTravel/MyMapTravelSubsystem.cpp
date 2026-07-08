@@ -193,6 +193,11 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 		}
 	}
 
+	//---------
+	// 强制覆盖外部传入的时间，将新地图到达后的强制黑屏等待时间延长至 15 秒，方便慢慢观察
+	MinLoadingTime = 15.0f;
+	//---------
+
 	if (UGameInstance* GI = World->GetGameInstance())
 	{
 		if (UMyTravelSessionSubsystem* TravelSession = GI->GetSubsystem<UMyTravelSessionSubsystem>())
@@ -219,7 +224,23 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 		}
 	}
 
+	/*
 	World->ServerTravel(TargetLevelName.ToString());
+	*/
+
+	//---------
+	// 人为插入 5 秒的纯净观察期：UI 此时已经生成，但由于尚未触发 ServerTravel，主线程未卡死，雷达可以全速输出
+	UE_LOG(LogTemp, Warning, TEXT("=== [测试延迟] PreLoading UI 已挂载，等待 5 秒后正式触发 ServerTravel... ==="));
+	FTimerHandle DelayTravelTimer;
+	World->GetTimerManager().SetTimer(DelayTravelTimer, [World, TargetLevelName]()
+		{
+			if (IsValid(World))
+			{
+				UE_LOG(LogTemp, Error, TEXT(">>>>> [测试延迟] 5秒已满！正式触发 ServerTravel，主线程即将进入卡死断层区 <<<<<"));
+				World->ServerTravel(TargetLevelName.ToString());
+			}
+		}, 5.0f, false);
+	//---------
 }
 
 #pragma endregion
