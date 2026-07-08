@@ -307,6 +307,21 @@ void UMyMapTravelSubsystem::FinishMapTravel()
 		ArrivalLoadingWidget = nullptr;
 	}
 
+	//---------
+	// 【新增】：加载彻底结束，UI 已销毁，立即掐断 Slate 物理雷达，停止日志轰炸
+	if (UWorld* World = GetWorld())
+	{
+		if (UGameInstance* GI = World->GetGameInstance())
+		{
+			if (UMyTravelSessionSubsystem* TS = GI->GetSubsystem<UMyTravelSessionSubsystem>())
+			{
+				TS->StopSlateRadar();
+				UE_LOG(LogTemp, Warning, TEXT("=== [安全收尾] 新地图加载流程已全部结束，雷达已安全关闭 ==="));
+			}
+		}
+	}
+	//---------
+
 	if (UWorld* World = GetWorld())
 	{
 		// 【修改 3】：从 GetFirstPlayerController 换成了 GetRealPlayerController

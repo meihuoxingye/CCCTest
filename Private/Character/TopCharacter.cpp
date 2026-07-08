@@ -288,6 +288,11 @@ void ATopCharacter::AttackEnd()
 {
 	if (MCComponent)
 	{
+		//---------
+		// 【新增】：检测按键抬起事件
+		UE_LOG(LogTemp, Warning, TEXT("[输入诊断] <<< 鼠标左键 (Attack) 已抬起，发送停火指令 <<<"));
+		//---------
+		
 		// 告诉战斗组件：停止射击
 		MCComponent->StopWeaponFire();
 	}
