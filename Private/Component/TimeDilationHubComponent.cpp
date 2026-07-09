@@ -8,6 +8,8 @@
 #include "Materials/MaterialParameterCollection.h" 
 #include "Kismet/KismetMaterialLibrary.h"
 
+#include "GameFramework/PlayerController.h" // 【新增】：为了在 Tick 中验证主人身份
+
 UTimeDilationHubComponent::UTimeDilationHubComponent()
 {
 	// 必须开启 Tick，这正是本组件存在的核心意义
@@ -25,6 +27,22 @@ void UTimeDilationHubComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 
 	UWorld* World = GetWorld();
 	if (!World) return;
+
+	// ==============================================================================
+	// 【核心修复：彻底终结无缝漫游后的“幽灵拔河”】
+	// 动态验证：绝不相信 BeginPlay 的一次性检查！
+	// 如果在无缝漫游中，这个控制器被引擎剥夺了本地玩家（沦为幽灵）
+	// 立刻永久剥夺它的 Tick 权力，防止它把时间强行拉回 1.0！
+	// ==============================================================================
+	if (APlayerController* PC = Cast<APlayerController>(GetOwner()))
+	{
+		if (!PC->IsLocalController())
+		{
+			// 发现自己变成了幽灵，立刻永久自尽（关闭 Tick），并且结束本帧运算
+			SetComponentTickEnabled(false);
+			return;
+		}
+	}
 
 	// 安全检查：检查我们在蓝图里配置的 MPC（全局材质参数集合）资产是否有效
 	if (GlobalUIMPC.Get())
