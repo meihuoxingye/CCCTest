@@ -1,27 +1,23 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Game/MyGameInstance.h"
-#include "Widgets/SWindow.h"
-#include "Widgets/SOverlay.h"
-#include "Widgets/Colors/SColorBlock.h"
-#include "Framework/Application/SlateApplication.h"
-#include "Engine/GameViewportClient.h"
-#include "Engine/Engine.h"
-
+#include "MoviePlayer.h"
+#include "Blueprint/UserWidget.h"
 
 // ==============================================================================
-// 引擎生命周期
+// 引擎生命周期 (Engine Lifecycle)
 // ==============================================================================
 #pragma region
 
 void UMyGameInstance::Init()
 {
 	Super::Init();
+	FCoreUObjectDelegates::PreLoadMap.AddUObject(this, &UMyGameInstance::OnPreLoadMap);
 }
 
 void UMyGameInstance::Shutdown()
 {
-	HideGlobalBlackScreen();
+	FCoreUObjectDelegates::PreLoadMap.RemoveAll(this);
 	Super::Shutdown();
 }
 
@@ -29,76 +25,109 @@ void UMyGameInstance::Shutdown()
 
 
 // ==============================================================================
-// 物理层加载遮罩控制 (SWindow Overlay)
+// 加载屏配置与动态接管 (Loading Screen Config & Dynamic Takeover)
 // ==============================================================================
 #pragma region
 
-void UMyGameInstance::ShowGlobalBlackScreen(TSoftClassPtr<UUserWidget> DynamicLoadingUI)
+void UMyGameInstance::StartSeamlessLoadingScreen(TSoftClassPtr<class UUserWidget> CustomUI, float MinTime, FName TargetMap)
 {
-	// 防重入
-	if (ActiveLoadingWidget.IsValid()) return;
+	UE_LOG(LogTemp, Error, TEXT("========== [GameInstance] StartSeamlessLoadingScreen 手动点火 =========="));
+	if (IsRunningDedicatedServer()) return;
 
-	// 1. 动态读取发货资产，并在长生对象（GameInstance）内部实例化 UMG
-	if (!DynamicLoadingUI.IsNull())
+	PendingTargetMapName = TargetMap;
+	UE_LOG(LogTemp, Error, TEXT("[GameInstance] 铭记真正的目标地图: %s"), *PendingTargetMapName.ToString());
+
+	TSoftClassPtr<UUserWidget> TargetUIClass = CustomUI.IsNull() ? DefaultLoadingUIClass : CustomUI;
+	UE_LOG(LogTemp, Error, TEXT("[GameInstance] 准备加载的 UI 路径: %s"), *TargetUIClass.ToString());
+
+	if (UClass* WidgetClass = TargetUIClass.LoadSynchronous())
 	{
-		if (UClass* LoadedClass = DynamicLoadingUI.LoadSynchronous())
+		if (UUserWidget* LoadingWidget = CreateWidget<UUserWidget>(this, WidgetClass))
 		{
-			PersistentLoadingWidget = CreateWidget<UUserWidget>(this, LoadedClass);
-			if (PersistentLoadingWidget)
+			AsyncSafeWidget = LoadingWidget->TakeWidget();
+
+			if (AsyncSafeWidget.IsValid())
 			{
-				PersistentLoadingWidget->AddToRoot(); // 加上全局不灭防弹衣
-				ActiveLoadingWidget = PersistentLoadingWidget->TakeWidget(); // 暴力抽离 Slate 核心指针
+				UE_LOG(LogTemp, Error, TEXT("[GameInstance] 灵魂剥离成功！拿到合法的 Slate 树！"));
+
+				if (IsMoviePlayerEnabled())
+				{
+					FLoadingScreenAttributes LoadingScreen;
+					LoadingScreen.bAutoCompleteWhenLoadingCompletes = false; // 强制禁止自动脱落，跨越过渡地图
+					LoadingScreen.bWaitForManualStop = true; // 等待抵达终点后手动拔电源
+
+					// 【致命修复】：必须允许引擎 Tick！无缝旅行必须依赖引擎 Tick 在后台读盘，否则直接死锁！
+					LoadingScreen.bAllowEngineTick = true;
+
+					LoadingScreen.MinimumLoadingScreenDisplayTime = MinTime;
+					LoadingScreen.WidgetLoadingScreen = AsyncSafeWidget;
+
+					GetMoviePlayer()->SetupLoadingScreen(LoadingScreen);
+					GetMoviePlayer()->PlayMovie(); // 强行点火接管屏幕
+
+					UE_LOG(LogTemp, Error, TEXT("[GameInstance] PlayMovie() 执行完毕！屏幕已强制被多线程接管！"));
+				}
+				else
+				{
+					UE_LOG(LogTemp, Error, TEXT("[GameInstance] 失败：IsMoviePlayerEnabled() 返回 FALSE！"));
+				}
+			}
+			else
+			{
+				UE_LOG(LogTemp, Error, TEXT("[GameInstance] 致命失败！！！TakeWidget 返回了 NULL！"));
 			}
 		}
 	}
-
-	// 2. 兜底策略：如果传送门没配置 UI 资产，生成绝对不漏光的纯黑色块
-	if (!ActiveLoadingWidget.IsValid())
-	{
-		ActiveLoadingWidget = SNew(SOverlay)
-			+ SOverlay::Slot()
-			[
-				SNew(SColorBlock).Color(FLinearColor::Black)
-			];
-	}
-
-	// 3. 【终极 3A 挂载】：将 Slate 挂载到主窗口 (OS Window)
-	// 无缝传送的 RemoveAllViewportWidgets() 根本清洗不到这里，画面绝对不会闪！
-	if (GEngine && GEngine->GameViewport)
-	{
-		TSharedPtr<SWindow> MainWindow = GEngine->GameViewport->GetWindow();
-		if (MainWindow.IsValid())
-		{
-			MainWindow->AddOverlaySlot()
-				.ZOrder(10000) // 确保在渲染层处于绝对最上方
-				[
-					ActiveLoadingWidget.ToSharedRef()
-				];
-		}
-	}
+	UE_LOG(LogTemp, Error, TEXT("=================================================="));
 }
 
-void UMyGameInstance::HideGlobalBlackScreen()
+void UMyGameInstance::StopSeamlessLoadingScreen()
 {
-	// 从主窗口撕下这块物理 UI
-	if (ActiveLoadingWidget.IsValid())
+	UE_LOG(LogTemp, Error, TEXT("[GameInstance] StopSeamlessLoadingScreen 手动熄灭！拔掉电源！"));
+	if (IsMoviePlayerEnabled())
 	{
-		if (GEngine && GEngine->GameViewport)
+		GetMoviePlayer()->StopMovie();
+	}
+	AsyncSafeWidget.Reset();
+	PendingTargetMapName = NAME_None;
+}
+
+#pragma endregion
+
+
+// ==============================================================================
+// 异步加载渲染管控 (Async Loading Render Control)
+// ==============================================================================
+#pragma region
+
+void UMyGameInstance::OnPreLoadMap(const FString& MapName)
+{
+	UE_LOG(LogTemp, Error, TEXT("[GameInstance] OnPreLoadMap 触发(常规硬加载): %s"), *MapName);
+
+	if (IsRunningDedicatedServer()) return;
+
+	if (IsMoviePlayerEnabled() && GetMoviePlayer()->IsMovieCurrentlyPlaying()) return;
+
+	if (UClass* WidgetClass = DefaultLoadingUIClass.LoadSynchronous())
+	{
+		if (UUserWidget* LoadingWidget = CreateWidget<UUserWidget>(this, WidgetClass))
 		{
-			TSharedPtr<SWindow> MainWindow = GEngine->GameViewport->GetWindow();
-			if (MainWindow.IsValid())
+			AsyncSafeWidget = LoadingWidget->TakeWidget();
+			if (IsMoviePlayerEnabled() && AsyncSafeWidget.IsValid())
 			{
-				MainWindow->RemoveOverlaySlot(ActiveLoadingWidget.ToSharedRef());
+				FLoadingScreenAttributes LoadingScreen;
+				LoadingScreen.bAutoCompleteWhenLoadingCompletes = true;
+				LoadingScreen.bWaitForManualStop = false;
+
+				// 硬加载会阻塞主线程，这里设为 false 是为了极致性能，设为 true 亦可
+				LoadingScreen.bAllowEngineTick = false;
+
+				LoadingScreen.MinimumLoadingScreenDisplayTime = 2.0f;
+				LoadingScreen.WidgetLoadingScreen = AsyncSafeWidget;
+
+				GetMoviePlayer()->SetupLoadingScreen(LoadingScreen);
 			}
 		}
-		ActiveLoadingWidget.Reset();
-	}
-
-	// 安全脱下 UMG 控件的防弹衣，使其能被 GC 干净回收
-	if (PersistentLoadingWidget)
-	{
-		PersistentLoadingWidget->RemoveFromRoot();
-		PersistentLoadingWidget = nullptr;
 	}
 }
 

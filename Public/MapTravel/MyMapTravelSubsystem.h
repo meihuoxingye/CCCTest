@@ -116,21 +116,6 @@ private:
 
 	void ProcessBiomeLerpTick();
 
-	// ==============================================================================
-	// 目标世界到达与强制等待 (Arrival & Artificial Wait)
-	// ==============================================================================
-private:
-
-	// 到达新地图后的 UI 句柄
-	UPROPERTY()
-	class UUserWidget* ArrivalLoadingWidget = nullptr;
-
-	FTimerHandle ArrivalTimerHandle;
-
-	// 必须是 UFUNCTION，否则计时器无法执行！
-	UFUNCTION()
-	void FinishMapTravel();
-
 
 	// ==============================================================================
 	// 同地图硬切换管线 (Intra-Map Hard Travel)

@@ -30,17 +30,18 @@
 
 #include "GameFramework/PlayerState.h"
 #include "Blueprint/UserWidget.h"
-#include "MapTravel/MyTravelSessionSubsystem.h"
+
+#include "Game/MyGameInstance.h"
+#include "Misc/PackageName.h"
 
 // ==============================================================================
-// 【新增】：内部安全获取真实玩家控制器的工具函数 (防无缝传送假身)
+// 内部安全获取真实玩家控制器的工具函数 (防无缝传送假身)
 // ==============================================================================
 namespace
 {
 	APlayerController* GetRealPlayerController(UWorld* World)
 	{
 		if (!World) return nullptr;
-		// 遍历所有控制器，只抓取真正拥有本地玩家 (LocalPlayer) 的“真身”
 		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 		{
 			APlayerController* PC = It->Get();
@@ -52,7 +53,6 @@ namespace
 		return nullptr;
 	}
 }
-
 
 // ==============================================================================
 // 生命周期与初始化 (Lifecycle & Initialization)
@@ -82,11 +82,69 @@ void UMyMapTravelSubsystem::Deinitialize()
 
 	if (UWorld* World = GetWorld())
 	{
-		// 【实用修复 1】：一键清理当前管家身上的所有定时器（天气过渡、硬切延迟等），根除由于地图销毁引发的空指针闪退
 		World->GetTimerManager().ClearAllTimersForObject(this);
 	}
 
 	Super::Deinitialize();
+}
+
+void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
+{
+	Super::OnWorldBeginPlay(InWorld);
+
+	FString CurrentMapName = InWorld.GetMapName();
+	UE_LOG(LogTemp, Error, TEXT("[MapTravel] OnWorldBeginPlay 触发！当前已落地地图: %s"), *CurrentMapName);
+
+	if (UMyGameInstance* GI = InWorld.GetGameInstance<UMyGameInstance>())
+	{
+		// 【致命 Bug 修复】：提取纯净的地图短名字，剔除所有的路径和前缀！
+		// 彻底解决目标带路径而当前无路径导致的“永远不关 UI” Bug
+		FString CleanTargetMap = FPackageName::GetShortName(GI->PendingTargetMapName.ToString());
+		FString CleanCurrentMap = FPackageName::GetShortName(CurrentMapName);
+
+		// 过滤过渡地图
+		if (GI->PendingTargetMapName.IsNone() || !CleanCurrentMap.Contains(CleanTargetMap))
+		{
+			UE_LOG(LogTemp, Error, TEXT("[MapTravel] 注意：当前地图(%s)不是目标(%s)！让加载屏继续遮盖！"), *CleanCurrentMap, *CleanTargetMap);
+			return;
+		}
+
+		UE_LOG(LogTemp, Error, TEXT(">>>>>>>>>> [MapTravel] 真正抵达最终目的地！准备恢复输入并关闭加载屏！ <<<<<<<<<<"));
+
+		// 抵达终点，手动熄火！彻底删除多线程 UI！
+		GI->StopSeamlessLoadingScreen();
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("[MapTravel] 致命错误: 在 OnWorldBeginPlay 中无法获取 UMyGameInstance！"));
+	}
+
+	// 恢复玩家控制权
+	if (GEngine && GEngine->GameViewport)
+	{
+		GEngine->GameViewport->SetIgnoreInput(false);
+	}
+
+	if (APlayerController* PC = GetRealPlayerController(&InWorld))
+	{
+		PC->EnableInput(PC);
+		PC->FlushPressedKeys();
+
+		FInputModeGameAndUI InputMode;
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		InputMode.SetHideCursorDuringCapture(false);
+		PC->SetInputMode(InputMode);
+
+		if (APawn* Pawn = PC->GetPawn())
+		{
+			Pawn->EnableInput(PC);
+			Pawn->SetActorEnableCollision(true);
+		}
+
+		FSlateApplication::Get().SetAllUserFocusToGameViewport();
+	}
+
+	bIsTraveling = false;
 }
 
 #pragma endregion
@@ -99,41 +157,14 @@ void UMyMapTravelSubsystem::Deinitialize()
 
 void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPtr<class UUserWidget> CustomLoadingUI, float MinLoadingTime)
 {
-	// 在函数开头加入
-	if (FSlateApplication::IsInitialized())
-	{
-		TArray<TSharedRef<SWindow>> AllWindows;
-		FSlateApplication::Get().GetAllVisibleWindowsOrdered(AllWindows);
-
-		UE_LOG(LogTemp, Warning, TEXT("=== 正在探测物理窗口 (共 %d 个) ==="), AllWindows.Num());
-
-		for (int32 i = 0; i < AllWindows.Num(); ++i)
-		{
-			TSharedRef<SWindow> Win = AllWindows[i];
-			FString WinTitle = Win->GetTitle().ToString();
-			// 抓取这个窗口里的内容类名
-			FString ContentType = Win->GetContent()->GetTypeAsString();
-
-			UE_LOG(LogTemp, Warning, TEXT("窗口 [%d]: 标题='%s', 内容类名='%s'"), i, *WinTitle, *ContentType);
-
-			// 如果你找到了那个带点和文字的窗口，可以用下面这行物理干掉它
-			if (ContentType.Contains(TEXT("PreLoad")) || ContentType.Contains(TEXT("Loading")))
-			{
-				// 临时测试：直接物理隐藏这个挡路的东西
-				Win->SetOpacity(0.0f);
-				UE_LOG(LogTemp, Error, TEXT("已物理隐藏幽灵窗口: %s"), *ContentType);
-			}
-		}
-	}
-
 	if (bIsTraveling) return;
-
 	bIsTraveling = true;
 
 	UWorld* World = GetWorld();
 	if (!IsValid(World) || TargetLevelName.IsNone())
 	{
 		bIsTraveling = false;
+		UE_LOG(LogTemp, Error, TEXT("[MapTravel] 致命错误: World无效或目标地图名字为空！"));
 		return;
 	}
 
@@ -193,124 +224,29 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 		}
 	}
 
-	if (UGameInstance* GI = World->GetGameInstance())
+	// 【核心融合】：保留你想要的严谨 else 判定！
+	if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
 	{
-		if (UMyTravelSessionSubsystem* TravelSession = GI->GetSubsystem<UMyTravelSessionSubsystem>())
+		if (CustomLoadingUI.IsNull())
 		{
-			TravelSession->PendingLoadingWidgetClass = CustomLoadingUI;
-			TravelSession->TargetMapName = TargetLevelName;
-			TravelSession->MinimumLoadingTime = MinLoadingTime;
-			TravelSession->TravelStartTime = FPlatformTime::Seconds();
+			UE_LOG(LogTemp, Warning, TEXT("[MapTravel] 警告: 传入的 CustomLoadingUI 是空的！将触发 GameInstance 的默认保底 UI。"));
 		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("[MapTravel] UI 资产路径有效，准备交接: %s"), *CustomLoadingUI.ToString());
+		}
+
+		UE_LOG(LogTemp, Error, TEXT("[MapTravel] 呼叫 GameInstance 手动点火拉起多线程加载屏..."));
+		GI->StartSeamlessLoadingScreen(CustomLoadingUI, MinLoadingTime, TargetLevelName);
+	}
+	else
+	{
+		// 严谨的防漏网兜底
+		UE_LOG(LogTemp, Error, TEXT("[MapTravel] 致命错误: 无法获取 UMyGameInstance！无法显示加载屏！"));
 	}
 
-	if (!CustomLoadingUI.IsNull())
-	{
-		if (UClass* LoadedWidgetClass = CustomLoadingUI.LoadSynchronous())
-		{
-			// 【修改 1】：从 GetFirstPlayerController 换成了 GetRealPlayerController
-			if (APlayerController* PC = GetRealPlayerController(World))
-			{
-				if (UUserWidget* PreLoadingUI = CreateWidget<UUserWidget>(PC, LoadedWidgetClass))
-				{
-					PreLoadingUI->AddToViewport(9999);
-				}
-			}
-		}
-	}
-
+	UE_LOG(LogTemp, Error, TEXT("[MapTravel] 正在调用 ServerTravel 去往: %s"), *TargetLevelName.ToString());
 	World->ServerTravel(TargetLevelName.ToString());
-}
-
-#pragma endregion
-
-
-// ==============================================================================
-// 目标世界到达与强制等待 (Arrival & Artificial Wait)
-// ==============================================================================
-#pragma region
-
-void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
-{
-	Super::OnWorldBeginPlay(InWorld);
-
-	UGameInstance* GI = InWorld.GetGameInstance();
-	if (!GI) return;
-
-	UMyTravelSessionSubsystem* TravelSession = GI->GetSubsystem<UMyTravelSessionSubsystem>();
-	if (!TravelSession) return;
-
-	FString CurrentMapName = InWorld.GetMapName();
-	if (TravelSession->TargetMapName.IsNone() || !CurrentMapName.Contains(TravelSession->TargetMapName.ToString()))
-	{
-		return;
-	}
-
-	UClass* TargetUIClass = TravelSession->ConsumeLoadingClass();
-	if (TargetUIClass)
-	{
-		// 【修改 2】：从 GetFirstPlayerController 换成了 GetRealPlayerController
-		if (APlayerController* PC = GetRealPlayerController(&InWorld))
-		{
-			PC->DisableInput(PC);
-
-			FInputModeUIOnly InputMode;
-			InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-			PC->SetInputMode(InputMode);
-
-			ArrivalLoadingWidget = CreateWidget<UUserWidget>(PC, TargetUIClass);
-			if (ArrivalLoadingWidget)
-			{
-				ArrivalLoadingWidget->AddToViewport(9999);
-			}
-		}
-
-		double ElapsedTime = FPlatformTime::Seconds() - TravelSession->TravelStartTime;
-		float RemainingTime = FMath::Max(0.1f, TravelSession->MinimumLoadingTime - static_cast<float>(ElapsedTime));
-
-		InWorld.GetTimerManager().SetTimer(ArrivalTimerHandle, this, &UMyMapTravelSubsystem::FinishMapTravel, RemainingTime, false);
-	}
-}
-
-void UMyMapTravelSubsystem::FinishMapTravel()
-{
-	// 【实用修复 2】：彻底解除引擎视口的物理级死锁，否则鼠标在某些全屏模式下会完全失效
-	if (GEngine && GEngine->GameViewport)
-	{
-		GEngine->GameViewport->SetIgnoreInput(false);
-	}
-
-	if (ArrivalLoadingWidget)
-	{
-		ArrivalLoadingWidget->RemoveFromParent();
-		ArrivalLoadingWidget = nullptr;
-	}
-
-	if (UWorld* World = GetWorld())
-	{
-		// 【修改 3】：从 GetFirstPlayerController 换成了 GetRealPlayerController
-		if (APlayerController* PC = GetRealPlayerController(World))
-		{
-			PC->EnableInput(PC);
-
-			// 【实用修复 3】：杀掉“吞输入/幽灵点击” Bug。强制清空玩家在黑屏期间狂点的残余按键。
-			PC->FlushPressedKeys();
-
-			FInputModeGameAndUI InputMode;
-			InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-			InputMode.SetHideCursorDuringCapture(false);
-			PC->SetInputMode(InputMode);
-
-			if (APawn* Pawn = PC->GetPawn())
-			{
-				Pawn->EnableInput(PC);
-			}
-
-			FSlateApplication::Get().SetAllUserFocusToGameViewport();
-		}
-	}
-
-	bIsTraveling = false;
 }
 
 #pragma endregion
@@ -333,7 +269,6 @@ void UMyMapTravelSubsystem::ExecuteZoneTravelWithWait(UDataLayerAsset* TargetZon
 		return;
 	}
 
-	// 【修改 4】：从 GetFirstPlayerController 换成了 GetRealPlayerController
 	if (APlayerController* PC = GetRealPlayerController(World))
 	{
 		PC->DisableInput(PC);
@@ -374,12 +309,9 @@ void UMyMapTravelSubsystem::FinishZoneTravel()
 
 	if (UWorld* World = GetWorld())
 	{
-		// 【修改 5】：从 GetFirstPlayerController 换成了 GetRealPlayerController
 		if (APlayerController* PC = GetRealPlayerController(World))
 		{
 			PC->EnableInput(PC);
-
-			// 【同上清理残余输入】
 			PC->FlushPressedKeys();
 
 			FInputModeGameAndUI InputMode;
@@ -568,7 +500,6 @@ void UMyMapTravelSubsystem::DebugPrintDataLayerStates()
 
 void UMyMapTravelSubsystem::ProcessBiomeLerpTick()
 {
-	// 增加有效性判断，防止关卡销毁时触发 Tick 导致闪退
 	if (!IsValid(GetWorld()) || !CurrentBiomeTarget || !CachedSunLight.IsValid() || !CachedSunLight->GetComponent())
 	{
 		if (UWorld* World = GetWorld()) World->GetTimerManager().ClearTimer(BiomeLerpTimer);
@@ -610,31 +541,19 @@ void UMyMapTravelSubsystem::ProcessBiomeLerpTick()
 void UMyMapTravelSubsystem::HardcoreRadarTick()
 {
 	UWorld* World = GetWorld();
-	// 如果 World 正在销毁或已失效，立即停止探测，防止访问空指针
 	if (!World || World->bIsTearingDown)
 	{
 		return;
 	}
 
-	// 安全获取 LocalPlayer 对应的 PC
 	APlayerController* PC = nullptr;
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
 		APlayerController* TempPC = It->Get();
-		// 关键防护：不仅判空，还要通过 IsValidLowLevel 确保对象没被回收，且 Player 指针有效
 		if (IsValid(TempPC) && TempPC->Player != nullptr)
 		{
 			PC = TempPC;
 			break;
-		}
-	}
-
-	FString UIMsg = TEXT("UI: 丢失");
-	if (UGameInstance* GI = World->GetGameInstance())
-	{
-		if (UMyTravelSessionSubsystem* TS = GI->GetSubsystem<UMyTravelSessionSubsystem>())
-		{
-			if (TS->CrossLevelSafeWidget.IsValid()) UIMsg = TEXT("UI: 正常");
 		}
 	}
 
@@ -644,9 +563,6 @@ void UMyMapTravelSubsystem::HardcoreRadarTick()
 		FVector Loc = PC->PlayerCameraManager->GetCameraLocation();
 		CamMsg = FString::Printf(TEXT("Cam: %.0f,%.0f"), Loc.X, Loc.Y);
 	}
-
-	FString FinalMsg = FString::Printf(TEXT("[雷达] %s | %s | %s"), *World->GetMapName(), *UIMsg, *CamMsg);
-	if (GEngine) GEngine->AddOnScreenDebugMessage(19999, 0.06f, FColor::Cyan, FinalMsg);
 }
 
 #pragma endregion
