@@ -57,7 +57,13 @@ public:
 
 	// 增加等待时间参数
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
-	void ExecuteMapTravel(FName TargetLevelName, TSoftClassPtr<class UUserWidget> CustomLoadingUI = nullptr, float MinLoadingTime = 2.0f);
+	void ExecuteMapTravel(
+		FName TargetLevelName,
+		TSoftClassPtr<class UUserWidget> ScreenOffUI,  // 【新增】：熄屏用的 UI 类
+		float ScreenOffDuration,                       // 【新增】：熄屏动画需要播放几秒
+		TSoftClassPtr<class UUserWidget> CustomLoadingUI,
+		float MinLoadingTime
+	);
 
 	// ==============================================================================
 	// 动态滑动窗口与流送管线 (Dynamic Sliding Window & Streaming Pipeline)

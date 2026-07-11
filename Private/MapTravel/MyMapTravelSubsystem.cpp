@@ -144,7 +144,7 @@ void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 // ==============================================================================
 #pragma region
 
-void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPtr<class UUserWidget> CustomLoadingUI, float MinLoadingTime)
+void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPtr<class UUserWidget> ScreenOffUI, float ScreenOffDuration, TSoftClassPtr<class UUserWidget> CustomLoadingUI, float MinLoadingTime)
 {
 	if (bIsTraveling) return;
 	bIsTraveling = true;
@@ -234,19 +234,26 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 			GI->DefaultLoadingUIClass = CustomLoadingUI;
 		}
 
-		// 触发 0.3 秒 Slate 渐暗，让黑幕平滑过渡
-		GI->StartBlackFade();
+		// 播放关卡设计师专属定制的熄屏 UI 动画
+		GI->PlayScreenOffUI(ScreenOffUI);
 	}
 
-	// 3. 等待 0.35 秒让 Slate 黑透，然后直接执行无缝漫游！
+	// 3. 等待 UMG 熄屏动画彻底播完（黑透），再执行无缝漫游！
+	// 如果设计师传的熄屏时间小于 0.1 秒，给个最低 0.1 秒的兜底，防止时序错乱
+	float SafeTravelDelay = FMath::Max(0.1f, ScreenOffDuration);
+
 	FTimerHandle TravelTimerHandle;
 	World->GetTimerManager().SetTimer(TravelTimerHandle, [World, TargetLevelName]()
 		{
 			if (IsValid(World))
 			{
+				// 【灵魂接力时刻】：
+				// ServerTravel 一旦触发，旧世界毁灭，刚才那个 UMG 熄屏 UI 会被引擎销毁。
+				// 但是！在同一微秒，底层的 SeamlessTravelTransition 会激活 BlackoutExtension！
+				// GPU 会瞬间接管纯黑画面，玩家的眼睛根本看不出任何破绽！
 				World->ServerTravel(TargetLevelName.ToString());
 			}
-		}, 0.35f, false);
+		}, SafeTravelDelay, false);
 }
 
 #pragma endregion
@@ -337,6 +344,7 @@ void UMyMapTravelSubsystem::FinishZoneTravel()
 // 动态滑动窗口与流送管线 (Dynamic Sliding Window & Streaming Pipeline)
 // ==============================================================================
 #pragma region
+
 
 void UMyMapTravelSubsystem::RegisterZoneSequence(const TArray<FZoneDataLayerPair>& InSequence)
 {

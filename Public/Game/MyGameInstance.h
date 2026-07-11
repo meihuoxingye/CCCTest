@@ -7,24 +7,7 @@
 #include "Blueprint/UserWidget.h"
 #include "Engine/TimerHandle.h"
 #include "Engine/Engine.h" 
-#include "Widgets/SCompoundWidget.h" // 声明 Slate 类所必需的头文件
 #include "MyGameInstance.generated.h"
-
-// ==============================================================================
-// 内部纯 Slate 渐暗组件 (Internal Slate Fade Widget)
-// ==============================================================================
-class CCC_API SBlackFadeWidget : public SCompoundWidget
-{
-public:
-	SLATE_BEGIN_ARGS(SBlackFadeWidget) {}
-	SLATE_END_ARGS()
-
-	void Construct(const FArguments& InArgs);
-	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;
-
-private:
-	float CurrentAlpha;
-};
 
 
 // ==============================================================================
@@ -50,10 +33,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Loading")
 	float MinUIShowDuration = 1.5f;
 
+	// 【新增】：拉起关卡设计师配置的个性化熄屏 UI
+	UFUNCTION(BlueprintCallable, Category = "Loading")
+	void PlayScreenOffUI(TSoftClassPtr<class UUserWidget> ScreenOffUIClass);
+
 	UPROPERTY(Transient)
 	FName PendingTargetMapName;
 
-	void StartBlackFade();
 	void ShowFakeLoadingScreen(TSoftClassPtr<class UUserWidget> CustomUI);
 
 	UFUNCTION(BlueprintCallable, Category = "Loading")
@@ -66,7 +52,6 @@ public:
 	void HandleEndTravel(UWorld* NewWorld);
 
 private:
-	TSharedPtr<class SWidget> PureBlackFadeSlate;
 	TSharedPtr<class SWidget> PureFakeLoadingSlate;
 
 	FTimerHandle FakeLoadingTimerHandle;

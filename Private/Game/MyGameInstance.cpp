@@ -7,28 +7,8 @@
 #include "Blueprint/UserWidget.h"
 #include "Engine/GameViewportClient.h"
 #include "TimerManager.h"
-#include "Widgets/Colors/SColorBlock.h"
 #include "Widgets/SWidget.h"
 #include "HAL/PlatformTime.h"
-
-// ==============================================================================
-// 内部纯 Slate 渐暗组件 (Internal Slate Fade Widget)
-// ==============================================================================
-#pragma region
-
-void SBlackFadeWidget::Construct(const FArguments& InArgs)
-{
-	CurrentAlpha = 0.0f;
-	ChildSlot[SNew(SColorBlock).Color_Lambda([this]() { return FLinearColor(0.0f, 0.0f, 0.0f, CurrentAlpha); })];
-}
-
-void SBlackFadeWidget::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
-{
-	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
-	if (CurrentAlpha < 1.0f) CurrentAlpha = FMath::Min(1.0f, CurrentAlpha + InDeltaTime * 3.33f);
-}
-
-#pragma endregion
 
 
 // ==============================================================================
@@ -128,16 +108,20 @@ void UMyGameInstance::HandleEndTravel(UWorld* NewWorld)
 	}
 }
 
-void UMyGameInstance::StartBlackFade()
+void UMyGameInstance::PlayScreenOffUI(TSoftClassPtr<class UUserWidget> ScreenOffUIClass)
 {
-	if (IsRunningDedicatedServer() || PureBlackFadeSlate.IsValid()) return;
+	// 如果关卡设计师没配置熄屏UI，我们就直接返回，后面会直接硬切
+	if (ScreenOffUIClass.IsNull()) return;
 
-	TSharedRef<SBlackFadeWidget> FadeWidget = SNew(SBlackFadeWidget);
-	PureBlackFadeSlate = FadeWidget;
-
-	if (GEngine && GEngine->GameViewport)
+	if (UClass* WidgetClass = ScreenOffUIClass.LoadSynchronous())
 	{
-		GEngine->GameViewport->AddViewportWidgetContent(PureBlackFadeSlate.ToSharedRef(), 10000);
+		if (UUserWidget* ScreenOffWidget = CreateWidget<UUserWidget>(this, WidgetClass))
+		{
+			// 加载到极高的层级，挡住一切
+			ScreenOffWidget->AddToViewport(10000);
+
+			// 注意：UMG 蓝图里，在 Event Construct 节点直接让它自动播放熄屏动画！
+		}
 	}
 }
 
@@ -160,12 +144,6 @@ void UMyGameInstance::ShowFakeLoadingScreen(TSoftClassPtr<class UUserWidget> Cus
 
 	// 记录 UI 真正呈现的绝对时间秒数
 	UIStartTime = FPlatformTime::Seconds();
-
-	if (PureBlackFadeSlate.IsValid() && GEngine && GEngine->GameViewport)
-	{
-		GEngine->GameViewport->RemoveViewportWidgetContent(PureBlackFadeSlate.ToSharedRef());
-		PureBlackFadeSlate.Reset();
-	}
 
 	// 开启一个单次定时器，到时间后宣判“最小显示时间已到”
 	if (UWorld* World = GetWorld())
