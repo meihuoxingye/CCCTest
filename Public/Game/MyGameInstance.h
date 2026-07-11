@@ -5,47 +5,84 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstance.h"
 #include "Blueprint/UserWidget.h"
+#include "Engine/TimerHandle.h"
+#include "Engine/Engine.h" 
+#include "Widgets/SCompoundWidget.h" // 声明 Slate 类所必需的头文件
 #include "MyGameInstance.generated.h"
 
+// ==============================================================================
+// 内部纯 Slate 渐暗组件 (Internal Slate Fade Widget)
+// ==============================================================================
+class CCC_API SBlackFadeWidget : public SCompoundWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SBlackFadeWidget) {}
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs);
+	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;
+
+private:
+	float CurrentAlpha;
+};
+
+
+// ==============================================================================
+// 核心生命周期与组件 (Core Lifecycle & Components)
+// ==============================================================================
 UCLASS()
 class CCC_API UMyGameInstance : public UGameInstance
 {
 	GENERATED_BODY()
 
-	// ==============================================================================
-	// 引擎生命周期 (Engine Lifecycle)
-	// ==============================================================================
 public:
 	virtual void Init() override;
 	virtual void Shutdown() override;
 
 	// ==============================================================================
-	// 加载屏配置与动态接管 (Loading Screen Config & Dynamic Takeover)
+	// 伪加载管线 UI 管理 (Fake Loading Pipeline UI)
 	// ==============================================================================
 public:
-	// 默认的保底加载 UI
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LoadingScreen")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Loading")
 	TSoftClassPtr<class UUserWidget> DefaultLoadingUIClass;
 
-	// 跨过 World 销毁，永远记住真正的目的地
+	// 旧的伪加载时间保留作为兜底，新增一个最小显示时间
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Loading")
+	float MinUIShowDuration = 1.5f;
+
 	UPROPERTY(Transient)
 	FName PendingTargetMapName;
 
-	// 手动引爆无缝加载屏！
-	UFUNCTION(BlueprintCallable, Category = "LoadingScreen")
-	void StartSeamlessLoadingScreen(TSoftClassPtr<class UUserWidget> CustomUI, float MinTime, FName TargetMap);
+	void StartBlackFade();
+	void ShowFakeLoadingScreen(TSoftClassPtr<class UUserWidget> CustomUI);
 
-	// 手动熄灭无缝加载屏！
-	UFUNCTION(BlueprintCallable, Category = "LoadingScreen")
-	void StopSeamlessLoadingScreen();
+	UFUNCTION(BlueprintCallable, Category = "Loading")
+	void HideFakeLoadingScreen();
 
-	// ==============================================================================
-	// 异步加载渲染管控 (Async Loading Render Control)
-	// ==============================================================================
+	UFUNCTION()
+	void HandleStartTravel(UWorld* CurrentWorld);
+
+	UFUNCTION()
+	void HandleEndTravel(UWorld* NewWorld);
+
 private:
-	// 保留给游戏刚启动时的常规硬加载使用
-	void OnPreLoadMap(const FString& MapName);
+	TSharedPtr<class SWidget> PureBlackFadeSlate;
+	TSharedPtr<class SWidget> PureFakeLoadingSlate;
 
-	// 唯一需要长存的变量，用于在加载期间兜住纯 Slate 灵魂免受 GC
-	TSharedPtr<class SWidget> AsyncSafeWidget;
+	FTimerHandle FakeLoadingTimerHandle;
+
+	TSharedPtr<class FBlackoutExtension, ESPMode::ThreadSafe> BlackoutExt;
+
+	FBeginStreamingPauseDelegate BeginStreamingPauseDelegate;
+	FEndStreamingPauseDelegate EndStreamingPauseDelegate;
+
+	void OnBeginStreamingPause(FViewport* Viewport);
+	void OnEndStreamingPause();
+
+	// 【新增状态锁】：用于双轨制时间对齐
+	double UIStartTime = 0.0;
+	bool bEngineIsReady = false;
+	bool bMinTimeElapsed = false;
+
+	void CheckAndHideLoadingScreen();
 };

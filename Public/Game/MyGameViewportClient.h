@@ -12,10 +12,7 @@ class CCC_API UMyGameViewportClient : public UCommonGameViewportClient
 	GENERATED_BODY()
 
 	// ==============================================================================
-	// 渲染重写 (Render Overrides)
+	// 渲染重写与管线接口 (Render Overrides & Pipeline API)
 	// ==============================================================================
-#pragma region
-public:
-	virtual void DrawTransition(class UCanvas* Canvas) override;
-#pragma endregion
+		// 目前不需要任何重写，保持类的纯净，为以后真正的视口逻辑留出空间
 };

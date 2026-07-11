@@ -1,134 +1,201 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Game/MyGameInstance.h"
-#include "MoviePlayer.h"
+#include "Game/BlackoutExtension.h"
+#include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "Blueprint/UserWidget.h"
+#include "Engine/GameViewportClient.h"
+#include "TimerManager.h"
+#include "Widgets/Colors/SColorBlock.h"
+#include "Widgets/SWidget.h"
+#include "HAL/PlatformTime.h"
 
 // ==============================================================================
-// 引擎生命周期 (Engine Lifecycle)
+// 内部纯 Slate 渐暗组件 (Internal Slate Fade Widget)
+// ==============================================================================
+#pragma region
+
+void SBlackFadeWidget::Construct(const FArguments& InArgs)
+{
+	CurrentAlpha = 0.0f;
+	ChildSlot[SNew(SColorBlock).Color_Lambda([this]() { return FLinearColor(0.0f, 0.0f, 0.0f, CurrentAlpha); })];
+}
+
+void SBlackFadeWidget::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
+{
+	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+	if (CurrentAlpha < 1.0f) CurrentAlpha = FMath::Min(1.0f, CurrentAlpha + InDeltaTime * 3.33f);
+}
+
+#pragma endregion
+
+
+// ==============================================================================
+// 核心生命周期与组件 (Core Lifecycle & Components)
 // ==============================================================================
 #pragma region
 
 void UMyGameInstance::Init()
 {
 	Super::Init();
-	FCoreUObjectDelegates::PreLoadMap.AddUObject(this, &UMyGameInstance::OnPreLoadMap);
+
+	BlackoutExt = FSceneViewExtensions::NewExtension<FBlackoutExtension>();
+
+	FWorldDelegates::OnSeamlessTravelTransition.AddUObject(this, &UMyGameInstance::HandleStartTravel);
+	FCoreUObjectDelegates::PostLoadMapWithWorld.AddUObject(this, &UMyGameInstance::HandleEndTravel);
+
+	BeginStreamingPauseDelegate.BindUObject(this, &UMyGameInstance::OnBeginStreamingPause);
+	EndStreamingPauseDelegate.BindUObject(this, &UMyGameInstance::OnEndStreamingPause);
+
+	if (GEngine)
+	{
+		GEngine->RegisterBeginStreamingPauseRenderingDelegate(&BeginStreamingPauseDelegate);
+		GEngine->RegisterEndStreamingPauseRenderingDelegate(&EndStreamingPauseDelegate);
+	}
 }
 
 void UMyGameInstance::Shutdown()
 {
-	FCoreUObjectDelegates::PreLoadMap.RemoveAll(this);
+	if (GEngine)
+	{
+		GEngine->RegisterBeginStreamingPauseRenderingDelegate(nullptr);
+		GEngine->RegisterEndStreamingPauseRenderingDelegate(nullptr);
+	}
+
+	FWorldDelegates::OnSeamlessTravelTransition.RemoveAll(this);
+	FCoreUObjectDelegates::PostLoadMapWithWorld.RemoveAll(this);
+
+	if (BlackoutExt.IsValid())
+	{
+		BlackoutExt->bIsActive = false;
+		BlackoutExt.Reset();
+	}
+
+	HideFakeLoadingScreen();
 	Super::Shutdown();
+}
+
+void UMyGameInstance::OnBeginStreamingPause(FViewport* Viewport)
+{
+}
+
+void UMyGameInstance::OnEndStreamingPause()
+{
 }
 
 #pragma endregion
 
 
 // ==============================================================================
-// 加载屏配置与动态接管 (Loading Screen Config & Dynamic Takeover)
+// 伪加载管线 UI 管理 (Fake Loading Pipeline UI)
 // ==============================================================================
 #pragma region
 
-void UMyGameInstance::StartSeamlessLoadingScreen(TSoftClassPtr<class UUserWidget> CustomUI, float MinTime, FName TargetMap)
+void UMyGameInstance::HandleStartTravel(UWorld* CurrentWorld)
 {
-	UE_LOG(LogTemp, Error, TEXT("========== [GameInstance] StartSeamlessLoadingScreen 手动点火 =========="));
-	if (IsRunningDedicatedServer()) return;
+	if (BlackoutExt.IsValid())
+	{
+		BlackoutExt->bIsActive = true;
+	}
 
-	PendingTargetMapName = TargetMap;
-	UE_LOG(LogTemp, Error, TEXT("[GameInstance] 铭记真正的目标地图: %s"), *PendingTargetMapName.ToString());
+	// 漫游开始，重置状态锁
+	bEngineIsReady = false;
+	bMinTimeElapsed = false;
+}
+
+void UMyGameInstance::HandleEndTravel(UWorld* NewWorld)
+{
+	// 1. 落地新世界第一帧，立刻解除渲染层的 3D 黑场拦截，交棒给 UI
+	if (BlackoutExt.IsValid())
+	{
+		BlackoutExt->bIsActive = false;
+	}
+
+	// 2. 尝试拉起动态 UI
+	ShowFakeLoadingScreen(nullptr);
+
+	// 3. 标记引擎已经反序列化就绪
+	bEngineIsReady = true;
+
+	// 4. 触发一次检查：如果加载太慢（比最小显示时间还长），则直接由这里关闭 UI
+	if (bMinTimeElapsed)
+	{
+		CheckAndHideLoadingScreen();
+	}
+}
+
+void UMyGameInstance::StartBlackFade()
+{
+	if (IsRunningDedicatedServer() || PureBlackFadeSlate.IsValid()) return;
+
+	TSharedRef<SBlackFadeWidget> FadeWidget = SNew(SBlackFadeWidget);
+	PureBlackFadeSlate = FadeWidget;
+
+	if (GEngine && GEngine->GameViewport)
+	{
+		GEngine->GameViewport->AddViewportWidgetContent(PureBlackFadeSlate.ToSharedRef(), 10000);
+	}
+}
+
+void UMyGameInstance::ShowFakeLoadingScreen(TSoftClassPtr<class UUserWidget> CustomUI)
+{
+	if (PureFakeLoadingSlate.IsValid()) return;
 
 	TSoftClassPtr<UUserWidget> TargetUIClass = CustomUI.IsNull() ? DefaultLoadingUIClass : CustomUI;
-	UE_LOG(LogTemp, Error, TEXT("[GameInstance] 准备加载的 UI 路径: %s"), *TargetUIClass.ToString());
-
 	if (UClass* WidgetClass = TargetUIClass.LoadSynchronous())
 	{
 		if (UUserWidget* LoadingWidget = CreateWidget<UUserWidget>(this, WidgetClass))
 		{
-			AsyncSafeWidget = LoadingWidget->TakeWidget();
-
-			if (AsyncSafeWidget.IsValid())
+			PureFakeLoadingSlate = LoadingWidget->TakeWidget();
+			if (PureFakeLoadingSlate.IsValid() && GEngine && GEngine->GameViewport)
 			{
-				UE_LOG(LogTemp, Error, TEXT("[GameInstance] 灵魂剥离成功！拿到合法的 Slate 树！"));
-
-				if (IsMoviePlayerEnabled())
-				{
-					FLoadingScreenAttributes LoadingScreen;
-					LoadingScreen.bAutoCompleteWhenLoadingCompletes = false; // 强制禁止自动脱落，跨越过渡地图
-					LoadingScreen.bWaitForManualStop = true; // 等待抵达终点后手动拔电源
-
-					// 【致命修复】：必须允许引擎 Tick！无缝旅行必须依赖引擎 Tick 在后台读盘，否则直接死锁！
-					LoadingScreen.bAllowEngineTick = true;
-
-					LoadingScreen.MinimumLoadingScreenDisplayTime = MinTime;
-					LoadingScreen.WidgetLoadingScreen = AsyncSafeWidget;
-
-					GetMoviePlayer()->SetupLoadingScreen(LoadingScreen);
-					GetMoviePlayer()->PlayMovie(); // 强行点火接管屏幕
-
-					UE_LOG(LogTemp, Error, TEXT("[GameInstance] PlayMovie() 执行完毕！屏幕已强制被多线程接管！"));
-				}
-				else
-				{
-					UE_LOG(LogTemp, Error, TEXT("[GameInstance] 失败：IsMoviePlayerEnabled() 返回 FALSE！"));
-				}
-			}
-			else
-			{
-				UE_LOG(LogTemp, Error, TEXT("[GameInstance] 致命失败！！！TakeWidget 返回了 NULL！"));
+				GEngine->GameViewport->AddViewportWidgetContent(PureFakeLoadingSlate.ToSharedRef(), 10001);
 			}
 		}
 	}
-	UE_LOG(LogTemp, Error, TEXT("=================================================="));
+
+	// 记录 UI 真正呈现的绝对时间秒数
+	UIStartTime = FPlatformTime::Seconds();
+
+	if (PureBlackFadeSlate.IsValid() && GEngine && GEngine->GameViewport)
+	{
+		GEngine->GameViewport->RemoveViewportWidgetContent(PureBlackFadeSlate.ToSharedRef());
+		PureBlackFadeSlate.Reset();
+	}
+
+	// 开启一个单次定时器，到时间后宣判“最小显示时间已到”
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(FakeLoadingTimerHandle, [this]()
+			{
+				bMinTimeElapsed = true;
+				// 如果时间到了，且引擎早已就绪，那就直接关掉 UI 迎接玩家
+				if (bEngineIsReady)
+				{
+					CheckAndHideLoadingScreen();
+				}
+			}, MinUIShowDuration, false);
+	}
 }
 
-void UMyGameInstance::StopSeamlessLoadingScreen()
+void UMyGameInstance::CheckAndHideLoadingScreen()
 {
-	UE_LOG(LogTemp, Error, TEXT("[GameInstance] StopSeamlessLoadingScreen 手动熄灭！拔掉电源！"));
-	if (IsMoviePlayerEnabled())
+	// 只有双轨条件全部满足，才执行最终的 UI 清除
+	if (bEngineIsReady && bMinTimeElapsed)
 	{
-		GetMoviePlayer()->StopMovie();
+		HideFakeLoadingScreen();
 	}
-	AsyncSafeWidget.Reset();
+}
+
+void UMyGameInstance::HideFakeLoadingScreen()
+{
+	if (PureFakeLoadingSlate.IsValid() && GEngine && GEngine->GameViewport)
+	{
+		GEngine->GameViewport->RemoveViewportWidgetContent(PureFakeLoadingSlate.ToSharedRef());
+		PureFakeLoadingSlate.Reset();
+	}
 	PendingTargetMapName = NAME_None;
-}
-
-#pragma endregion
-
-
-// ==============================================================================
-// 异步加载渲染管控 (Async Loading Render Control)
-// ==============================================================================
-#pragma region
-
-void UMyGameInstance::OnPreLoadMap(const FString& MapName)
-{
-	UE_LOG(LogTemp, Error, TEXT("[GameInstance] OnPreLoadMap 触发(常规硬加载): %s"), *MapName);
-
-	if (IsRunningDedicatedServer()) return;
-
-	if (IsMoviePlayerEnabled() && GetMoviePlayer()->IsMovieCurrentlyPlaying()) return;
-
-	if (UClass* WidgetClass = DefaultLoadingUIClass.LoadSynchronous())
-	{
-		if (UUserWidget* LoadingWidget = CreateWidget<UUserWidget>(this, WidgetClass))
-		{
-			AsyncSafeWidget = LoadingWidget->TakeWidget();
-			if (IsMoviePlayerEnabled() && AsyncSafeWidget.IsValid())
-			{
-				FLoadingScreenAttributes LoadingScreen;
-				LoadingScreen.bAutoCompleteWhenLoadingCompletes = true;
-				LoadingScreen.bWaitForManualStop = false;
-
-				// 硬加载会阻塞主线程，这里设为 false 是为了极致性能，设为 true 亦可
-				LoadingScreen.bAllowEngineTick = false;
-
-				LoadingScreen.MinimumLoadingScreenDisplayTime = 2.0f;
-				LoadingScreen.WidgetLoadingScreen = AsyncSafeWidget;
-
-				GetMoviePlayer()->SetupLoadingScreen(LoadingScreen);
-			}
-		}
-	}
 }
 
 #pragma endregion

@@ -3,13 +3,10 @@
 #include "Game/MyGameViewportClient.h"
 
 // ==============================================================================
-// 渲染重写 (Render Overrides)
+// 渲染重写与管线接口 (Render Overrides & Pipeline API)
 // ==============================================================================
 #pragma region
 
-void UMyGameViewportClient::DrawTransition(class UCanvas* Canvas)
-{
-	// 彻底留空，物理超度引擎底层的三个加载点
-}
+// 保持空净，所有的物理涂黑已移交至渲染管线底层的 SceneViewExtension
 
 #pragma endregion

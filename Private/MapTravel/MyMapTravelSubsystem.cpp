@@ -34,6 +34,10 @@
 #include "Game/MyGameInstance.h"
 #include "Misc/PackageName.h"
 
+#include "RenderingThread.h"
+#include "HAL/IConsoleManager.h"
+#include "Game/MyGameViewportClient.h"
+
 // ==============================================================================
 // 内部安全获取真实玩家控制器的工具函数 (防无缝传送假身)
 // ==============================================================================
@@ -93,30 +97,22 @@ void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	Super::OnWorldBeginPlay(InWorld);
 
 	FString CurrentMapName = InWorld.GetMapName();
-	UE_LOG(LogTemp, Error, TEXT("[MapTravel] OnWorldBeginPlay 触发！当前已落地地图: %s"), *CurrentMapName);
 
 	if (UMyGameInstance* GI = InWorld.GetGameInstance<UMyGameInstance>())
 	{
-		// 【致命 Bug 修复】：提取纯净的地图短名字，剔除所有的路径和前缀！
-		// 彻底解决目标带路径而当前无路径导致的“永远不关 UI” Bug
 		FString CleanTargetMap = FPackageName::GetShortName(GI->PendingTargetMapName.ToString());
 		FString CleanCurrentMap = FPackageName::GetShortName(CurrentMapName);
 
 		// 过滤过渡地图
 		if (GI->PendingTargetMapName.IsNone() || !CleanCurrentMap.Contains(CleanTargetMap))
 		{
-			UE_LOG(LogTemp, Error, TEXT("[MapTravel] 注意：当前地图(%s)不是目标(%s)！让加载屏继续遮盖！"), *CleanCurrentMap, *CleanTargetMap);
 			return;
 		}
 
-		UE_LOG(LogTemp, Error, TEXT(">>>>>>>>>> [MapTravel] 真正抵达最终目的地！准备恢复输入并关闭加载屏！ <<<<<<<<<<"));
-
-		// 抵达终点，手动熄火！彻底删除多线程 UI！
-		GI->StopSeamlessLoadingScreen();
-	}
-	else
-	{
-		UE_LOG(LogTemp, Error, TEXT("[MapTravel] 致命错误: 在 OnWorldBeginPlay 中无法获取 UMyGameInstance！"));
+		// 【真正落地】：新世界加载完成！
+		// 此时 GameInstance 监听到 PostLoadMapWithWorld，底层的 BlackoutExtension 断路器已自动解除。
+		// 我们顺势在屏幕上贴好精美的 UMG 加载图，完美衔接！
+		GI->ShowFakeLoadingScreen(nullptr);
 	}
 
 	// 恢复玩家控制权
@@ -164,10 +160,10 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 	if (!IsValid(World) || TargetLevelName.IsNone())
 	{
 		bIsTraveling = false;
-		UE_LOG(LogTemp, Error, TEXT("[MapTravel] 致命错误: World无效或目标地图名字为空！"));
 		return;
 	}
 
+	// 1. 瞬间剥夺控制权
 	if (GEngine && GEngine->GameViewport)
 	{
 		GEngine->GameViewport->SetIgnoreInput(true);
@@ -205,7 +201,6 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 			if (APawn* PlayerPawn = PC->GetPawn())
 			{
 				PlayerPawn->SetActorEnableCollision(false);
-
 				if (UEnhancedInputComponent* PawnEIC = Cast<UEnhancedInputComponent>(PlayerPawn->InputComponent))
 				{
 					PawnEIC->ClearActionBindings();
@@ -224,29 +219,32 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 		}
 	}
 
-	// 【核心融合】：保留你想要的严谨 else 判定！
+	// 2. 记忆目标地图，并呼叫普通的 Slate 渐暗 UI
 	if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
 	{
-		if (CustomLoadingUI.IsNull())
+		GI->PendingTargetMapName = TargetLevelName;
+
+		if (!CustomLoadingUI.IsNull())
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[MapTravel] 警告: 传入的 CustomLoadingUI 是空的！将触发 GameInstance 的默认保底 UI。"));
-		}
-		else
-		{
-			UE_LOG(LogTemp, Error, TEXT("[MapTravel] UI 资产路径有效，准备交接: %s"), *CustomLoadingUI.ToString());
+			GI->DefaultLoadingUIClass = CustomLoadingUI;
 		}
 
-		UE_LOG(LogTemp, Error, TEXT("[MapTravel] 呼叫 GameInstance 手动点火拉起多线程加载屏..."));
-		GI->StartSeamlessLoadingScreen(CustomLoadingUI, MinLoadingTime, TargetLevelName);
-	}
-	else
-	{
-		// 严谨的防漏网兜底
-		UE_LOG(LogTemp, Error, TEXT("[MapTravel] 致命错误: 无法获取 UMyGameInstance！无法显示加载屏！"));
+		// 触发 0.3 秒 Slate 渐暗，让黑幕平滑过渡
+		GI->StartBlackFade();
 	}
 
-	UE_LOG(LogTemp, Error, TEXT("[MapTravel] 正在调用 ServerTravel 去往: %s"), *TargetLevelName.ToString());
-	World->ServerTravel(TargetLevelName.ToString());
+	// 3. 等待 0.35 秒让 Slate 黑透，然后直接执行无缝漫游！
+	FTimerHandle TravelTimerHandle;
+	World->GetTimerManager().SetTimer(TravelTimerHandle, [World, TargetLevelName]()
+		{
+			if (IsValid(World))
+			{
+				// 【终极闭环】：只要这句话一执行，引擎广播 OnSeamlessTravelTransition。
+				// GameInstance 监听到后瞬间激活 BlackoutExtension。
+				// 渲染管线立刻断电清黑，光追 TLAS 停止更新，完美跨越垃圾回收与地图流送！
+				World->ServerTravel(TargetLevelName.ToString());
+			}
+		}, 0.35f, false);
 }
 
 #pragma endregion
