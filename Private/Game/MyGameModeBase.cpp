@@ -93,17 +93,6 @@ void AMyGameModeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		// 1. 清除 GameMode 自身挂起的计时器（比如 2 秒的后台基建预热任务）
 		World->GetTimerManager().ClearAllTimersForObject(this);
-
-		/*
-		// 2. 遍历清理所有控制器的残留异步任务
-		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-		{
-			if (APlayerController* PC = It->Get())
-			{
-				World->GetTimerManager().ClearAllTimersForObject(PC);
-			}
-		}
-		*/
 	}
 
 	Super::EndPlay(EndPlayReason);

@@ -135,15 +135,4 @@ private:
 
 	UFUNCTION()
 	void FinishZoneTravel();
-
-	/*
-	// ==============================================================================
-	// 硬核雷达监控 (Hardcore Radar)
-	// ==============================================================================
-private:
-	FTimerHandle HardcoreRadarTimer;
-
-	UFUNCTION()
-	void HardcoreRadarTick();
-	*/
 };

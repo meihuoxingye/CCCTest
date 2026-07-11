@@ -107,13 +107,6 @@ void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		{
 			return;
 		}
-
-		/*
-		// 【真正落地】：新世界加载完成！
-		// 此时 GameInstance 监听到 PostLoadMapWithWorld，底层的 BlackoutExtension 断路器已自动解除。
-		// 我们顺势在屏幕上贴好精美的 UMG 加载图，完美衔接！
-		GI->ShowFakeLoadingScreen(nullptr);
-		*/
 	}
 
 	// 恢复玩家控制权
@@ -536,40 +529,3 @@ void UMyMapTravelSubsystem::ProcessBiomeLerpTick()
 }
 
 #pragma endregion
-
-/*
-// ==============================================================================
-// 硬核雷达监控 (Hardcore Radar)
-// ==============================================================================
-#pragma region
-
-void UMyMapTravelSubsystem::HardcoreRadarTick()
-{
-	UWorld* World = GetWorld();
-	if (!World || World->bIsTearingDown)
-	{
-		return;
-	}
-
-	APlayerController* PC = nullptr;
-	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-	{
-		APlayerController* TempPC = It->Get();
-		if (IsValid(TempPC) && TempPC->Player != nullptr)
-		{
-			PC = TempPC;
-			break;
-		}
-	}
-
-	/*
-	FString CamMsg = TEXT("Cam: 无效");
-	if (PC && PC->PlayerCameraManager)
-	{
-		FVector Loc = PC->PlayerCameraManager->GetCameraLocation();
-		CamMsg = FString::Printf(TEXT("Cam: %.0f,%.0f"), Loc.X, Loc.Y);
-	}
-}
-
-#pragma endregion
-*/

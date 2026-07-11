@@ -17,9 +17,6 @@ public:
 	AMyTransitionGameMode();
 
 protected:
-	virtual void BeginPlay() override;
-
-protected:
 	// 内部引用：随过场世界一起灰飞烟灭，无需手动销毁
 	UPROPERTY(Transient)
 	UUserWidget* ActiveLoadingWidget;

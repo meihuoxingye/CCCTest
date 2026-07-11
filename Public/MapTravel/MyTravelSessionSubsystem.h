@@ -17,13 +17,6 @@ class CCC_API UMyTravelSessionSubsystem : public UGameInstanceSubsystem
 	GENERATED_BODY()
 
 	// ==============================================================================
-	// 生命周期与初始化
-	// ==============================================================================
-public:
-	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-	virtual void Deinitialize() override;
-
-	// ==============================================================================
 	// 跨界数据总线 (Dynamic UI Transfer)
 	// ==============================================================================
 public:
@@ -60,18 +53,4 @@ public:
 	// 携带 UMG 原体免受 GC
 	UPROPERTY()
 	class UUserWidget* CrossLevelLoadingWidget = nullptr;
-
-/*
-	// ==============================================================================
-	// 【硬核雷达】：全局 Slate 物理层级深度扫描
-	// ==============================================================================
-public:
-	void StartSlateRadar();
-	void StopSlateRadar();
-
-private:
-	void SlateRadarTick(float DeltaTime);
-	FDelegateHandle SlateRadarHandle;
-	float SlateRadarAccumulator = 0.0f;
-*/
 };
