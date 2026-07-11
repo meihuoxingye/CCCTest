@@ -182,6 +182,8 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 			}
 
 			PC->FlushPressedKeys();
+
+			// 逻辑层点穴：禁止控制器接受任何输入，但绝不调用 UnPossess 以维持附身关系！
 			PC->DisableInput(PC);
 			PC->SetIgnoreMoveInput(true);
 			PC->SetIgnoreLookInput(true);
@@ -193,15 +195,18 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 
 			if (APawn* PlayerPawn = PC->GetPawn())
 			{
+				// 物理层点穴：关闭碰撞防止穿模或掉落，摄像机完美维持原机位
 				PlayerPawn->SetActorEnableCollision(false);
 				if (UEnhancedInputComponent* PawnEIC = Cast<UEnhancedInputComponent>(PlayerPawn->InputComponent))
 				{
 					PawnEIC->ClearActionBindings();
 				}
-				PC->UnPossess();
 			}
 
-			/*待修改*/
+			// =====================================================================
+			// 【修复 1：重迎免死金牌】
+			// 强行将控制器和玩家状态挂载到 PersistentLevel，防止被 World Partition 抛弃导致 0x30 闪退！
+			// =====================================================================
 			if (PC->GetLevel() != World->PersistentLevel)
 			{
 				PC->Rename(nullptr, World->PersistentLevel);
@@ -210,7 +215,6 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 			{
 				PC->PlayerState->Rename(nullptr, World->PersistentLevel);
 			}
-			/*待修改*/
 		}
 	}
 
@@ -218,6 +222,12 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 	if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
 	{
 		GI->PendingTargetMapName = TargetLevelName;
+
+		// =====================================================================
+		// 【修复 3：补上断层的加载时间】
+		// 将关卡触发器传过来的时间，正式赋给 GameInstance 的双轨时间锁！
+		// =====================================================================
+		GI->MinUIShowDuration = MinLoadingTime;
 
 		if (!CustomLoadingUI.IsNull())
 		{
@@ -234,9 +244,6 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 		{
 			if (IsValid(World))
 			{
-				// 【终极闭环】：只要这句话一执行，引擎广播 OnSeamlessTravelTransition。
-				// GameInstance 监听到后瞬间激活 BlackoutExtension。
-				// 渲染管线立刻断电清黑，光追 TLAS 停止更新，完美跨越垃圾回收与地图流送！
 				World->ServerTravel(TargetLevelName.ToString());
 			}
 		}, 0.35f, false);
@@ -274,18 +281,13 @@ void UMyMapTravelSubsystem::ExecuteZoneTravelWithWait(UDataLayerAsset* TargetZon
 			Pawn->DisableInput(PC);
 		}
 
-		if (!CustomLoadingUI.IsNull())
+		// =====================================================================
+		// 【修复 2.1：废弃老式独立 UI，并轨至大管家】
+		// 同地图硬切换也由 GameInstance 统一全权接管 UI 显示，绝不使用 9999 层级
+		// =====================================================================
+		if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
 		{
-			if (UClass* LoadedClass = CustomLoadingUI.LoadSynchronous())
-			{
-				/*待修改*/
-				ZoneLoadingWidget = CreateWidget<UUserWidget>(PC, LoadedClass);
-				if (ZoneLoadingWidget)
-				{
-					ZoneLoadingWidget->AddToViewport(9999);
-				}
-				/*待修改*/
-			}
+			GI->ShowFakeLoadingScreen(CustomLoadingUI);
 		}
 	}
 
@@ -296,16 +298,16 @@ void UMyMapTravelSubsystem::ExecuteZoneTravelWithWait(UDataLayerAsset* TargetZon
 
 void UMyMapTravelSubsystem::FinishZoneTravel()
 {
-	/*待修改*/
-	if (ZoneLoadingWidget)
-	{
-		ZoneLoadingWidget->RemoveFromParent();
-		ZoneLoadingWidget = nullptr;
-	}
-	/*待修改*/
-
 	if (UWorld* World = GetWorld())
 	{
+		// =====================================================================
+		// 【修复 2.2：由大管家统一撤下黑幕和 UI】
+		// =====================================================================
+		if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
+		{
+			GI->HideFakeLoadingScreen();
+		}
+
 		if (APlayerController* PC = GetRealPlayerController(World))
 		{
 			PC->EnableInput(PC);
