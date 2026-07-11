@@ -35,7 +35,6 @@
 
 #include "RenderingThread.h"
 #include "HAL/IConsoleManager.h"
-#include "Game/MyGameViewportClient.h"
 
 // ==============================================================================
 // 内部安全获取真实玩家控制器的工具函数 (防无缝传送假身)
