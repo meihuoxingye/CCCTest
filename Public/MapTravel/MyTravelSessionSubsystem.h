@@ -61,6 +61,7 @@ public:
 	UPROPERTY()
 	class UUserWidget* CrossLevelLoadingWidget = nullptr;
 
+/*
 	// ==============================================================================
 	// 【硬核雷达】：全局 Slate 物理层级深度扫描
 	// ==============================================================================
@@ -72,4 +73,5 @@ private:
 	void SlateRadarTick(float DeltaTime);
 	FDelegateHandle SlateRadarHandle;
 	float SlateRadarAccumulator = 0.0f;
+*/
 };

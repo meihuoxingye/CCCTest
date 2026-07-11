@@ -11,7 +11,6 @@
 #include "Engine/ExponentialHeightFog.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "TimerManager.h"
-#include "MoviePlayer.h"
 #include "Kismet/GameplayStatics.h"
 #include "Sound/SoundMix.h"
 #include "GameFramework/PlayerController.h"
@@ -109,10 +108,12 @@ void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 			return;
 		}
 
+		/*
 		// 【真正落地】：新世界加载完成！
 		// 此时 GameInstance 监听到 PostLoadMapWithWorld，底层的 BlackoutExtension 断路器已自动解除。
 		// 我们顺势在屏幕上贴好精美的 UMG 加载图，完美衔接！
 		GI->ShowFakeLoadingScreen(nullptr);
+		*/
 	}
 
 	// 恢复玩家控制权
@@ -208,6 +209,7 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 				PC->UnPossess();
 			}
 
+			/*待修改*/
 			if (PC->GetLevel() != World->PersistentLevel)
 			{
 				PC->Rename(nullptr, World->PersistentLevel);
@@ -216,6 +218,7 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 			{
 				PC->PlayerState->Rename(nullptr, World->PersistentLevel);
 			}
+			/*待修改*/
 		}
 	}
 
@@ -283,11 +286,13 @@ void UMyMapTravelSubsystem::ExecuteZoneTravelWithWait(UDataLayerAsset* TargetZon
 		{
 			if (UClass* LoadedClass = CustomLoadingUI.LoadSynchronous())
 			{
+				/*待修改*/
 				ZoneLoadingWidget = CreateWidget<UUserWidget>(PC, LoadedClass);
 				if (ZoneLoadingWidget)
 				{
 					ZoneLoadingWidget->AddToViewport(9999);
 				}
+				/*待修改*/
 			}
 		}
 	}
@@ -299,11 +304,13 @@ void UMyMapTravelSubsystem::ExecuteZoneTravelWithWait(UDataLayerAsset* TargetZon
 
 void UMyMapTravelSubsystem::FinishZoneTravel()
 {
+	/*待修改*/
 	if (ZoneLoadingWidget)
 	{
 		ZoneLoadingWidget->RemoveFromParent();
 		ZoneLoadingWidget = nullptr;
 	}
+	/*待修改*/
 
 	if (UWorld* World = GetWorld())
 	{
@@ -530,7 +537,7 @@ void UMyMapTravelSubsystem::ProcessBiomeLerpTick()
 
 #pragma endregion
 
-
+/*
 // ==============================================================================
 // 硬核雷达监控 (Hardcore Radar)
 // ==============================================================================
@@ -555,6 +562,7 @@ void UMyMapTravelSubsystem::HardcoreRadarTick()
 		}
 	}
 
+	/*
 	FString CamMsg = TEXT("Cam: 无效");
 	if (PC && PC->PlayerCameraManager)
 	{
@@ -564,3 +572,4 @@ void UMyMapTravelSubsystem::HardcoreRadarTick()
 }
 
 #pragma endregion
+*/

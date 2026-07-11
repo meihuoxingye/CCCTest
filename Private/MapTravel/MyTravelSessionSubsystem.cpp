@@ -16,7 +16,7 @@ void UMyTravelSessionSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void UMyTravelSessionSubsystem::Deinitialize()
 {
-	StopSlateRadar();
+	/*StopSlateRadar();*/
 	Super::Deinitialize();
 }
 
@@ -44,6 +44,7 @@ UClass* UMyTravelSessionSubsystem::ConsumeLoadingClass()
 
 #pragma endregion
 
+/*
 // ==============================================================================
 // 【硬核雷达】：全局 Slate 物理层级深度扫描
 // ==============================================================================
@@ -120,3 +121,4 @@ void UMyTravelSessionSubsystem::SlateRadarTick(float DeltaTime)
 }
 
 #pragma endregion
+*/

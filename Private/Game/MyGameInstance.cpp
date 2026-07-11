@@ -76,6 +76,9 @@ void UMyGameInstance::Shutdown()
 	Super::Shutdown();
 }
 
+//所以这两个空函数体内无法写入任何实际有意义的代码。
+// 它们目前在你的源码树中，纯粹是为了通过绑定来覆盖并破坏引擎默认拉起“三个点图标”的底层多线程机制。
+// 虽然不能删，但必须明确：任何试图在这里做状态清理的逻辑都是绝对失效的。
 void UMyGameInstance::OnBeginStreamingPause(FViewport* Viewport)
 {
 }

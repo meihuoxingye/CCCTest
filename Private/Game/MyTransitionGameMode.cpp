@@ -30,6 +30,7 @@ void AMyTransitionGameMode::BeginPlay()
 {
 	Super::BeginPlay();
 
+	/*
 	// 【安全防线】：专用服务器（后台主机）绝对禁止运行任何 UI 渲染逻辑，节省内存防崩溃
 	if (IsNetMode(NM_DedicatedServer)) return;
 
@@ -68,6 +69,7 @@ void AMyTransitionGameMode::BeginPlay()
 			}
 		}
 	}
+	*/
 }
 
 #pragma endregion
