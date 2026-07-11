@@ -59,9 +59,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void ExecuteMapTravel(
 		FName TargetLevelName,
-		TSoftClassPtr<class UUserWidget> ScreenOffUI,  // 【新增】：熄屏用的 UI 类
+		TSoftClassPtr<class UMyTransitionWidgetBase> ScreenOffUI,  // 【新增】：熄屏用的 UI 类
 		float ScreenOffDuration,                       // 【新增】：熄屏动画需要播放几秒
-		TSoftClassPtr<class UUserWidget> CustomLoadingUI,
+		TSoftClassPtr<class UMyTransitionWidgetBase> CustomLoadingUI,
 		float MinLoadingTime
 	);
 

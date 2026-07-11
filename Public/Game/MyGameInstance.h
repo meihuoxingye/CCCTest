@@ -4,11 +4,11 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstance.h"
-#include "Blueprint/UserWidget.h"
+// 引入我们的转场基类
+#include "UI/Transition/MyTransitionWidgetBase.h"
 #include "Engine/TimerHandle.h"
 #include "Engine/Engine.h" 
 #include "MyGameInstance.generated.h"
-
 
 // ==============================================================================
 // 核心生命周期与组件 (Core Lifecycle & Components)
@@ -26,24 +26,29 @@ public:
 	// 伪加载管线 UI 管理 (Fake Loading Pipeline UI)
 	// ==============================================================================
 public:
+	// 【强制契约】：关卡设计师只能选继承了我们基类的 UI
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Loading")
-	TSoftClassPtr<class UUserWidget> DefaultLoadingUIClass;
+	TSoftClassPtr<class UMyTransitionWidgetBase> DefaultLoadingUIClass;
 
-	// 旧的伪加载时间保留作为兜底，新增一个最小显示时间
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Loading")
 	float MinUIShowDuration = 1.5f;
 
-	// 【新增】：拉起关卡设计师配置的个性化熄屏 UI
-	UFUNCTION(BlueprintCallable, Category = "Loading")
-	void PlayScreenOffUI(TSoftClassPtr<class UUserWidget> ScreenOffUIClass);
-
+	// 供子类或加载进度条提取使用的目标地图名
 	UPROPERTY(Transient)
 	FName PendingTargetMapName;
 
-	void ShowFakeLoadingScreen(TSoftClassPtr<class UUserWidget> CustomUI);
+	// 【新增】：拉起关卡设计师定制的熄屏闭合 UI
+	UFUNCTION(BlueprintCallable, Category = "Loading")
+	void PlayScreenOffUI(TSoftClassPtr<class UMyTransitionWidgetBase> ScreenOffUIClass);
+
+	void ShowFakeLoadingScreen(TSoftClassPtr<class UMyTransitionWidgetBase> CustomUI);
 
 	UFUNCTION(BlueprintCallable, Category = "Loading")
 	void HideFakeLoadingScreen();
+
+	// 【暴露给转场基类调用的终极粉碎函数】
+	UFUNCTION(BlueprintCallable, Category = "Loading")
+	void FinalizeLoadingScreenRemoval();
 
 	UFUNCTION()
 	void HandleStartTravel(UWorld* CurrentWorld);
@@ -52,10 +57,11 @@ public:
 	void HandleEndTravel(UWorld* NewWorld);
 
 private:
-	TSharedPtr<class SWidget> PureFakeLoadingSlate;
+	// 【完美保命符】：死死抓住新世界的加载 UI，防 GC 回收
+	UPROPERTY(Transient)
+	UMyTransitionWidgetBase* ActiveTransitionUI;
 
 	FTimerHandle FakeLoadingTimerHandle;
-
 	TSharedPtr<class FBlackoutExtension, ESPMode::ThreadSafe> BlackoutExt;
 
 	FBeginStreamingPauseDelegate BeginStreamingPauseDelegate;
@@ -64,7 +70,6 @@ private:
 	void OnBeginStreamingPause(FViewport* Viewport);
 	void OnEndStreamingPause();
 
-	// 【新增状态锁】：用于双轨制时间对齐
 	double UIStartTime = 0.0;
 	bool bEngineIsReady = false;
 	bool bMinTimeElapsed = false;

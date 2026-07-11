@@ -25,20 +25,6 @@ struct FKey;
 // 而这些修改输入模式、隐藏鼠标的终极权力，UI 面板根本没资格调这些底层 API，只能通过委托发送“请求”
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTacticalMenuCloseRequestedSignature);
 
-// ==============================================================================
-// 转换状态机枚举 (Transition State Machine Enum)
-// ==============================================================================
-
-// 声明枚举类型，并标记 BlueprintType 使其可以在蓝图系统中作为变量类型被访问
-// 使用 uint8 作为底层数据类型以节约内存
-UENUM(BlueprintType)
-enum class EUIState : uint8
-{
-	// 使用 UMETA 宏定义在蓝图编辑器中显示的中文本地化名称
-	Idle		UMETA(DisplayName = "静止"),
-	Opening		UMETA(DisplayName = "展开中"),
-	Closing		UMETA(DisplayName = "收起中")
-};
 
 /** * 可激活控件基类 (Activatable Widget Base)
  * 3A级战术呼出底层：抗子弹时间、纯数学进度表现驱动、进出场双轨解耦及实时编辑器预览
@@ -93,7 +79,7 @@ public:
 	// 声明为纯节点（无执行引脚，BlueprintPure），因为这是一个不会修改类成员状态的 Getter 函数
 	// const 后缀保证该函数不会改变类的任何成员变量
 	UFUNCTION(BlueprintPure, Category = "UI|Transition")
-	EUIState GetCurrentState() const { return CurrentState; }
+	EUIAnimationState GetCurrentState() const { return AnimModule.CurrentState; }
 
 
 	// ==============================================================================
@@ -101,48 +87,18 @@ public:
 	// ==============================================================================
 protected:
 
-	// 核心状态标尺。在 UMG 编辑器细节面板可手动切换状态进行出/退场分流预览。
-	// 允许在蓝图编辑器面板的任何位置编辑，并且在蓝图图表中可读可写
-	// 默认状态初始化为“静止”
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Transition|State")
-	EUIState CurrentState = EUIState::Idle;
-
-	// 出场专属耗时（秒）。通常较长，用于展示张力极强的飞入动画
-	// 设置最小限制为 0.01 秒，从源头防止后续 DeltaTime 除零引发崩溃
-	// 默认展开动画耗时 0.35 秒
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Transition|Settings", meta = (ClampMin = "0.01"))
-	float OpeningDuration = 0.35f;
-
-	// 退场专属耗时（秒）。通常极短（如 0.15），要求干净利落，不拖泥带水
-	// 同样限制最小耗时防崩溃
-	// 默认收起动画耗时 0.15 秒
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Transition|Settings", meta = (ClampMin = "0.01"))
-	float ClosingDuration = 0.15f;
-
-	// 出场缓动指数。推荐 2.0~3.0，飞入时自带丝滑刹车感
-	// 限定缓动指数最小为 1.0 (线性)，用于 FMath::InterpEaseInOut 数学函数
-	// 默认开场缓动强度为 2.0
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Transition|Settings", meta = (ClampMin = "1.0"))
-	float OpeningExp = 2.0f;
-
-	// 退场缓动指数。推荐 1.0 (纯线性)，让透明度匀速消失，绝不拖泥带水
-	// 同样限制最少为纯线性
-	// 默认退场缓动强度为 1.0
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Transition|Settings", meta = (ClampMin = "1.0"))
-	float ClosingExp = 1.0f;
+	// 【核心装配】：将动画模块作为电池嵌入！
+	// 奇迹宏 ShowOnlyInnerProperties 会让这个结构体在细节面板中隐形，
+	// 里面的 OpeningDuration 等所有参数会直接平铺在 UI 的外层，美术体验极佳，且实现最高级代码解耦！
+	// 【已修正】：将 FUIAnimator 纠正为 FMyUIAnimationModule
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Transition|Settings", meta = (ShowOnlyInnerProperties))
+	FMyUIAnimationModule AnimModule;
 
 
 	// ==============================================================================
 	// MVVM 双轨渲染驱动源 (MVVM Dual-Track Drive Source)
 	// ==============================================================================
 protected:
-
-	// 核心时间标尺 (0.0 -> 1.0)，代表当前动画已完成的绝对百分比（现实时间/总时长）。
-	// 【底层计算】：由 NativeTick 每帧自动累加或递减。单帧变化步长 = 本帧物理时间差 (DeltaTime) / 动画总耗时 (Duration)。
-	// 【架构意义】：将物理秒数强制“归一化”为 0~1 的比例，使后续的缓动曲线公式与蓝图表现彻底脱离具体时长的耦合。
-	// 在 UMG 编辑器可拖动滑块实时预览。限制范围在 0.0 到 1.0 之间，避免越界溢出导致后续动画计算错误。
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, FieldNotify, Setter, Getter, Category = "UI|Transition|State", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float TransitionProgress = 0.0f;
 
 	// 【双轨渲染之第一轨：MVVM 线性数据总线】
 	// 业务场景：控制 UI 菜单出场 (Fade/Slide In) 或退场时的基础视觉表现。
@@ -158,8 +114,9 @@ protected:
 	// 2. 它拉取的是缓存在内存里的 0.0~1.0 纯净线性浮点数（如 0.5 代表面板目前的物理进度到了 50%）。
 	// 3. 引擎拿到这个数字后，会直接塞入 UI 蓝图里绑定的控件透明度或材质参数中。
 	// 架构防线：为什么必须是 const 内联函数？
-	// 因为在 0.3 秒的自驱动动画里，它会被底层高频“查岗”几十次。const 加内联能提供纯粹 O(1) 的内存直读，严禁在此写任何数学计算，榨干渲染性能！
-	float GetTransitionProgress() const { return TransitionProgress; }
+	// 因为在 0.3秒的自驱动动画里，它会被底层高频“查岗”几十次。const 加内联能提供纯粹 O(1) 的内存直读，严禁在此写任何数学计算，榨干渲染性能！
+	UFUNCTION(BlueprintPure, FieldNotify, Category = "UI|Transition|State")
+	float GetTransitionProgress() const { return AnimModule.TransitionProgress; }
 
 
 	// 【第二轨：入场动画渲染钩子】
@@ -172,7 +129,7 @@ protected:
 	// C++ 仅作为发令枪派发数据，绝不挂起当前线程等待蓝图的执行结果，实现了底层状态机与表层视觉的绝对物理隔离。
 	// 【架构定位】：这是本框架 UI 表现力的核心主轴。与第一轨的“线性瞎广播”不同，第二轨是“带数学处理的精准打击”。
 	// 【工作流】：本类的 NativeTick 会用高阶多项式（EaseInOut）将死板的线性时间，扭曲成带有“物理惯性（先慢后快再慢）”的 EasedProgress。
-	// 然后通过此蓝图事件 (BlueprintImplementableEvent) 直接下发。
+	// Then through this blueprint event (BlueprintImplementableEvent) to directly dispatch.
 	UFUNCTION(BlueprintImplementableEvent, Category = "UI|Transition|Animation")
 	void UpdateOpeningEffect(float Progress, float EasedProgress);
 
@@ -288,7 +245,7 @@ protected:
 	// 允许穿透 UI 拦截的“输入动作 (Input Action)”白名单数组。
 	// 在蓝图中将全局动作（如关闭面板、切换地图、移动）添加进来，底层会自动反查对应的真实按键并予以放行，完美兼容玩家自定义改键。
 	// “允许穿透”即赋予这些特定按键免检特权，让它们的信号不在 UI 层被销毁，而是漏回给底层的全局系统（如 PlayerController）。
-	// 典型应用：必须放行“关闭面板”的全局快捷键（如 Tab、Esc）。如果不允许其穿透，UI 会把关闭指令一起吞噬，导致面板永远关不掉（操作死锁）。
+	// 典型应用：必须放行“关闭面板”的全局快捷键（如 Tab、Esc）。如果不允许其穿透，UI 会把关闭指令一起吞噬，导致面板永远关不掉操作死锁。
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|Input Routing")
 	TArray<class UInputAction*> PassthroughActions;
 
@@ -305,7 +262,7 @@ private:
 	// 【缓存重建引擎】：根据蓝图配置的 PassthroughActions，向增强输入系统反查对应的物理按键并重构缓存表。
 	// @调用时机：
 	// 1. 首次建仓：UI 创建并加入屏幕时（NativeConstruct）。
-	// 2. 动态刷新：玩家在系统设置中修改了键位，触发增强输入系统 ControlMappingsRebuiltDelegate 时自动回调。
+	// 2. 动态刷新：玩家在 system设置中修改了键位，触发增强输入系统 ControlMappingsRebuiltDelegate 时自动回调。
 	// @注意：必须标记为 UFUNCTION()，否则无法被 UE 反射系统识别，进而导致 AddUniqueDynamic 动态多播委托绑定失败。
 	UFUNCTION()
 	void RefreshInputPassthroughCache();

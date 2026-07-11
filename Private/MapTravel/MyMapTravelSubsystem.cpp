@@ -36,6 +36,9 @@
 #include "RenderingThread.h"
 #include "HAL/IConsoleManager.h"
 
+// 引入基类类型以供强制传参
+#include "UI/Transition/MyTransitionWidgetBase.h"
+
 // ==============================================================================
 // 内部安全获取真实玩家控制器的工具函数 (防无缝传送假身)
 // ==============================================================================
@@ -144,7 +147,7 @@ void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 // ==============================================================================
 #pragma region
 
-void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPtr<class UUserWidget> ScreenOffUI, float ScreenOffDuration, TSoftClassPtr<class UUserWidget> CustomLoadingUI, float MinLoadingTime)
+void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPtr<class UMyTransitionWidgetBase> ScreenOffUI, float ScreenOffDuration, TSoftClassPtr<class UMyTransitionWidgetBase> CustomLoadingUI, float MinLoadingTime)
 {
 	if (bIsTraveling) return;
 	bIsTraveling = true;

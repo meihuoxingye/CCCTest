@@ -24,6 +24,9 @@
 
 #include "Engine/Engine.h"
 
+// 【引入我们的动画模块电池】：解耦纯数学驱动逻辑
+#include "UI/MyUIAnimationModule.h"
+
 
 // ==============================================================================
 // MVVM 双轨渲染驱动源 (MVVM Dual-Track Drive Source)
@@ -36,17 +39,17 @@ void UMyActivatableWidgetBase::SetTransitionProgress(float InProgress)
 	// 业务背景：当 UI 播放出场/退场动画时，本类的 NativeTick 会在短短 0.3 秒内，亲自每帧向这里塞入递增/递减的进度。
 	// 灾难规避：此处必须执行严格的内存值比对。一旦拦截到因超高帧率导致 DeltaTime 过小而产生的无效重复数字，立刻掐断广播。
 	// 绝不允许对全网 UI 下发无效的刷新指令，死守渲染管线的 CPU 消耗底线。
-	if (TransitionProgress != InProgress)
+	if (AnimModule.TransitionProgress != InProgress)
 	{
 		// 数据物理着陆 (记录最新的 0~1 线性进度)
-		TransitionProgress = InProgress;
+		AnimModule.TransitionProgress = InProgress;
 
 		// 【第二道防线：编译期寻址与零反射广播 (Zero-Reflection Broadcast)】
 		// 架构解耦：它与 UpdateOpeningEffect（蓝图缓动钩子）共同组成了本框架的“双轨动画渲染机制”。
 		// 此处 C++ 只负责大喊“线性进度变了”，绝不关心蓝图拿这个进度去干什么。
 		// 极限压榨：摒弃慢速的字符串哈希匹配，直接利用 UHT 编译期生成的静态描述符地址 (FieldId)。
-		// 使得向 MVVM 框架通报变更的时间复杂度降为纯粹的 O(1)，确保极致流畅。
-		BroadcastFieldValueChanged(UMyActivatableWidgetBase::FFieldNotificationClassDescriptor::TransitionProgress);
+		// 注意：因已升级为纯函数驱动，此处的 FieldId 已重构为 GetTransitionProgress。
+		BroadcastFieldValueChanged(UMyActivatableWidgetBase::FFieldNotificationClassDescriptor::GetTransitionProgress);
 	}
 }
 
@@ -63,9 +66,9 @@ void UMyActivatableWidgetBase::NativeOnInitialized()
 	Super::NativeOnInitialized();
 
 	// 将 UI 动画过渡进度归零（0.0 代表动画起点）
-	TransitionProgress = 0.0f;
+	AnimModule.TransitionProgress = 0.0f;
 	// 将 UI 的初始状态设置为待机（Idle）
-	CurrentState = EUIState::Idle;
+	AnimModule.CurrentState = EUIAnimationState::Idle;
 
 	// 【修复】：消除直接赋值的弃用警告，统一使用 5.8 标准 Setter
 	SetIsFocusable(true);
@@ -106,20 +109,18 @@ void UMyActivatableWidgetBase::SynchronizeProperties()
 	Super::SynchronizeProperties();
 
 	// 如果当前 UI 正在打开或者处于待机状态
-	if (CurrentState == EUIState::Opening || CurrentState == EUIState::Idle)
+	if (AnimModule.CurrentState == EUIAnimationState::Opening || AnimModule.CurrentState == EUIAnimationState::Idle)
 	{
-		// 计算经过缓动曲线（EaseInOut）处理后的当前进度值
-		float EasedProgress = FMath::InterpEaseInOut(0.0f, 1.0f, TransitionProgress, OpeningExp);
+		// 电池直取：计算经过缓动曲线（EaseInOut）处理后的当前进度值
 		// 将计算好的进度传递给蓝图或底层的打开特效更新函数
-		UpdateOpeningEffect(TransitionProgress, EasedProgress);
+		UpdateOpeningEffect(AnimModule.TransitionProgress, AnimModule.GetEasedProgress());
 	}
 	// 如果当前 UI 正在关闭
-	else if (CurrentState == EUIState::Closing)
+	else if (AnimModule.CurrentState == EUIAnimationState::Closing)
 	{
 		// 计算经过缓动曲线处理后的关闭动画进度值
-		float EasedProgress = FMath::InterpEaseInOut(0.0f, 1.0f, TransitionProgress, ClosingExp);
 		// 将计算好的进度传递给蓝图或底层的关闭特效更新函数
-		UpdateClosingEffect(TransitionProgress, EasedProgress);
+		UpdateClosingEffect(AnimModule.TransitionProgress, AnimModule.GetEasedProgress());
 	}
 }
 
@@ -130,36 +131,24 @@ void UMyActivatableWidgetBase::NativeTick(const FGeometry& MyGeometry, float InD
 
 	// Idle 状态下直接返回，这是最廉价的开销，避免不必要的数学推演
 	// 如果处于待机状态，不需要更新动画进度，直接返回以节省性能
-	if (CurrentState == EUIState::Idle) return;
+	if (AnimModule.CurrentState == EUIAnimationState::Idle) return;
 
-	// 根据当前是打开还是关闭状态，确定对应的动画总时长
-	float CurrentDuration = (CurrentState == EUIState::Opening) ? OpeningDuration : ClosingDuration;
+	// 记录计算前的旧进度，供后续第一轨防抖对比
+	float OldProgress = AnimModule.TransitionProgress;
 
-	// 【优化】：将除法预计算并转为乘法，消除每一帧的除法开销，对 CPU 分支预测更友好
-	// 计算本帧进度增加/减少的步长（防止除零错误，最少取 0.001f 应对高帧率显示器）
-	const float InvDuration = 1.0f / FMath::Max(0.001f, CurrentDuration);
-	const float Step = InDeltaTime * InvDuration;
-
-	float NewProgress = TransitionProgress;
-
-	// 如果正在播放入场动画
-	if (CurrentState == EUIState::Opening)
-	{
-		// 累加进度，最高不超过 1.0f
-		NewProgress = FMath::Min(TransitionProgress + Step, 1.0f);
-	}
-	// 如果正在播放退场动画
-	else if (CurrentState == EUIState::Closing)
-	{
-		// 递减进度，最低不低于 0.0f
-		NewProgress = FMath::Max(TransitionProgress - Step, 0.0f);
-	}
+	// 【核心时钟引擎】：将 DeltaTime 喂给电池，让底层纯数学模块代为处理进度流转
+	// bool 返回值代表本帧动画是否彻底跑满（0 或 100%）
+	bool bJustFinished = AnimModule.Tick(InDeltaTime);
 
 	// 【双轨渲染之第一轨】：MVVM 核心数据总线更新广播
-	SetTransitionProgress(NewProgress);
+	// 脏标记拦截：如果电池内部计算产生了真实位移，则下发 MVVM 通知
+	if (OldProgress != AnimModule.TransitionProgress)
+	{
+		BroadcastFieldValueChanged(UMyActivatableWidgetBase::FFieldNotificationClassDescriptor::GetTransitionProgress);
+	}
 
 	// 再次判断状态，用于应用动画效果及判定动画是否结束
-	if (CurrentState == EUIState::Opening)
+	if (AnimModule.CurrentState == EUIAnimationState::Opening || (bJustFinished && AnimModule.TransitionProgress >= 1.0f))
 	{
 		// ==============================================================================
 		// 【双轨渲染之第二轨：数学引擎与蓝图交接 (Math Engine & Blueprint Handover)】
@@ -167,27 +156,18 @@ void UMyActivatableWidgetBase::NativeTick(const FGeometry& MyGeometry, float InD
 		// 性能与表现的完美平衡：C++ 承担极其昂贵的非线性数学插值计算 (InterpEaseInOut)，
 		// 算出带有丝滑惯性的 EasedProgress 后，将其直接拍给蓝图的 UpdateOpeningEffect 钩子。
 		// 让蓝图只做它最擅长的事——把现成的算好的数字连到 Transform 节点上。
-		// 计算缓动后的进度值
-		float EasedProgress = FMath::InterpEaseInOut(0.0f, 1.0f, TransitionProgress, OpeningExp);
-		// 更新打开动画的视觉表现
-		UpdateOpeningEffect(TransitionProgress, EasedProgress);
+		UpdateOpeningEffect(AnimModule.TransitionProgress, AnimModule.GetEasedProgress());
 
-		// 如果进度达到或超过 1.0，说明入场动画播放完毕
-		if (TransitionProgress >= 1.0f) CurrentState = EUIState::Idle; // 切换为待机状态
+		// 电池内部在跑到 1.0f 时已自动将状态切回 Idle，无需再次处理
 	}
-	else if (CurrentState == EUIState::Closing)
+	else if (AnimModule.CurrentState == EUIAnimationState::Closing || (bJustFinished && AnimModule.TransitionProgress <= 0.0f))
 	{
 		// 【执行第二轨：退场非线性渲染】
-		// 计算缓动后的进度值
-		float EasedProgress = FMath::InterpEaseInOut(0.0f, 1.0f, TransitionProgress, ClosingExp);
-		// 更新关闭动画的视觉表现
-		UpdateClosingEffect(TransitionProgress, EasedProgress);
+		UpdateClosingEffect(AnimModule.TransitionProgress, AnimModule.GetEasedProgress());
 
 		// 状态机收尾：当进度彻底归零（退场动画播完）
-		if (TransitionProgress <= 0.0f)
+		if (bJustFinished)
 		{
-			// 将状态重置为待机
-			CurrentState = EUIState::Idle;
 			// 隐藏 UI（折叠状态不占位、不渲染）
 			SetVisibility(ESlateVisibility::Collapsed);
 
@@ -242,7 +222,7 @@ void UMyActivatableWidgetBase::NativeOnFocusLost(const FFocusEvent& InFocusEvent
 
 	// 如果 UI 依然可见且并未进入关闭程序，说明焦点丢失是意外发生的（如 Alt-Tab 切屏）
 	// 强制收回焦点，确保 NativeOnKeyDown 持续生效，消除因切屏导致的交互中断
-	if (GetVisibility() == ESlateVisibility::Visible && CurrentState != EUIState::Closing)
+	if (GetVisibility() == ESlateVisibility::Visible && AnimModule.CurrentState != EUIAnimationState::Closing)
 	{
 		SetFocus();
 	}
@@ -252,7 +232,7 @@ void UMyActivatableWidgetBase::NativeOnActivated()
 {
 	// ！！！【新增日志 3：底层状态机照妖镜】！！！
 	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 20.f, FColor::Red, FString::Printf(TEXT("[3. UI底层] NativeOnActivated 触发！| 刚进来的 State: %d (0=Idle, 1=Opening, 2=Closing) | 进度: %f"),
-		(int32)CurrentState, TransitionProgress));
+		(int32)AnimModule.CurrentState, AnimModule.TransitionProgress));
 
 	Super::NativeOnActivated();
 
@@ -264,22 +244,22 @@ void UMyActivatableWidgetBase::NativeOnActivated()
 	// 必须在防连按 Return 之前执行！识别预热引发的满进度假死并强行破局。
 	// NativeTick 会将播放完动画的 UI 设为空闲状态，开启且进度条满的状态绝对是异常状态
 	// ==============================================================================
-	if (CurrentState == EUIState::Opening && TransitionProgress >= 1.0f)
+	if (AnimModule.CurrentState == EUIAnimationState::Opening && AnimModule.TransitionProgress >= 1.0f)
 	{
 		// 剥夺预热残留的虚假 Opening 状态，打回原型
-		CurrentState = EUIState::Idle;
+		AnimModule.CurrentState = EUIAnimationState::Idle;
 	}
 
 	// 如果已经在打开的过程中，直接返回，避免重复触发激活逻辑
 	// 【架构注】：此处的拦截已经完美防御了玩家在 0.1 秒内连按造成的“重复压栈”风险！
-	if (CurrentState == EUIState::Opening) return;
+	if (AnimModule.CurrentState == EUIAnimationState::Opening) return;
 
 	// 防御 2 - 世界上下文检查，防止在关卡切换等极端情况下触发空指针
 	if (!GetWorld()) return;
 
 	// 【终极修复 1：无条件归零】
 	// 删掉那个脆弱的 if (GetVisibility() == Collapsed) 判断。
-	// 无论发生什么，只要触发了激活，就必须无条件将进度强制拨回 0！
+	// 无论发生什么，只要触发了激活，就必须无条件将进度强制拨回 0！（调用包装函数确发 MVVM 广播）
 	SetTransitionProgress(0.0f);
 
 	// 将 UI 的根节点（WBP_TacticalMenu）设为可见，从而使整个UI可见，使其开始渲染并接受交互
@@ -289,8 +269,8 @@ void UMyActivatableWidgetBase::NativeOnActivated()
 	// 需要 UI 区域以外的部分参与检测，以确定点击到底是控制 UI 还是想要退出 UI
 	SetVisibility(ESlateVisibility::Visible);
 
-	// 将状态机切换到“正在打开”
-	CurrentState = EUIState::Opening;
+	// 将状态机切换到“正在打开” (不使用电池的 StartOpening，因上方刚完成手动拨零及 MVVM 广播)
+	AnimModule.CurrentState = EUIAnimationState::Opening;
 
 	// 【全自动入栈】
 	// 获取当前 UI 所属的本地玩家
@@ -333,15 +313,8 @@ void UMyActivatableWidgetBase::NativeOnActivated()
 	// 承接上方函数：此时，UI 的绝对像素宽高和空间位置（Geometry）已经被强制算好并存入底层缓存了！
 	// 接下来触发蓝图钩子 UpdateOpeningEffect 时，蓝图里拿到的 Geometry 就会是真实尺寸（如1920x1080），绝对不会再是 (0,0)！
 
-	// 准备首帧时间参数：因为第一帧的 NativeTick 尚未运行，必须手动利用起跑点计算一次初始参数。
-	// 本函数只会在 UI 展开时执行一次，所以此函数里计算的 TransitionProgress 绝对是 0.0f，代表动画起点；
-	// 输入实际经过时间占动画总时长的比例 TransitionProgress，根据范围（0.0 - 1.0）与曲率 OpeningExp，
-	// 计算出当前实际经过时间对应的缓动进度 EasedProgress，若曲率为 2 则 EasedProgress 会在开始缓慢，而中途加速，快结束时又减速，形成丝滑的飞入感
-	// 防止 OpeningExp 参数异常导致的极值错误
-	float EasedProgress = FMath::InterpEaseInOut(0.0f, 1.0f, TransitionProgress, FMath::Max(0.1f, OpeningExp));
-
 	// 触发更新动画，防止出现一帧的默认状态画面闪烁
-	UpdateOpeningEffect(TransitionProgress, EasedProgress);
+	UpdateOpeningEffect(AnimModule.TransitionProgress, AnimModule.GetEasedProgress());
 }
 
 void UMyActivatableWidgetBase::NativeOnDeactivated()
@@ -350,7 +323,7 @@ void UMyActivatableWidgetBase::NativeOnDeactivated()
 
 	// 增加可见性检查与设计时拦截，防止对象已销毁时依然触发逻辑
 	// 如果已经在关闭过程中，或者是折叠不可见状态，则无需重复执行反激活
-	if (IsDesignTime() || CurrentState == EUIState::Closing || GetVisibility() == ESlateVisibility::Collapsed) return;
+	if (IsDesignTime() || AnimModule.CurrentState == EUIAnimationState::Closing || GetVisibility() == ESlateVisibility::Collapsed) return;
 
 	// 【终极修复 2：Tick 抢救术】
 	// 虚幻引擎规定：Collapsed 状态下的 UI 绝对不执行 Tick！
@@ -358,8 +331,9 @@ void UMyActivatableWidgetBase::NativeOnDeactivated()
 	// 直到动画跑完（TransitionProgress <= 0），再由我们自己在 Tick 结尾设回 Collapsed。
 	SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 
-	// 将状态机切换为“正在关闭”
-	CurrentState = EUIState::Closing;
+	// 将状态机切换为“正在关闭” 
+	// 注意：此处保留你原有的“断点续播”打断防线，如果刚开到一半就关，进度基于原位置回退，而非突变 1.0f
+	AnimModule.CurrentState = EUIAnimationState::Closing;
 
 	// 注意：这里绝不调用 PopUI！留在拦截栈中抗点击穿透，交由 Tick 动画结束时出栈。
 }

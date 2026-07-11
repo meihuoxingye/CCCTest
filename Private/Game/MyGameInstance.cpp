@@ -108,61 +108,51 @@ void UMyGameInstance::HandleEndTravel(UWorld* NewWorld)
 	}
 }
 
-void UMyGameInstance::PlayScreenOffUI(TSoftClassPtr<class UUserWidget> ScreenOffUIClass)
+void UMyGameInstance::PlayScreenOffUI(TSoftClassPtr<class UMyTransitionWidgetBase> ScreenOffUIClass)
 {
-	// 如果关卡设计师没配置熄屏UI，我们就直接返回，后面会直接硬切
 	if (ScreenOffUIClass.IsNull()) return;
 
 	if (UClass* WidgetClass = ScreenOffUIClass.LoadSynchronous())
 	{
-		if (UUserWidget* ScreenOffWidget = CreateWidget<UUserWidget>(this, WidgetClass))
+		// 【神级联动】：因为它是 UMyTransitionWidgetBase，我们只要把它加到视口，
+		// 它的 NativeConstruct 就会自动激活体内的动画电池跑入场动画，完全不需要我们手动下令！
+		if (UMyTransitionWidgetBase* ScreenOffWidget = CreateWidget<UMyTransitionWidgetBase>(this, WidgetClass))
 		{
-			// 加载到极高的层级，挡住一切
 			ScreenOffWidget->AddToViewport(10000);
-
-			// 注意：UMG 蓝图里，在 Event Construct 节点直接让它自动播放熄屏动画！
+			// 注：这个熄屏 UI 会在 ServerTravel 发生时，和旧世界一起自动灰飞烟灭，无需存指针清理
 		}
 	}
 }
 
-void UMyGameInstance::ShowFakeLoadingScreen(TSoftClassPtr<class UUserWidget> CustomUI)
+void UMyGameInstance::ShowFakeLoadingScreen(TSoftClassPtr<class UMyTransitionWidgetBase> CustomUI)
 {
-	if (PureFakeLoadingSlate.IsValid()) return;
+	if (ActiveTransitionUI) return; // 防连按重复拉起
 
-	TSoftClassPtr<UUserWidget> TargetUIClass = CustomUI.IsNull() ? DefaultLoadingUIClass : CustomUI;
+	TSoftClassPtr<UMyTransitionWidgetBase> TargetUIClass = CustomUI.IsNull() ? DefaultLoadingUIClass : CustomUI;
 	if (UClass* WidgetClass = TargetUIClass.LoadSynchronous())
 	{
-		if (UUserWidget* LoadingWidget = CreateWidget<UUserWidget>(this, WidgetClass))
+		// 【纯净创建】：直接存入保命指针，直接上屏！
+		ActiveTransitionUI = CreateWidget<UMyTransitionWidgetBase>(this, WidgetClass);
+		if (ActiveTransitionUI)
 		{
-			PureFakeLoadingSlate = LoadingWidget->TakeWidget();
-			if (PureFakeLoadingSlate.IsValid() && GEngine && GEngine->GameViewport)
-			{
-				GEngine->GameViewport->AddViewportWidgetContent(PureFakeLoadingSlate.ToSharedRef(), 10001);
-			}
+			ActiveTransitionUI->AddToViewport(10001);
 		}
 	}
 
-	// 记录 UI 真正呈现的绝对时间秒数
 	UIStartTime = FPlatformTime::Seconds();
 
-	// 开启一个单次定时器，到时间后宣判“最小显示时间已到”
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().SetTimer(FakeLoadingTimerHandle, [this]()
 			{
 				bMinTimeElapsed = true;
-				// 如果时间到了，且引擎早已就绪，那就直接关掉 UI 迎接玩家
-				if (bEngineIsReady)
-				{
-					CheckAndHideLoadingScreen();
-				}
+				if (bEngineIsReady) CheckAndHideLoadingScreen();
 			}, MinUIShowDuration, false);
 	}
 }
 
 void UMyGameInstance::CheckAndHideLoadingScreen()
 {
-	// 只有双轨条件全部满足，才执行最终的 UI 清除
 	if (bEngineIsReady && bMinTimeElapsed)
 	{
 		HideFakeLoadingScreen();
@@ -171,10 +161,24 @@ void UMyGameInstance::CheckAndHideLoadingScreen()
 
 void UMyGameInstance::HideFakeLoadingScreen()
 {
-	if (PureFakeLoadingSlate.IsValid() && GEngine && GEngine->GameViewport)
+	if (ActiveTransitionUI)
 	{
-		GEngine->GameViewport->RemoveViewportWidgetContent(PureFakeLoadingSlate.ToSharedRef());
-		PureFakeLoadingSlate.Reset();
+		// 引擎就绪！直接通知 UI，UI 内部的电池会切到退场状态，开始擦除动画！
+		ActiveTransitionUI->NotifyEngineReady();
+	}
+	else
+	{
+		FinalizeLoadingScreenRemoval();
+	}
+}
+
+void UMyGameInstance::FinalizeLoadingScreenRemoval()
+{
+	if (ActiveTransitionUI)
+	{
+		// 物理移除，释放内存。这行代码只会被 UI 播完动画后自己反向调用！
+		ActiveTransitionUI->RemoveFromParent();
+		ActiveTransitionUI = nullptr;
 	}
 	PendingTargetMapName = NAME_None;
 }
