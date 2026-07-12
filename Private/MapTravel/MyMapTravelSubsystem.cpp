@@ -200,27 +200,18 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 	UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>();
 	if (!GI)
 	{
-		// 连大管家都没了，转场系统彻底瘫痪，直接终止！绝不使用固定值兜底瞎跑！
 		bIsTraveling = false;
 		return;
 	}
 
-	// 提取当前地图的干净名字（去除前缀）
-	FName CurrentMapName = FName(*FPackageName::GetShortName(World->GetMapName()));
-
-	// 离开用当前地图的配置，进入用目标地图的配置！
+	FName CurrentMapName = FName(*UGameplayStatics::GetCurrentLevelName(World, true));
 	FMapTransitionConfig OutConfig = GI->GetMapTransitionConfig(CurrentMapName);
-	FMapTransitionConfig InConfig = GI->GetMapTransitionConfig(TargetLevelName);
 
-	// 设置新世界的加载屏（用 InConfig）
+	// 【修改点】：直接记下目标名字就行了，落地后大管家自己会查字典！
 	GI->PendingTargetMapName = TargetLevelName;
-	GI->MinUIShowDuration = InConfig.MinLoadingTime;
-	GI->DefaultLoadingUIClass = InConfig.LoadingScreenUIClass;
 
-	// 播放旧世界的熄屏（用 OutConfig）
 	GI->PlayScreenOffUI(OutConfig.ScreenOffUIClass, OutConfig.ScreenOffDuration);
 
-	// 【完全只读化】：读取大管家面板中的只读 SystemSafeDelay 作为物理底线，彻底抛弃 0.1f
 	float SafeTravelDelay = FMath::Max(GI->SystemSafeDelay, OutConfig.ScreenOffDuration);
 
 	// 3. 挂起计时器执行 ServerTravel
@@ -281,15 +272,15 @@ void UMyMapTravelSubsystem::ExecuteZoneTravelWithWait(AActor* TeleportingActor, 
 	FName CurrentMapName = FName(*FPackageName::GetShortName(World->GetMapName()));
 	FMapTransitionConfig Config = GI->GetMapTransitionConfig(CurrentMapName);
 
+	// 【修改点】：同地图传送，目标地图名就是当前地图名，告诉大管家！
+	GI->PendingTargetMapName = CurrentMapName;
+
 	GI->PlayScreenOffUI(Config.ScreenOffUIClass, Config.ScreenOffDuration);
 
-	// 【完全只读化】：时间完全来源于大管家的防呆锁和地图字典配置
 	float SafeDelay = FMath::Max(GI->SystemSafeDelay, Config.ScreenOffDuration);
 	float IntroDelay = Config.MinLoadingTime;
 
-	// 为了给下面 Timer 里的闭包传 UI：
-	GI->MinUIShowDuration = Config.MinLoadingTime;
-	GI->DefaultLoadingUIClass = Config.LoadingScreenUIClass;
+	// 【删除了那几行给旧变量赋值的冗余代码】
 
 	// 3. 卡表瞬移
 	FTimerDelegate TimerDel;
@@ -301,7 +292,8 @@ void UMyMapTravelSubsystem::ExecuteZoneTravelWithWait(AActor* TeleportingActor, 
 			{
 				if (UMyGameInstance* InnerGI = InnerWorld->GetGameInstance<UMyGameInstance>())
 				{
-					InnerGI->ShowFakeLoadingScreen(InnerGI->DefaultLoadingUIClass);
+					// 【修改点】：直接传 nullptr，大管家内部会自己查字典！
+					InnerGI->ShowFakeLoadingScreen(nullptr);
 				}
 				InnerWorld->GetTimerManager().SetTimer(ZoneTravelTimerHandle, this, &UMyMapTravelSubsystem::FinishZoneTravel, IntroDelay, false);
 			}

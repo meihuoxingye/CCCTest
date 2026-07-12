@@ -52,7 +52,16 @@ void UMyGameInstance::Shutdown()
 		BlackoutExt.Reset();
 	}
 
-	HideFakeLoadingScreen();
+	// =====================================================================
+	// 【崩溃修复】：引擎销毁期间，绝对禁止调用 UMG 的动画系统！
+	// 直接从内存层面物理抹杀 Widget，不留任何遗言！
+	// =====================================================================
+	if (ActiveTransitionUI)
+	{
+		ActiveTransitionUI->RemoveFromParent();
+		ActiveTransitionUI = nullptr;
+	}
+
 	Super::Shutdown();
 }
 
@@ -139,12 +148,19 @@ void UMyGameInstance::PlayScreenOffUI(TSoftClassPtr<class UMyTransitionWidgetBas
 
 void UMyGameInstance::ShowFakeLoadingScreen(TSoftClassPtr<class UMyTransitionWidgetBase> CustomUI)
 {
-	if (ActiveTransitionUI) return; // 防连按重复拉起
+	if (ActiveTransitionUI) return;
 
-	TSoftClassPtr<UMyTransitionWidgetBase> TargetUIClass = CustomUI.IsNull() ? DefaultLoadingUIClass : CustomUI;
+	// =====================================================================
+	// 【核心魔法】：被删掉的变量不需要了，大管家自己用 PendingTargetMapName 查字典！
+	// =====================================================================
+	FMapTransitionConfig Config = GetMapTransitionConfig(PendingTargetMapName);
+
+	// 优先用外部强传的 CustomUI，如果没有就用字典里的
+	TSoftClassPtr<UMyTransitionWidgetBase> TargetUIClass = CustomUI.IsNull() ? Config.LoadingScreenUIClass : CustomUI;
+	float ActualDuration = Config.MinLoadingTime;
+
 	if (UClass* WidgetClass = TargetUIClass.LoadSynchronous())
 	{
-		// 【纯净创建】：直接存入保命指针，直接上屏！
 		ActiveTransitionUI = CreateWidget<UMyTransitionWidgetBase>(this, WidgetClass);
 		if (ActiveTransitionUI)
 		{
@@ -160,7 +176,7 @@ void UMyGameInstance::ShowFakeLoadingScreen(TSoftClassPtr<class UMyTransitionWid
 			{
 				bMinTimeElapsed = true;
 				if (bEngineIsReady) CheckAndHideLoadingScreen();
-			}, MinUIShowDuration, false);
+			}, ActualDuration, false); // 【修改点】：使用字典里查出来的时间
 	}
 }
 

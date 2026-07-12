@@ -17,6 +17,9 @@
 // 解决僵尸索引后台猎杀的异步支持
 #include "Async/Async.h" 
 
+// 【新增】：引入我们的大世界漫游管线
+#include "MapTravel/MyMapTravelSubsystem.h"
+
 
 // ==============================================================================
 // 核心接口 (Core Interfaces)
@@ -149,13 +152,24 @@ bool UMySaveSubsystem::LoadGameFromSlot(const FString& SlotName)
 
 
 	// =====================================================================
-	// 【终极修复：废除“同关卡免加载”的危险优化，强制刷新世界状态】
-	// 无论玩家是否在当前关卡，必须强制 OpenLevel。
-	// 否则那些已经被杀死的怪物、被触发的机关、被破坏的木箱，都不会被重置！
-	// 相当于一刀切，没专门设置的一切都会重置
+	// 【终极修复：废除粗暴的 OpenLevel，全面接入 3A 漫游管线】
+	// 无论玩家是否在当前关卡，强制利用漫游管线刷新世界状态。
 	// =====================================================================
+	// 1. 记下要读的档位名字（记忆锚点），留给新世界的 HandlePendingLoad 在黑幕背后读取
 	PendingLoadSlotName = SlotName;
-	UGameplayStatics::OpenLevel(World, SaveObj->GlobalDataBlock.SavedLevelName);
+
+	// 2. 呼叫我们亲手打造的跨地图流送子系统
+	if (UMyMapTravelSubsystem* TravelSub = World->GetSubsystem<UMyMapTravelSubsystem>())
+	{
+		// 让大世界管线去查字典、拉黑幕、剥夺玩家输入、并执行优雅的无缝切图！
+		// 目标名字直接从存档数据里提取
+		TravelSub->ExecuteMapTravel(SaveObj->GlobalDataBlock.SavedLevelName);
+	}
+	else
+	{
+		// 极端异常兜底（如果由于不可抗力导致子系统丢失），才使用硬切
+		UGameplayStatics::OpenLevel(World, SaveObj->GlobalDataBlock.SavedLevelName);
+	}
 
 	return true;
 }
