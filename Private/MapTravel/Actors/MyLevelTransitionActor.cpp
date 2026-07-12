@@ -26,7 +26,9 @@ AMyLevelTransitionActor::AMyLevelTransitionActor()
 void AMyLevelTransitionActor::BeginPlay()
 {
 	Super::BeginPlay();
-	TriggerBox->OnComponentBeginOverlap.AddDynamic(this, &AMyLevelTransitionActor::OnOverlapBegin);
+
+	// 【修正】：使用 AddUniqueDynamic 防止 Live Coding 导致的重复绑定崩溃
+	TriggerBox->OnComponentBeginOverlap.AddUniqueDynamic(this, &AMyLevelTransitionActor::OnOverlapBegin);
 }
 
 #pragma endregion

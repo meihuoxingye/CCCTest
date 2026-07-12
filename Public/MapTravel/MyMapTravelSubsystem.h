@@ -128,9 +128,9 @@ private:
 	// ==============================================================================
 public:
 
-	// 带有 UI 与强制等待的数据层切换（用于同地图内进 Boss 房等重度切换）
+	// 带有 UI 与强制等待的同地图瞬移切换（用于同地图内进 Boss 房等重度切换）
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
-	void ExecuteZoneTravelWithWait(UDataLayerAsset* TargetZone, TSoftClassPtr<class UUserWidget> CustomLoadingUI, float WaitTime);
+	void ExecuteZoneTravelWithWait(AActor* TeleportingActor,const FTransform& TargetTransform,TSoftClassPtr<class UMyTransitionWidgetBase> ScreenOffUI,float ScreenOffDuration,TSoftClassPtr<class UMyTransitionWidgetBase> CustomLoadingUI,float MinDisplayTime);
 
 private:
 

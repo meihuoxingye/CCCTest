@@ -26,11 +26,21 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "TransitionUI")
 	virtual void NotifyEngineReady();
 
+	// 【新增】：接受关卡设计师的最高指令，覆写电池的播放时间
+	UFUNCTION(BlueprintCallable, Category = "TransitionUI")
+	virtual void SetTransitionDuration(float InIntroDuration);
+
 
 	// ==============================================================================
 	// 动画渲染驱动源 (Animation Drive Source)
 	// ==============================================================================
 protected:
+	// 【新增：3A级工业防呆警告盾牌】
+	// 为什么是 EditDefaultsOnly + BlueprintReadOnly：确保该变量在细节面板中对美术是【完全灰色只读】的！
+	// 把它死死钉在 AnimModule 的正上方，任何美术在调参数前都必须强制阅读此契约。
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "TransitionUI|Animation", meta = (MultiLine = true))
+	FText ArchitectureWarning;
+
 	// 【核心装配】：将动画模块作为电池嵌入！
 	// 奇迹宏 ShowOnlyInnerProperties 会让这个结构体在细节面板中隐形，
 	// 里面的 OpeningDuration 等参数会直接平铺在 UI 的外层，美术体验极佳！
@@ -45,13 +55,13 @@ protected:
 	// @param Progress 线性进度 (0.0 到 1.0)
 	// @param EasedProgress 经过缓动曲线平滑后的视觉进度
 	UFUNCTION(BlueprintImplementableEvent, Category = "TransitionUI|Animation")
-	void BP_UpdateIntroEffect(float Progress, float EasedProgress);
+	void UpdateOpeningEffect(float Progress, float EasedProgress);
 
 	// 【退场动画渲染钩子】
 	// @param Progress 线性进度 (1.0 递减到 0.0)
 	// @param EasedProgress 经过缓动曲线平滑后的视觉进度
 	UFUNCTION(BlueprintImplementableEvent, Category = "TransitionUI|Animation")
-	void BP_UpdateOutroEffect(float Progress, float EasedProgress);
+	void UpdateClosingEffect(float Progress, float EasedProgress);
 
 
 	// ==============================================================================

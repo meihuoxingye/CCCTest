@@ -238,7 +238,7 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 		}
 
 		// 播放关卡设计师专属定制的熄屏 UI 动画
-		GI->PlayScreenOffUI(ScreenOffUI);
+		GI->PlayScreenOffUI(ScreenOffUI, ScreenOffDuration);
 	}
 
 	// 3. 等待 UMG 熄屏动画彻底播完（黑透），再执行无缝漫游！
@@ -267,9 +267,9 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 // ==============================================================================
 #pragma region
 
-void UMyMapTravelSubsystem::ExecuteZoneTravelWithWait(UDataLayerAsset* TargetZone, TSoftClassPtr<class UUserWidget> CustomLoadingUI, float WaitTime)
+void UMyMapTravelSubsystem::ExecuteZoneTravelWithWait(AActor* TeleportingActor, const FTransform& TargetTransform, TSoftClassPtr<class UMyTransitionWidgetBase> ScreenOffUI, float ScreenOffDuration, TSoftClassPtr<class UMyTransitionWidgetBase> CustomLoadingUI, float MinDisplayTime)
 {
-	if (bIsTraveling || !TargetZone) return;
+	if (bIsTraveling || !TeleportingActor) return;
 	bIsTraveling = true;
 
 	UWorld* World = GetWorld();
@@ -279,6 +279,7 @@ void UMyMapTravelSubsystem::ExecuteZoneTravelWithWait(UDataLayerAsset* TargetZon
 		return;
 	}
 
+	// 1. 点穴：禁止玩家一切操作
 	if (APlayerController* PC = GetRealPlayerController(World))
 	{
 		PC->DisableInput(PC);
@@ -290,20 +291,41 @@ void UMyMapTravelSubsystem::ExecuteZoneTravelWithWait(UDataLayerAsset* TargetZon
 		{
 			Pawn->DisableInput(PC);
 		}
-
-		// =====================================================================
-		// 【修复 2.1：废弃老式独立 UI，并轨至大管家】
-		// 同地图硬切换也由 GameInstance 统一全权接管 UI 显示，绝不使用 9999 层级
-		// =====================================================================
-		if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
-		{
-			GI->ShowFakeLoadingScreen(CustomLoadingUI);
-		}
 	}
 
-	RefreshSlidingWindow(TargetZone);
+	// 2. 呼叫大管家：播旧区域的熄屏闭合 UI
+	if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
+	{
+		GI->PlayScreenOffUI(ScreenOffUI, ScreenOffDuration);
+	}
 
-	World->GetTimerManager().SetTimer(ZoneTravelTimerHandle, this, &UMyMapTravelSubsystem::FinishZoneTravel, WaitTime, false);
+	// 3. 等待熄屏完成（黑透）后：把人瞬移过去 -> 唤起新区域展示 UI -> 启动等待计时器
+	float SafeDelay = FMath::Max(0.1f, ScreenOffDuration);
+
+	FTimerDelegate TimerDel;
+	TimerDel.BindLambda([this, TeleportingActor, TargetTransform, CustomLoadingUI, MinDisplayTime]()
+		{
+			// 执行物理瞬移
+			if (IsValid(TeleportingActor))
+			{
+				TeleportingActor->SetActorTransform(TargetTransform);
+			}
+
+			if (UWorld* InnerWorld = GetWorld())
+			{
+				// 让大管家贴上新区域的展示大字（或转场图）
+				if (UMyGameInstance* GI = InnerWorld->GetGameInstance<UMyGameInstance>())
+				{
+					GI->MinUIShowDuration = MinDisplayTime;
+					GI->ShowFakeLoadingScreen(CustomLoadingUI);
+				}
+
+				// 开启终极计时器，展示时间一到，通知大管家撤去UI并恢复输入
+				InnerWorld->GetTimerManager().SetTimer(ZoneTravelTimerHandle, this, &UMyMapTravelSubsystem::FinishZoneTravel, MinDisplayTime, false);
+			}
+		});
+
+	World->GetTimerManager().SetTimer(ZoneTravelTimerHandle, TimerDel, SafeDelay, false);
 }
 
 void UMyMapTravelSubsystem::FinishZoneTravel()

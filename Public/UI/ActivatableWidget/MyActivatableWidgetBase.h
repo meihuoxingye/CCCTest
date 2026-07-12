@@ -6,6 +6,8 @@
 #include "CoreMinimal.h"
 // 【替换为 CommonUI】：包含 CommonActivatableWidget 基类
 #include "CommonActivatableWidget.h"
+// 【引入我们的动画模块电池】：解耦纯数学驱动逻辑
+#include "UI/MyUIAnimationModule.h"
 // 【必须在最后一行】
 // 包含 Unreal Header Tool 生成的反射代码文件
 #include "MyActivatableWidgetBase.generated.h"
@@ -100,11 +102,14 @@ protected:
 	// ==============================================================================
 protected:
 
-	// 【双轨渲染之第一轨：MVVM 线性数据总线】
+	// 【双轨渲染之第一轨：MVVM 线性数据总线 (手动同步接口)】
 	// 业务场景：控制 UI 菜单出场 (Fade/Slide In) 或退场时的基础视觉表现。
-	// 架构真相：本动画不依赖任何外部 Timeline！这是由本类 NativeTick 亲自接管生命周期并进行纯数学步进计算的底层接口。
+	// 架构演进：引入动画模块 (FMyUIAnimationModule) 后，高频的“每帧动画步进与广播”已由 NativeTick 内部直接接管。
+	// 当前定位：这是一个“手动强行修改进度，并触发 MVVM 刷新”的专用接口。
+	// 工作流：当我们需要在动画自动播放之外，强行介入修改进度时调用。
+	// 典型用例：例如 UI 刚激活 (NativeOnActivated) 且尚未触发 Tick 时，调用 SetTransitionProgress(0.0f) 强行归零。
+	// 它可以保证底层数字被修改的同时，立刻向蓝图下发 MVVM 广播，防止底层数据与屏幕视觉脱节。
 	// 强制规范：严禁在 C++ 层面写死 SetRenderOpacity() 等表现代码！
-	// 工作流：NativeTick 每帧算出最新的 0.0~1.0 线性进度后塞入这里，UI 蓝图通过 MVVM 静态监听此数字，全自动完成基础的视觉演变。
 	UFUNCTION(BlueprintCallable, Category = "UI|Transition|State")
 	void SetTransitionProgress(float InProgress);
 
@@ -135,7 +140,7 @@ protected:
 
 	// 【第二轨：退场动画渲染钩子】
 	// 【退场专属钩子】：仅在 UI 收起时触发。推荐仅驱动透明度渐隐，利用 Slate 特性维持最后坐标。	 
-	// @param Progress  线性进度 (0.0 到 1.0)	 * @param EasedProgress  平滑后的视觉进度；
+	// @param Progress  线性进度 (1.0 到 0.0)	 * @param EasedProgress  平滑后的视觉进度；
 	// 这是一个没有 C++ 实现的事件，强制要求蓝图子类去实现处理收起 UI 时的动画表现。
 	// 为什么不在 C++ 写死代码：防止底层被视觉表现绑架！若在 C++ 写死动画逻辑，美术每次修改表现都需要程序员重新编译项目，将千变万化的视觉表演权 100% 移交蓝图
 	// 【架构约束/单向通讯】：返回值为 void 宣告了它是“发射后不管”的事件（蓝图红节点）。

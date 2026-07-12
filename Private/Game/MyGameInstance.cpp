@@ -108,7 +108,7 @@ void UMyGameInstance::HandleEndTravel(UWorld* NewWorld)
 	}
 }
 
-void UMyGameInstance::PlayScreenOffUI(TSoftClassPtr<class UMyTransitionWidgetBase> ScreenOffUIClass)
+void UMyGameInstance::PlayScreenOffUI(TSoftClassPtr<class UMyTransitionWidgetBase> ScreenOffUIClass, float InDuration)
 {
 	if (ScreenOffUIClass.IsNull()) return;
 
@@ -118,6 +118,9 @@ void UMyGameInstance::PlayScreenOffUI(TSoftClassPtr<class UMyTransitionWidgetBas
 		// 它的 NativeConstruct 就会自动激活体内的动画电池跑入场动画，完全不需要我们手动下令！
 		if (UMyTransitionWidgetBase* ScreenOffWidget = CreateWidget<UMyTransitionWidgetBase>(this, WidgetClass))
 		{
+			// 【铁律执行】：在上屏（NativeConstruct）触发动画前，强行将 LD 的时间注入电池！
+			ScreenOffWidget->SetTransitionDuration(InDuration);
+
 			ScreenOffWidget->AddToViewport(10000);
 			// 注：这个熄屏 UI 会在 ServerTravel 发生时，和旧世界一起自动灰飞烟灭，无需存指针清理
 		}

@@ -20,13 +20,16 @@ void UMyTransitionWidgetBase::NotifyEngineReady()
 	}
 }
 
+void UMyTransitionWidgetBase::SetTransitionDuration(float InIntroDuration)
+{
+	// 赋给它什么值，电池就跑多少秒，绝不逼逼！
+	if (InIntroDuration > 0.0f)
+	{
+		AnimModule.OpeningDuration = InIntroDuration;
+	}
+}
+
 #pragma endregion
-
-
-// ==============================================================================
-// 动画渲染驱动源 (Animation Drive Source)
-// ==============================================================================
-// (纯蓝图钩子，无需在 C++ 实现)
 
 
 // ==============================================================================
@@ -41,6 +44,13 @@ void UMyTransitionWidgetBase::NativeConstruct()
 	// 防止编辑器预览模式执行运行时逻辑
 	if (IsDesignTime()) return;
 
+	// 【防呆文本物理着陆】：硬编码锁死警告内容
+	ArchitectureWarning = NSLOCTEXT("Architecture", "TransitionWarning",
+		"【系统时序契约】：\n"
+		"1. 此处的 Opening/Closing Duration 在本类中仅供【编辑器视口拖动预览】！\n"
+		"2. 游戏运行时，此处的具体秒数将被完全废弃，系统将强行注入关卡触发器(Trigger)中配置的物理时间！\n"
+		"3. 美术仅需在此类中调节缓动指数(Exp)和视觉效果，绝对不要和策划硬刚运行时时间！");
+
 	bIsWaitingForEngine = false;
 
 	// UI 实例化上屏的第一帧，直接命令电池开始跑入场动画
@@ -51,15 +61,21 @@ void UMyTransitionWidgetBase::SynchronizeProperties()
 {
 	Super::SynchronizeProperties();
 
+	// 保证编辑器模式下，美术一编译或者一改参数，警告文本就能在细节面板里被刷成灰色
+	ArchitectureWarning = NSLOCTEXT("Architecture", "TransitionWarning",
+		"【系统时序契约】：\n"
+		"1. 此处的 Opening/Closing Duration 在本类中仅供【编辑器视口拖动预览】！\n"
+		"2. 游戏运行时，此处的具体秒数将被完全废弃，系统将强行注入关卡触发器(Trigger)中配置的物理时间！\n"
+		"3. 美术仅需在此类中调节缓动指数(Exp)和视觉效果，绝对不要和策划硬刚运行时时间！");
+
 	// 【编辑器实时预览】：完美复用电池里的逻辑
-	if (AnimModule.CurrentState == EUIState::Opening || AnimModule.CurrentState == EUIState::Idle)
+	if (AnimModule.CurrentState == EUIAnimationState::Opening || AnimModule.CurrentState == EUIAnimationState::Idle)
 	{
-		// 你在蓝图编辑器里拖动 TransitionProgress 滑块，画面就会动！
-		BP_UpdateIntroEffect(AnimModule.TransitionProgress, AnimModule.GetEasedProgress());
+		UpdateOpeningEffect(AnimModule.TransitionProgress, AnimModule.GetEasedProgress());
 	}
-	else if (AnimModule.CurrentState == EUIState::Closing)
+	else if (AnimModule.CurrentState == EUIAnimationState::Closing)
 	{
-		BP_UpdateOutroEffect(AnimModule.TransitionProgress, AnimModule.GetEasedProgress());
+		UpdateClosingEffect(AnimModule.TransitionProgress, AnimModule.GetEasedProgress());
 	}
 }
 
@@ -67,33 +83,26 @@ void UMyTransitionWidgetBase::NativeTick(const FGeometry& MyGeometry, float InDe
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
 
-	// 编辑器模式，或者正在死等引擎的状态下，切断 Tick 节省开销
 	if (IsDesignTime() || bIsWaitingForEngine) return;
 
-	// 1. 【电池驱动】：把 DeltaTime 喂给电池，让它自己去算那些复杂的除法和数学逻辑
-	// 返回值为 true 代表动画在本帧刚好彻底播完
 	bool bJustFinished = AnimModule.Tick(InDeltaTime);
 
-	// 2. 【分流渲染】：根据电池的当前状态，或者刚刚结束的状态，去调用蓝图钩子
-	if (AnimModule.CurrentState == EUIState::Opening || (bJustFinished && AnimModule.TransitionProgress >= 1.0f))
+	// 【修改这里】：全换成 EUIAnimationState
+	if (AnimModule.CurrentState == EUIAnimationState::Opening || (bJustFinished && AnimModule.TransitionProgress >= 1.0f))
 	{
-		// 把电池算好的结果直接抛给蓝图
-		BP_UpdateIntroEffect(AnimModule.TransitionProgress, AnimModule.GetEasedProgress());
+		UpdateOpeningEffect(AnimModule.TransitionProgress, AnimModule.GetEasedProgress());
 
 		if (bJustFinished)
 		{
-			// 入场播完，上锁！进入静默挂起模式，等待 GameInstance 的唤醒
 			bIsWaitingForEngine = true;
 		}
 	}
-	else if (AnimModule.CurrentState == EUIState::Closing || (bJustFinished && AnimModule.TransitionProgress <= 0.0f))
+	else if (AnimModule.CurrentState == EUIAnimationState::Closing || (bJustFinished && AnimModule.TransitionProgress <= 0.0f))
 	{
-		BP_UpdateOutroEffect(AnimModule.TransitionProgress, AnimModule.GetEasedProgress());
+		UpdateClosingEffect(AnimModule.TransitionProgress, AnimModule.GetEasedProgress());
 
 		if (bJustFinished)
 		{
-			// 【终极收尾】：退场动画彻底播完（擦干净了）
-			// 电池已经把进度降到了 0.0，UI 自我了断，反向呼叫大管家进行物理粉碎！
 			if (UMyGameInstance* GI = Cast<UMyGameInstance>(UGameplayStatics::GetGameInstance(this)))
 			{
 				GI->FinalizeLoadingScreenRemoval();

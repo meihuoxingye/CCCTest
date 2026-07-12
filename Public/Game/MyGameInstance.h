@@ -39,7 +39,7 @@ public:
 
 	// 【新增】：拉起关卡设计师定制的熄屏闭合 UI
 	UFUNCTION(BlueprintCallable, Category = "Loading")
-	void PlayScreenOffUI(TSoftClassPtr<class UMyTransitionWidgetBase> ScreenOffUIClass);
+	void PlayScreenOffUI(TSoftClassPtr<class UMyTransitionWidgetBase> ScreenOffUIClass, float InDuration);
 
 	void ShowFakeLoadingScreen(TSoftClassPtr<class UMyTransitionWidgetBase> CustomUI);
 

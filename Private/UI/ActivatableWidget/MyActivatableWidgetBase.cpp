@@ -24,9 +24,6 @@
 
 #include "Engine/Engine.h"
 
-// 【引入我们的动画模块电池】：解耦纯数学驱动逻辑
-#include "UI/MyUIAnimationModule.h"
-
 
 // ==============================================================================
 // MVVM 双轨渲染驱动源 (MVVM Dual-Track Drive Source)

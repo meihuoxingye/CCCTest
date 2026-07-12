@@ -23,7 +23,9 @@ AMyZoneTriggerActor::AMyZoneTriggerActor()
 void AMyZoneTriggerActor::BeginPlay()
 {
 	Super::BeginPlay();
-	TriggerBox->OnComponentBeginOverlap.AddDynamic(this, &AMyZoneTriggerActor::OnOverlapBegin);
+
+	// 【修正】：使用 AddUniqueDynamic 
+	TriggerBox->OnComponentBeginOverlap.AddUniqueDynamic(this, &AMyZoneTriggerActor::OnOverlapBegin);
 }
 
 #pragma endregion

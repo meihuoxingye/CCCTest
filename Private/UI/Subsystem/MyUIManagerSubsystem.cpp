@@ -6,6 +6,8 @@
 #include "UI/ActivatableWidget/MyActivatableWidgetBase.h"
 // 引入自定义 UI 工具函数库（比如用于射线检测/鼠标悬停检测等）
 #include "Tools/MyUITools.h"
+// 【引入我们的动画模块电池】：解耦纯数学驱动逻辑
+#include "UI/MyUIAnimationModule.h"
 
 // ==============================================================================
 // 栈操作与生命周期 (Stack Operations)
@@ -64,7 +66,7 @@ bool UMyUIManagerSubsystem::ProcessUIClick()
 		if (IsValid(TopUI))
 		{
 			// 如果这个栈顶 UI 的状态机不等于 "正在关闭" （即处于展开中或静止展开完毕状态）
-			if (TopUI->GetCurrentState() != EUIState::Closing)
+			if (TopUI->GetCurrentState() != EUIAnimationState::Closing)
 			{
 				// 【核心新增逻辑】：查阅该 UI 的档案，看它是否允许被背景点击强制关闭
 				if (TopUI->bCanBeClosedByBackgroundClick)
