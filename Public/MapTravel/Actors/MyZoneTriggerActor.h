@@ -38,22 +38,7 @@ protected:
 	// ==============================================================================
 protected:
 	// 同地图内的目标传送位置和朝向
+	// 【注意】：表现层已彻底数据驱动化！UI蓝图与时间请去 UMyGameInstance 的全局字典中统一配置！
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition Settings", meta = (MakeEditWidget = true))
 	FTransform TargetZoneTransform;
-
-	// 离开当前区域时的闭合动画（如：纯黑硬切、眼皮闭上）
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition Settings")
-	TSoftClassPtr<class UMyTransitionWidgetBase> ScreenOffUIClass;
-
-	// 闭合动画耗时
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition Settings", meta = (ClampMin = "0.1"))
-	float ScreenOffDuration = 0.5f;
-
-	// 抵达新区域时的加载或展示界面（例如：“发现新区域：黑龙巢穴”的霸气大字 UI）
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition Settings")
-	TSoftClassPtr<class UMyTransitionWidgetBase> AreaPresentationUIClass;
-
-	// 展示 UI 至少停留的展示时间
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition Settings", meta = (ClampMin = "0.1"))
-	float MinDisplayTime = 1.5f;
 };

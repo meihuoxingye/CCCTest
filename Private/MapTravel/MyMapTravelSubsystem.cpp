@@ -110,33 +110,6 @@ void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 			return;
 		}
 	}
-
-	// 恢复玩家控制权
-	if (GEngine && GEngine->GameViewport)
-	{
-		GEngine->GameViewport->SetIgnoreInput(false);
-	}
-
-	if (APlayerController* PC = GetRealPlayerController(&InWorld))
-	{
-		PC->EnableInput(PC);
-		PC->FlushPressedKeys();
-
-		FInputModeGameAndUI InputMode;
-		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-		InputMode.SetHideCursorDuringCapture(false);
-		PC->SetInputMode(InputMode);
-
-		if (APawn* Pawn = PC->GetPawn())
-		{
-			Pawn->EnableInput(PC);
-			Pawn->SetActorEnableCollision(true);
-		}
-
-		FSlateApplication::Get().SetAllUserFocusToGameViewport();
-	}
-
-	bIsTraveling = false;
 }
 
 #pragma endregion
@@ -147,7 +120,7 @@ void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 // ==============================================================================
 #pragma region
 
-void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPtr<class UMyTransitionWidgetBase> ScreenOffUI, float ScreenOffDuration, TSoftClassPtr<class UMyTransitionWidgetBase> CustomLoadingUI, float MinLoadingTime)
+void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 {
 	if (bIsTraveling) return;
 	bIsTraveling = true;
@@ -221,39 +194,41 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 		}
 	}
 
-	// 2. 记忆目标地图，并呼叫普通的 Slate 渐暗 UI
-	if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
+	// =====================================================================
+	// 2. 核心数据驱动：直接从大管家取值，消灭一切局部固定值！
+	// =====================================================================
+	UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>();
+	if (!GI)
 	{
-		GI->PendingTargetMapName = TargetLevelName;
-
-		// =====================================================================
-		// 【修复 3：补上断层的加载时间】
-		// 将关卡触发器传过来的时间，正式赋给 GameInstance 的双轨时间锁！
-		// =====================================================================
-		GI->MinUIShowDuration = MinLoadingTime;
-
-		if (!CustomLoadingUI.IsNull())
-		{
-			GI->DefaultLoadingUIClass = CustomLoadingUI;
-		}
-
-		// 播放关卡设计师专属定制的熄屏 UI 动画
-		GI->PlayScreenOffUI(ScreenOffUI, ScreenOffDuration);
+		// 连大管家都没了，转场系统彻底瘫痪，直接终止！绝不使用固定值兜底瞎跑！
+		bIsTraveling = false;
+		return;
 	}
 
-	// 3. 等待 UMG 熄屏动画彻底播完（黑透），再执行无缝漫游！
-	// 如果设计师传的熄屏时间小于 0.1 秒，给个最低 0.1 秒的兜底，防止时序错乱
-	float SafeTravelDelay = FMath::Max(0.1f, ScreenOffDuration);
+	// 提取当前地图的干净名字（去除前缀）
+	FName CurrentMapName = FName(*FPackageName::GetShortName(World->GetMapName()));
 
+	// 离开用当前地图的配置，进入用目标地图的配置！
+	FMapTransitionConfig OutConfig = GI->GetMapTransitionConfig(CurrentMapName);
+	FMapTransitionConfig InConfig = GI->GetMapTransitionConfig(TargetLevelName);
+
+	// 设置新世界的加载屏（用 InConfig）
+	GI->PendingTargetMapName = TargetLevelName;
+	GI->MinUIShowDuration = InConfig.MinLoadingTime;
+	GI->DefaultLoadingUIClass = InConfig.LoadingScreenUIClass;
+
+	// 播放旧世界的熄屏（用 OutConfig）
+	GI->PlayScreenOffUI(OutConfig.ScreenOffUIClass, OutConfig.ScreenOffDuration);
+
+	// 【完全只读化】：读取大管家面板中的只读 SystemSafeDelay 作为物理底线，彻底抛弃 0.1f
+	float SafeTravelDelay = FMath::Max(GI->SystemSafeDelay, OutConfig.ScreenOffDuration);
+
+	// 3. 挂起计时器执行 ServerTravel
 	FTimerHandle TravelTimerHandle;
 	World->GetTimerManager().SetTimer(TravelTimerHandle, [World, TargetLevelName]()
 		{
 			if (IsValid(World))
 			{
-				// 【灵魂接力时刻】：
-				// ServerTravel 一旦触发，旧世界毁灭，刚才那个 UMG 熄屏 UI 会被引擎销毁。
-				// 但是！在同一微秒，底层的 SeamlessTravelTransition 会激活 BlackoutExtension！
-				// GPU 会瞬间接管纯黑画面，玩家的眼睛根本看不出任何破绽！
 				World->ServerTravel(TargetLevelName.ToString());
 			}
 		}, SafeTravelDelay, false);
@@ -267,7 +242,7 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName, TSoftClassPt
 // ==============================================================================
 #pragma region
 
-void UMyMapTravelSubsystem::ExecuteZoneTravelWithWait(AActor* TeleportingActor, const FTransform& TargetTransform, TSoftClassPtr<class UMyTransitionWidgetBase> ScreenOffUI, float ScreenOffDuration, TSoftClassPtr<class UMyTransitionWidgetBase> CustomLoadingUI, float MinDisplayTime)
+void UMyMapTravelSubsystem::ExecuteZoneTravelWithWait(AActor* TeleportingActor, const FTransform& TargetTransform)
 {
 	if (bIsTraveling || !TeleportingActor) return;
 	bIsTraveling = true;
@@ -293,35 +268,42 @@ void UMyMapTravelSubsystem::ExecuteZoneTravelWithWait(AActor* TeleportingActor, 
 		}
 	}
 
-	// 2. 呼叫大管家：播旧区域的熄屏闭合 UI
-	if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
+	// =====================================================================
+	// 2. 同地图瞬移：百分百依靠大管家面板配置，消灭一切局部初值！
+	// =====================================================================
+	UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>();
+	if (!GI)
 	{
-		GI->PlayScreenOffUI(ScreenOffUI, ScreenOffDuration);
+		bIsTraveling = false;
+		return;
 	}
 
-	// 3. 等待熄屏完成（黑透）后：把人瞬移过去 -> 唤起新区域展示 UI -> 启动等待计时器
-	float SafeDelay = FMath::Max(0.1f, ScreenOffDuration);
+	FName CurrentMapName = FName(*FPackageName::GetShortName(World->GetMapName()));
+	FMapTransitionConfig Config = GI->GetMapTransitionConfig(CurrentMapName);
 
+	GI->PlayScreenOffUI(Config.ScreenOffUIClass, Config.ScreenOffDuration);
+
+	// 【完全只读化】：时间完全来源于大管家的防呆锁和地图字典配置
+	float SafeDelay = FMath::Max(GI->SystemSafeDelay, Config.ScreenOffDuration);
+	float IntroDelay = Config.MinLoadingTime;
+
+	// 为了给下面 Timer 里的闭包传 UI：
+	GI->MinUIShowDuration = Config.MinLoadingTime;
+	GI->DefaultLoadingUIClass = Config.LoadingScreenUIClass;
+
+	// 3. 卡表瞬移
 	FTimerDelegate TimerDel;
-	TimerDel.BindLambda([this, TeleportingActor, TargetTransform, CustomLoadingUI, MinDisplayTime]()
+	TimerDel.BindLambda([this, TeleportingActor, TargetTransform, IntroDelay]()
 		{
-			// 执行物理瞬移
-			if (IsValid(TeleportingActor))
-			{
-				TeleportingActor->SetActorTransform(TargetTransform);
-			}
+			if (IsValid(TeleportingActor)) TeleportingActor->SetActorTransform(TargetTransform);
 
 			if (UWorld* InnerWorld = GetWorld())
 			{
-				// 让大管家贴上新区域的展示大字（或转场图）
-				if (UMyGameInstance* GI = InnerWorld->GetGameInstance<UMyGameInstance>())
+				if (UMyGameInstance* InnerGI = InnerWorld->GetGameInstance<UMyGameInstance>())
 				{
-					GI->MinUIShowDuration = MinDisplayTime;
-					GI->ShowFakeLoadingScreen(CustomLoadingUI);
+					InnerGI->ShowFakeLoadingScreen(InnerGI->DefaultLoadingUIClass);
 				}
-
-				// 开启终极计时器，展示时间一到，通知大管家撤去UI并恢复输入
-				InnerWorld->GetTimerManager().SetTimer(ZoneTravelTimerHandle, this, &UMyMapTravelSubsystem::FinishZoneTravel, MinDisplayTime, false);
+				InnerWorld->GetTimerManager().SetTimer(ZoneTravelTimerHandle, this, &UMyMapTravelSubsystem::FinishZoneTravel, IntroDelay, false);
 			}
 		});
 
@@ -332,31 +314,44 @@ void UMyMapTravelSubsystem::FinishZoneTravel()
 {
 	if (UWorld* World = GetWorld())
 	{
-		// =====================================================================
-		// 【修复 2.2：由大管家统一撤下黑幕和 UI】
-		// =====================================================================
+		// 【解耦魔法】：由大管家统一撤下黑幕和 UI。
+		// UI 播放完退场动画后，会自动调用大管家的 FinalizeLoadingScreenRemoval，
+		// 进而触发下面的 RestorePlayerInput()！实现了跨地图与同地图的大一统。
 		if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
 		{
 			GI->HideFakeLoadingScreen();
 		}
+	}
+}
 
-		if (APlayerController* PC = GetRealPlayerController(World))
+void UMyMapTravelSubsystem::RestorePlayerInput()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	// 彻底解除点穴，将控制权、物理碰撞、按键输入全部交还给玩家
+	if (GEngine && GEngine->GameViewport)
+	{
+		GEngine->GameViewport->SetIgnoreInput(false);
+	}
+
+	if (APlayerController* PC = GetRealPlayerController(World))
+	{
+		PC->EnableInput(PC);
+		PC->FlushPressedKeys();
+
+		FInputModeGameAndUI InputMode;
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		InputMode.SetHideCursorDuringCapture(false);
+		PC->SetInputMode(InputMode);
+
+		if (APawn* Pawn = PC->GetPawn())
 		{
-			PC->EnableInput(PC);
-			PC->FlushPressedKeys();
-
-			FInputModeGameAndUI InputMode;
-			InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-			InputMode.SetHideCursorDuringCapture(false);
-			PC->SetInputMode(InputMode);
-
-			if (APawn* Pawn = PC->GetPawn())
-			{
-				Pawn->EnableInput(PC);
-			}
-
-			FSlateApplication::Get().SetAllUserFocusToGameViewport();
+			Pawn->EnableInput(PC);
+			Pawn->SetActorEnableCollision(true);
 		}
+
+		FSlateApplication::Get().SetAllUserFocusToGameViewport();
 	}
 
 	bIsTraveling = false;

@@ -55,15 +55,10 @@ public:
 	// ==============================================================================
 public:
 
-	// 增加等待时间参数
+	// 【极致瘦身】：只需要地图名！配置全自动从字典里拿！
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
-	void ExecuteMapTravel(
-		FName TargetLevelName,
-		TSoftClassPtr<class UMyTransitionWidgetBase> ScreenOffUI,  // 【新增】：熄屏用的 UI 类
-		float ScreenOffDuration,                       // 【新增】：熄屏动画需要播放几秒
-		TSoftClassPtr<class UMyTransitionWidgetBase> CustomLoadingUI,
-		float MinLoadingTime
-	);
+	void ExecuteMapTravel(FName TargetLevelName);
+
 
 	// ==============================================================================
 	// 动态滑动窗口与流送管线 (Dynamic Sliding Window & Streaming Pipeline)
@@ -130,7 +125,11 @@ public:
 
 	// 带有 UI 与强制等待的同地图瞬移切换（用于同地图内进 Boss 房等重度切换）
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
-	void ExecuteZoneTravelWithWait(AActor* TeleportingActor,const FTransform& TargetTransform,TSoftClassPtr<class UMyTransitionWidgetBase> ScreenOffUI,float ScreenOffDuration,TSoftClassPtr<class UMyTransitionWidgetBase> CustomLoadingUI,float MinDisplayTime);
+	void ExecuteZoneTravelWithWait(AActor* TeleportingActor, const FTransform& TargetTransform);
+
+	// 【添加这一行】：跨地图与同地图漫游的终极收尾：恢复玩家输入
+	UFUNCTION(BlueprintCallable, Category = "MapTravel")
+	void RestorePlayerInput();
 
 private:
 

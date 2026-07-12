@@ -40,21 +40,12 @@ void AMyZoneTriggerActor::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AA
 {
 	if (OtherActor && OtherActor != this && OtherActor->IsA<ACharacter>())
 	{
-		// 触碰即锁死防抖
 		TriggerBox->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 		if (UMyMapTravelSubsystem* TravelSubsystem = GetWorld()->GetSubsystem<UMyMapTravelSubsystem>())
 		{
-			// 呼叫大管家执行“同地图带UI瞬移”
-			// (这里假设你在 MyMapTravelSubsystem 中实现了 ExecuteZoneTravelWithWait)
-			TravelSubsystem->ExecuteZoneTravelWithWait(
-				OtherActor,
-				TargetZoneTransform,
-				ScreenOffUIClass,
-				ScreenOffDuration,
-				AreaPresentationUIClass,
-				MinDisplayTime
-			);
+			// 【终极瘦身】：只传人和坐标，剩下的脏活累活全交给底层和大管家
+			TravelSubsystem->ExecuteZoneTravelWithWait(OtherActor, TargetZoneTransform);
 		}
 	}
 }

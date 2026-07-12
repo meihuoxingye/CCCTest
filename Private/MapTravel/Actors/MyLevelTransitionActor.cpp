@@ -41,22 +41,14 @@ void AMyLevelTransitionActor::BeginPlay()
 
 void AMyLevelTransitionActor::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
-	// 仅响应角色 Pawn 的触碰
 	if (OtherActor && OtherActor != this && OtherActor->IsA<ACharacter>())
 	{
-		// 1. 触发后立刻物理锁死碰撞体，防止多名玩家或重复横跳导致二次触发
 		TriggerBox->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-		// 2. 呼叫大管家：直接将关卡设计师在面板里配好的参数原封不动地砸过去
 		if (UMyMapTravelSubsystem* TravelSubsystem = GetWorld()->GetSubsystem<UMyMapTravelSubsystem>())
 		{
-			TravelSubsystem->ExecuteMapTravel(
-				TargetLevelName,
-				ScreenOffUIClass,
-				ScreenOffDuration,
-				LoadingScreenUIClass,
-				MinLoadingTime
-			);
+			// 【终极瘦身】：只传目标名字，表现层参数大管家会全自动查字典！
+			TravelSubsystem->ExecuteMapTravel(TargetLevelName);
 		}
 	}
 }

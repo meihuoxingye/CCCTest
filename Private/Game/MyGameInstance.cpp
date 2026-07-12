@@ -108,6 +108,16 @@ void UMyGameInstance::HandleEndTravel(UWorld* NewWorld)
 	}
 }
 
+FMapTransitionConfig UMyGameInstance::GetMapTransitionConfig(FName MapName) const
+{
+	// O(1) 极速哈希查表，查到了就返回专属配置
+	if (const FMapTransitionConfig* FoundConfig = MapTransitionRegistry.Find(MapName))
+	{
+		return *FoundConfig;
+	}
+	return DefaultTransitionConfig;
+}
+
 void UMyGameInstance::PlayScreenOffUI(TSoftClassPtr<class UMyTransitionWidgetBase> ScreenOffUIClass, float InDuration)
 {
 	if (ScreenOffUIClass.IsNull()) return;
