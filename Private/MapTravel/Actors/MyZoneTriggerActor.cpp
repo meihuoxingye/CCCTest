@@ -5,6 +5,7 @@
 #include "MapTravel/MyMapTravelSubsystem.h"
 #include "GameFramework/Character.h"
 #include "Engine/World.h"
+#include "WorldPartition/DataLayer/DataLayerAsset.h"
 
 // ==============================================================================
 // 核心生命周期与组件 (Core Lifecycle & Components)
@@ -24,7 +25,6 @@ void AMyZoneTriggerActor::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// 【修正】：使用 AddUniqueDynamic 
 	TriggerBox->OnComponentBeginOverlap.AddUniqueDynamic(this, &AMyZoneTriggerActor::OnOverlapBegin);
 }
 
@@ -32,7 +32,7 @@ void AMyZoneTriggerActor::BeginPlay()
 
 
 // ==============================================================================
-// 转场触发逻辑 (Transition Trigger Logic)
+// 数据层流送逻辑 (Data Layer Streaming Logic)
 // ==============================================================================
 #pragma region
 
@@ -40,22 +40,17 @@ void AMyZoneTriggerActor::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AA
 {
 	if (OtherActor && OtherActor != this && OtherActor->IsA<ACharacter>())
 	{
-		TriggerBox->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		// 【注意】：作为滑动窗口流送触发器，玩家可能会来回走动，绝不能像传送门那样关闭碰撞！
 
 		if (UMyMapTravelSubsystem* TravelSubsystem = GetWorld()->GetSubsystem<UMyMapTravelSubsystem>())
 		{
-			// 【终极瘦身】：只传人和坐标，剩下的脏活累活全交给底层和大管家
-			TravelSubsystem->ExecuteZoneTravelWithWait(OtherActor, TargetZoneTransform);
+			// 【拨乱反正】：将本触发器绑定的数据层，直接喂给子系统的滑动窗口！
+			if (AssociatedDataLayer)
+			{
+				TravelSubsystem->RefreshSlidingWindow(AssociatedDataLayer);
+			}
 		}
 	}
 }
 
-#pragma endregion
-
-
-// ==============================================================================
-// 转场视觉配置 (Transition Visual Settings)
-// ==============================================================================
-#pragma region
-// （本区无实现代码）
 #pragma endregion

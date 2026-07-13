@@ -10,7 +10,6 @@
 #include "Widgets/SWidget.h"
 #include "HAL/PlatformTime.h"
 
-
 // ==============================================================================
 // 核心生命周期与组件 (Core Lifecycle & Components)
 // ==============================================================================
@@ -52,10 +51,8 @@ void UMyGameInstance::Shutdown()
 		BlackoutExt.Reset();
 	}
 
-	// =====================================================================
-	// 【崩溃修复】：引擎销毁期间，绝对禁止调用 UMG 的动画系统！
+	// 崩溃修复：引擎销毁期间，绝对禁止调用 UMG 的动画系统！
 	// 直接从内存层面物理抹杀 Widget，不留任何遗言！
-	// =====================================================================
 	if (ActiveTransitionUI)
 	{
 		ActiveTransitionUI->RemoveFromParent();
@@ -65,7 +62,7 @@ void UMyGameInstance::Shutdown()
 	Super::Shutdown();
 }
 
-//所以这两个空函数体内无法写入任何实际有意义的代码。
+// 这两个空函数体内无法写入任何实际有意义的代码。
 // 它们目前在你的源码树中，纯粹是为了通过绑定来覆盖并破坏引擎默认拉起“三个点图标”的底层多线程机制。
 // 虽然不能删，但必须明确：任何试图在这里做状态清理的逻辑都是绝对失效的。
 void UMyGameInstance::OnBeginStreamingPause(FViewport* Viewport)
@@ -91,35 +88,80 @@ void UMyGameInstance::HandleStartTravel(UWorld* CurrentWorld)
 		BlackoutExt->bIsActive = true;
 	}
 
-	// 漫游开始，重置状态锁
 	bEngineIsReady = false;
 	bMinTimeElapsed = false;
 }
 
 void UMyGameInstance::HandleEndTravel(UWorld* NewWorld)
 {
-	// 1. 落地新世界第一帧，立刻解除渲染层的 3D 黑场拦截，交棒给 UI
 	if (BlackoutExt.IsValid())
 	{
 		BlackoutExt->bIsActive = false;
 	}
 
-	// 2. 尝试拉起动态 UI
+	// ------------------------------------------------------------------------------
+	// 记录一：Persistent Level 落地的确切时间
+	// ------------------------------------------------------------------------------
+	PersistentLevelLoadTime = FPlatformTime::Seconds();
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Yellow, FString::Printf(TEXT("[1] Persistent 进内存时间: %f"), PersistentLevelLoadTime));
+	}
+	UE_LOG(LogTemp, Warning, TEXT("[TimeTracker] Persistent Level 进内存！绝对时间: %f"), PersistentLevelLoadTime);
+	// ------------------------------------------------------------------------------
+
 	ShowFakeLoadingScreen(nullptr);
 
-	// 3. 标记引擎已经反序列化就绪
-	bEngineIsReady = true;
-
-	// 4. 触发一次检查：如果加载太慢（比最小显示时间还长），则直接由这里关闭 UI
-	if (bMinTimeElapsed)
+	// 用 0.05 秒这种极高频率去轮询，抓出时间差的真凶！
+	if (UWorld* World = GetWorld())
 	{
-		CheckAndHideLoadingScreen();
+		World->GetTimerManager().SetTimer(EngineReadyPollTimerHandle, this, &UMyGameInstance::PollEngineReadyStatus, 0.05f, true);
+	}
+}
+
+void UMyGameInstance::PollEngineReadyStatus()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	// 纯净的引擎基础状态探测，不搞花里胡哨的系统判断
+	bool bIsFullyLoaded = World->HasBegunPlay();
+
+	if (bIsFullyLoaded && !World->AreAlwaysLoadedLevelsLoaded())
+	{
+		bIsFullyLoaded = false;
+	}
+
+	if (bIsFullyLoaded)
+	{
+		World->GetTimerManager().ClearTimer(EngineReadyPollTimerHandle);
+
+		// ------------------------------------------------------------------------------
+		// 记录二：引擎真正宣告 Ready 的时间，并算出精确的真实物理时间差！
+		// ------------------------------------------------------------------------------
+		double EngineReadyTime = FPlatformTime::Seconds();
+		double TimeDelta = EngineReadyTime - PersistentLevelLoadTime;
+
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Red, FString::Printf(TEXT("[2] 引擎 Ready 时间: %f"), EngineReadyTime));
+			GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Cyan, FString::Printf(TEXT(">>> 真实加载耗时差 (2 - 1): %f 秒 <<<"), TimeDelta));
+		}
+		UE_LOG(LogTemp, Error, TEXT("[TimeTracker] 引擎宣告 Ready！绝对时间: %f | 距离落地耗时: %f 秒"), EngineReadyTime, TimeDelta);
+		// ------------------------------------------------------------------------------
+
+		bEngineIsReady = true;
+
+		if (bMinTimeElapsed)
+		{
+			CheckAndHideLoadingScreen();
+		}
 	}
 }
 
 FMapTransitionConfig UMyGameInstance::GetMapTransitionConfig(FName MapName) const
 {
-	// O(1) 极速哈希查表，查到了就返回专属配置
 	if (const FMapTransitionConfig* FoundConfig = MapTransitionRegistry.Find(MapName))
 	{
 		return *FoundConfig;
@@ -133,15 +175,10 @@ void UMyGameInstance::PlayScreenOffUI(TSoftClassPtr<class UMyTransitionWidgetBas
 
 	if (UClass* WidgetClass = ScreenOffUIClass.LoadSynchronous())
 	{
-		// 【神级联动】：因为它是 UMyTransitionWidgetBase，我们只要把它加到视口，
-		// 它的 NativeConstruct 就会自动激活体内的动画电池跑入场动画，完全不需要我们手动下令！
 		if (UMyTransitionWidgetBase* ScreenOffWidget = CreateWidget<UMyTransitionWidgetBase>(this, WidgetClass))
 		{
-			// 【铁律执行】：在上屏（NativeConstruct）触发动画前，强行将 LD 的时间注入电池！
 			ScreenOffWidget->SetTransitionDuration(InDuration);
-
 			ScreenOffWidget->AddToViewport(10000);
-			// 注：这个熄屏 UI 会在 ServerTravel 发生时，和旧世界一起自动灰飞烟灭，无需存指针清理
 		}
 	}
 }
@@ -150,12 +187,7 @@ void UMyGameInstance::ShowFakeLoadingScreen(TSoftClassPtr<class UMyTransitionWid
 {
 	if (ActiveTransitionUI) return;
 
-	// =====================================================================
-	// 【核心魔法】：被删掉的变量不需要了，大管家自己用 PendingTargetMapName 查字典！
-	// =====================================================================
 	FMapTransitionConfig Config = GetMapTransitionConfig(PendingTargetMapName);
-
-	// 优先用外部强传的 CustomUI，如果没有就用字典里的
 	TSoftClassPtr<UMyTransitionWidgetBase> TargetUIClass = CustomUI.IsNull() ? Config.LoadingScreenUIClass : CustomUI;
 	float ActualDuration = Config.MinLoadingTime;
 
@@ -164,6 +196,7 @@ void UMyGameInstance::ShowFakeLoadingScreen(TSoftClassPtr<class UMyTransitionWid
 		ActiveTransitionUI = CreateWidget<UMyTransitionWidgetBase>(this, WidgetClass);
 		if (ActiveTransitionUI)
 		{
+			ActiveTransitionUI->SetLoadingTimeConfig(Config.MinLoadingTime, Config.HoldTimeAtFull);
 			ActiveTransitionUI->AddToViewport(10001);
 		}
 	}
@@ -176,7 +209,7 @@ void UMyGameInstance::ShowFakeLoadingScreen(TSoftClassPtr<class UMyTransitionWid
 			{
 				bMinTimeElapsed = true;
 				if (bEngineIsReady) CheckAndHideLoadingScreen();
-			}, ActualDuration, false); // 【修改点】：使用字典里查出来的时间
+			}, ActualDuration, false);
 	}
 }
 
@@ -192,7 +225,6 @@ void UMyGameInstance::HideFakeLoadingScreen()
 {
 	if (ActiveTransitionUI)
 	{
-		// 引擎就绪！直接通知 UI，UI 内部的电池会切到退场状态，开始擦除动画！
 		ActiveTransitionUI->NotifyEngineReady();
 	}
 	else
@@ -205,7 +237,6 @@ void UMyGameInstance::FinalizeLoadingScreenRemoval()
 {
 	if (ActiveTransitionUI)
 	{
-		// 物理移除，释放内存。这行代码只会被 UI 播完动画后自己反向调用！
 		ActiveTransitionUI->RemoveFromParent();
 		ActiveTransitionUI = nullptr;
 	}

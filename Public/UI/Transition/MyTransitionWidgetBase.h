@@ -30,6 +30,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "TransitionUI")
 	virtual void SetTransitionDuration(float InIntroDuration);
 
+	// 供进度条子类接收字典时间进行纯视觉速度测算的通用接口
+	UFUNCTION(BlueprintCallable, Category = "TransitionUI")
+	virtual void SetLoadingTimeConfig(float InMinLoadingTime, float InHoldTime);
+
 
 	// ==============================================================================
 	// 动画渲染驱动源 (Animation Drive Source)

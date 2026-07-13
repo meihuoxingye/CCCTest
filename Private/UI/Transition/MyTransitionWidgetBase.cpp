@@ -29,6 +29,11 @@ void UMyTransitionWidgetBase::SetTransitionDuration(float InIntroDuration)
 	}
 }
 
+void UMyTransitionWidgetBase::SetLoadingTimeConfig(float InMinLoadingTime, float InHoldTime)
+{
+	// 基类属于通用过渡黑幕，没有进度条业务，在此留空专门等待带有进度条的子类重写覆盖
+}
+
 #pragma endregion
 
 
