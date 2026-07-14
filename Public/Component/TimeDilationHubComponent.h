@@ -38,6 +38,11 @@ public:
 	// Tab 键与中键的回调函数中调用
 	void SetSwitchMode(bool bEnable);
 
+	// 【新增防线：物理急停开关】
+	// 用于转场、死亡等极端情况，强制撕毁一切子弹时间状态，物理回归 1.0 流速！
+	UFUNCTION(BlueprintCallable, Category = "Time")
+	void ForceResetTime();
+
 	// 绑定给 Tab 键的输入动作，反转 bIsSwitchModeActive 状态
 	void ToggleSwitchMode();
 

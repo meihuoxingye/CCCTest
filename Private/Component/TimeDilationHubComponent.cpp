@@ -150,4 +150,12 @@ void UTimeDilationHubComponent::ToggleBulletTime()
 	UpdateTargetTimeDilation();
 }
 
+void UTimeDilationHubComponent::ForceResetTime()
+{
+	// 仅负责安全关闭内部状态机，不越权修改全局时间流速
+	bIsSwitchModeActive = false;
+	bIsBulletTime = false;
+	TargetTimeDilation = 1.0f;
+}
+
 #pragma endregion

@@ -36,6 +36,9 @@
 #include "RenderingThread.h"
 #include "HAL/IConsoleManager.h"
 
+#include "Component/TimeDilationHubComponent.h"
+
+
 // 引入基类类型以供强制传参
 #include "UI/Transition/MyTransitionWidgetBase.h"
 
@@ -132,6 +135,9 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 		return;
 	}
 
+	// 【全局物理破片盾牌】：第一时间恢复法则，防止转场 Timer 无限拉长
+	UGameplayStatics::SetGlobalTimeDilation(World, 1.0f);
+
 	// 1. 瞬间剥夺控制权
 	if (GEngine && GEngine->GameViewport)
 	{
@@ -144,6 +150,19 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 	{
 		if (APlayerController* PC = It->Get())
 		{
+			// =====================================================================
+			// 【时间领主防线】：只对灵魂（Controller）进行操作！
+			// 这里调用的是组件公开的 API 契约（接口）。
+			// 如果你未来使用了 UE原生的 UInterface (例如 IMyTimeInterface)，
+			// 可以直接把这里替换为：IMyTimeInterface::Execute_ForceResetTime(PC); 做到绝对解耦。
+			// =====================================================================
+			if (UTimeDilationHubComponent* TimeComp = PC->GetComponentByClass<UTimeDilationHubComponent>())
+			{
+				TimeComp->ForceResetTime(); // 强制组件内部状态机关机
+			}
+			PC->CustomTimeDilation = 1.0f; // 消除灵魂个体的流速残留
+			// =====================================================================
+
 			World->GetTimerManager().ClearAllTimersForObject(PC);
 			TArray<UActorComponent*> UIComponents;
 			PC->GetComponents(UIComponents);
@@ -159,7 +178,7 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 
 			PC->FlushPressedKeys();
 
-			// 逻辑层点穴：禁止控制器接受任何输入，但绝不调用 UnPossess 以维持附身关系！
+			// 逻辑层点穴：禁止控制器接受任何输入，绝不调用 UnPossess 以维持附身关系
 			PC->DisableInput(PC);
 			PC->SetIgnoreMoveInput(true);
 			PC->SetIgnoreLookInput(true);
@@ -171,18 +190,17 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 
 			if (APawn* PlayerPawn = PC->GetPawn())
 			{
-				// 物理层点穴：关闭碰撞防止穿模或掉落，摄像机完美维持原机位
+				// 【剔除冗余】：肉体只配被点穴和重置个体时间，绝不去肉体蓝图里找全局时间组件！
+				PlayerPawn->CustomTimeDilation = 1.0f;
 				PlayerPawn->SetActorEnableCollision(false);
+
 				if (UEnhancedInputComponent* PawnEIC = Cast<UEnhancedInputComponent>(PlayerPawn->InputComponent))
 				{
 					PawnEIC->ClearActionBindings();
 				}
 			}
 
-			// =====================================================================
-			// 【修复 1：重迎免死金牌】
-			// 强行将控制器和玩家状态挂载到 PersistentLevel，防止被 World Partition 抛弃导致 0x30 闪退！
-			// =====================================================================
+			// 重迎免死金牌 (Rename)
 			if (PC->GetLevel() != World->PersistentLevel)
 			{
 				PC->Rename(nullptr, World->PersistentLevel);
@@ -194,9 +212,7 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 		}
 	}
 
-	// =====================================================================
-	// 2. 核心数据驱动：直接从大管家取值，消灭一切局部固定值！
-	// =====================================================================
+	// 2. 核心数据驱动与大管家查表
 	UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>();
 	if (!GI)
 	{
@@ -207,9 +223,7 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 	FName CurrentMapName = FName(*UGameplayStatics::GetCurrentLevelName(World, true));
 	FMapTransitionConfig OutConfig = GI->GetMapTransitionConfig(CurrentMapName);
 
-	// 【修改点】：直接记下目标名字就行了，落地后大管家自己会查字典！
 	GI->PendingTargetMapName = TargetLevelName;
-
 	GI->PlayScreenOffUI(OutConfig.ScreenOffUIClass, OutConfig.ScreenOffDuration);
 
 	float SafeTravelDelay = FMath::Max(GI->SystemSafeDelay, OutConfig.ScreenOffDuration);
