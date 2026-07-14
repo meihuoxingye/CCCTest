@@ -22,6 +22,7 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
+	// 反射标记：在所有蓝图和细节面板中仅可见、只读，防止美术误删触发器组件
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	class UBoxComponent* TriggerBox;
 

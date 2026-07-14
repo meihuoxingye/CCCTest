@@ -8,6 +8,7 @@
 #include "UI/MyUIAnimationModule.h" 
 #include "MyTransitionWidgetBase.generated.h"
 
+
 /**
  * 所有转场相关 UI（熄屏、过场黑幕、加载屏）的统一下层绝对基类。
  * 通过装配 FMyUIAnimationModule 获取了 3A 级的动画驱动能力。
@@ -22,15 +23,16 @@ class CCC_API UMyTransitionWidgetBase : public UUserWidget
 	// 外部大管家契约接口 (External Master Contracts)
 	// ==============================================================================
 public:
-	// 大管家呼叫：底层死锁结束，新世界准备就绪，可以开始播退场动画了！
+
+	// 大管家专线回调：底层无缝漫游死锁结束，新世界准备就绪，命令 UI 开始播放退场动画
 	UFUNCTION(BlueprintCallable, Category = "TransitionUI")
 	virtual void NotifyEngineReady();
 
-	// 【新增】：接受关卡设计师的最高指令，覆写电池的播放时间
+	// 接收大管家查表后下发的最高指令，强行覆写内部电池的物理播放时长
 	UFUNCTION(BlueprintCallable, Category = "TransitionUI")
 	virtual void SetTransitionDuration(float InIntroDuration);
 
-	// 供进度条子类接收字典时间进行纯视觉速度测算的通用接口
+	// 供带有进度条业务的子类，接收字典时间并进行纯视觉速度平滑测算的通用虚接口
 	UFUNCTION(BlueprintCallable, Category = "TransitionUI")
 	virtual void SetLoadingTimeConfig(float InMinLoadingTime, float InHoldTime);
 
@@ -39,31 +41,24 @@ public:
 	// 动画渲染驱动源 (Animation Drive Source)
 	// ==============================================================================
 protected:
-	// 【新增：3A级工业防呆警告盾牌】
-	// 为什么是 EditDefaultsOnly + BlueprintReadOnly：确保该变量在细节面板中对美术是【完全灰色只读】的！
-	// 把它死死钉在 AnimModule 的正上方，任何美术在调参数前都必须强制阅读此契约。
+
+	// 3A级工业防呆警告盾牌：在编辑器面板中对美术完全灰色只读，死死钉在参数上方强制警示系统契约
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "TransitionUI|Animation", meta = (MultiLine = true))
 	FText ArchitectureWarning;
 
-	// 【核心装配】：将动画模块作为电池嵌入！
-	// 奇迹宏 ShowOnlyInnerProperties 会让这个结构体在细节面板中隐形，
-	// 里面的 OpeningDuration 等参数会直接平铺在 UI 的外层，美术体验极佳！
+	// 核心装配：将动画模块作为电池嵌入，ShowOnlyInnerProperties 使其内部参数在细节面板中极度优雅地平铺
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TransitionUI|Animation", meta = (ShowOnlyInnerProperties))
 	FMyUIAnimationModule AnimModule;
 
-	// 【挂起状态锁】：用于入场播完后，安静等待大管家发令
+	// 挂起状态互斥锁：用于入场黑屏播完后，UI 陷入绝对安静的死等，直到大管家发送就绪指令
 	UPROPERTY(BlueprintReadOnly, Category = "TransitionUI|State")
 	bool bIsWaitingForEngine = false;
 
-	// 【入场动画渲染钩子】
-	// @param Progress 线性进度 (0.0 到 1.0)
-	// @param EasedProgress 经过缓动曲线平滑后的视觉进度
+	// 入场动画渲染钩子：交由蓝图子类实现，接收线性进度与缓动进度，驱动纯视觉的黑幕闭合效果
 	UFUNCTION(BlueprintImplementableEvent, Category = "TransitionUI|Animation")
 	void UpdateOpeningEffect(float Progress, float EasedProgress);
 
-	// 【退场动画渲染钩子】
-	// @param Progress 线性进度 (1.0 递减到 0.0)
-	// @param EasedProgress 经过缓动曲线平滑后的视觉进度
+	// 退场动画渲染钩子：交由蓝图子类实现，接收递减的进度与缓动进度，驱动纯视觉的黑幕擦除效果
 	UFUNCTION(BlueprintImplementableEvent, Category = "TransitionUI|Animation")
 	void UpdateClosingEffect(float Progress, float EasedProgress);
 
@@ -72,10 +67,13 @@ protected:
 	// 控件生命周期 (Widget Lifecycle)
 	// ==============================================================================
 protected:
+
+	// 覆写底层生命周期：UI 实例化上屏的第一帧，锁定防呆文本并开始执行入场状态机
 	virtual void NativeConstruct() override;
 
-	// 【所见即所得】：编辑器与 C++ 数据同步桥梁。
+	// 所见即所得桥梁：引擎原生数据同步钩子，让美术在编辑器视口拖动参数时能完美预览时间曲线和动画效果
 	virtual void SynchronizeProperties() override;
 
+	// 覆写原生帧更新：在此高频驱动电池步进，并在到达临界值时安全触发状态变轨或呼叫大管家
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 };

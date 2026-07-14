@@ -15,10 +15,16 @@
 
 AMyZoneTriggerActor::AMyZoneTriggerActor()
 {
+	// 触发器本身不需要执行任何逐帧逻辑，彻底切断 Tick 以极致节省 CPU 开销
 	PrimaryActorTick.bCanEverTick = false;
 
+	// 实例化底层的盒体碰撞组件
 	TriggerBox = CreateDefaultSubobject<UBoxComponent>(TEXT("TriggerBox"));
+
+	// 将盒体碰撞组件设为当前 Actor 的物理和空间层级根节点
 	RootComponent = TriggerBox;
+
+	// 赋予触发器专属碰撞预设，仅产生重叠事件，绝对忽略物理阻挡
 	TriggerBox->SetCollisionProfileName(TEXT("Trigger"));
 }
 
@@ -26,6 +32,7 @@ void AMyZoneTriggerActor::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// 使用 AddUniqueDynamic 进行绑定，防止 Live Coding 或编辑器热重载时产生重复绑定导致的多次触发与内存崩溃
 	TriggerBox->OnComponentBeginOverlap.AddUniqueDynamic(this, &AMyZoneTriggerActor::OnOverlapBegin);
 }
 
@@ -39,17 +46,24 @@ void AMyZoneTriggerActor::BeginPlay()
 
 void AMyZoneTriggerActor::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
-	// 【判定条件的精确化】：必须确保重叠的 Actor 是受本地玩家控制的 Pawn，防止 AI 巡逻员意外拉动数据层流送
+	// 尝试将重叠进来的 Actor 转换为基础肉体 (Pawn)
 	APawn* OverlappedPawn = Cast<APawn>(OtherActor);
+
+	// 判定条件的精确化：必须确保重叠者是合法且受本地玩家控制的 Pawn
+	// 这一步彻底防死了 AI 巡逻员、掉落的武器或乱跑的 NPC 意外拉动世界数据层的流送
 	if (OverlappedPawn && OverlappedPawn->IsLocallyControlled())
 	{
-		// 【注意】：作为滑动窗口流送触发器，玩家可能会来回走动，绝不能像传送门那样关闭碰撞！
+		// 注意：作为滑动窗口流送触发器，玩家在探索时必然会来回走动并反复进出该区域
+		// 绝不能像地图传送门那样在触发后关闭碰撞 (SetCollisionEnabled)，必须保持长效监听！
 
+		// 安全获取当前世界的转场大管家
 		if (UMyMapTravelSubsystem* TravelSubsystem = GetWorld()->GetSubsystem<UMyMapTravelSubsystem>())
 		{
-			// 【拨乱反正】：将本触发器绑定的数据层，直接喂给子系统的滑动窗口！
+			// 确保关卡设计师在细节面板里正确绑定了目标数据层资产
 			if (AssociatedDataLayer)
 			{
+				// 拨乱反正：将本触发器绑定的核心数据层喂给大管家的滑动窗口
+				// 由子系统统一推演和接管远近格子的内存分配，实现极低耦合
 				TravelSubsystem->RefreshSlidingWindow(AssociatedDataLayer);
 			}
 		}

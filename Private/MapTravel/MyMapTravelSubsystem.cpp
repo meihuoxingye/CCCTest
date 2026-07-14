@@ -49,15 +49,26 @@ namespace
 {
 	APlayerController* GetRealPlayerController(UWorld* World)
 	{
+		// 防御性编程：世界指针为空直接返回
 		if (!World) return nullptr;
+
+		// 遍历当前世界中所有的玩家控制器
 		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 		{
+			// 获取当前的 PlayerController 指针
 			APlayerController* PC = It->Get();
+
+			// 1. PC 必须有效
+			// 2. 必须是 LocalController (防止联机模式下拿到远程客户端的代理控制器)
+			// 3. 必须拥有 LocalPlayer (防止无缝漫游中，拿到还没被销毁的残留假身或幽灵)
 			if (PC && PC->IsLocalController() && PC->GetLocalPlayer())
 			{
+				// 找到了唯一合法的真实本地控制器，返回
 				return PC;
 			}
 		}
+
+		// 没找到则返回空
 		return nullptr;
 	}
 }
@@ -69,47 +80,73 @@ namespace
 
 void UMyMapTravelSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
+	// 调用父类初始化
 	Super::Initialize(Collection);
+
+	// 安全获取当前世界上下文
 	if (UWorld* World = GetWorld())
 	{
+		// 缓存 DataLayerManager 指针，避免运行时高频调用造成的开销
 		CachedDataLayerManager = UDataLayerManager::GetDataLayerManager(World);
 	}
 
+	// 物理重置所有内部状态机参数与转场锁
 	bIsTraveling = false;
+
+	// 重置上一次激活的数据层为空
 	LastActiveZone = nullptr;
+
+	// 重置生态环境渐变的 Alpha 值为 0
 	LerpAlpha = 0.0f;
+
+	// 初始化默认的渐变步长
 	LerpStep = 0.02f;
+
+	// 清空滑动窗口的数据层序列缓存
 	ZoneSequence.Empty();
 }
 
 void UMyMapTravelSubsystem::Deinitialize()
 {
+	// 释放弱指针缓存，防止旧世界的管理器变成野指针
 	CachedDataLayerManager.Reset();
+
+	// 清空数据层序列，释放内存
 	ZoneSequence.Empty();
+
+	// 清除对旧世界数据层资产的引用
 	LastActiveZone = nullptr;
 
+	// 安全获取当前世界
 	if (UWorld* World = GetWorld())
 	{
+		// 防内存泄漏：清除本子系统挂在 TimerManager 上的所有定时器
 		World->GetTimerManager().ClearAllTimersForObject(this);
 	}
 
+	// 调用父类反初始化完成收尾
 	Super::Deinitialize();
 }
 
 void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
+	// 调用父类逻辑
 	Super::OnWorldBeginPlay(InWorld);
 
+	// 获取当前刚落地的世界地图的原始长名称
 	FString CurrentMapName = InWorld.GetMapName();
 
+	// 获取大管家 GameInstance
 	if (UMyGameInstance* GI = InWorld.GetGameInstance<UMyGameInstance>())
 	{
+		// 提取纯净的地图短名用于对比
 		FString CleanTargetMap = FPackageName::GetShortName(GI->PendingTargetMapName.ToString());
 		FString CleanCurrentMap = FPackageName::GetShortName(CurrentMapName);
 
-		// 过滤过渡地图
+		// 过滤过渡地图：如果没有挂起的目标，或者当前落地地图不是期望地图
 		if (GI->PendingTargetMapName.IsNone() || !CleanCurrentMap.Contains(CleanTargetMap))
 		{
+			// 直接返回，不执行后续新世界的任何初始化逻辑
 			return;
 		}
 	}
@@ -135,14 +172,18 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 		return;
 	}
 
-	// 【全局物理破片盾牌】：第一时间恢复法则，防止转场 Timer 无限拉长
+	// 全局物理破片盾牌：第一时间恢复法则，防止转场 Timer 因全局变慢而被无限拉长
 	UGameplayStatics::SetGlobalTimeDilation(World, 1.0f);
 
-	// 1. 瞬间剥夺控制权
 	if (GEngine && GEngine->GameViewport)
 	{
+		// 瞬间剥夺物理输入控制权
 		GEngine->GameViewport->SetIgnoreInput(true);
+
+		// 清空键盘焦点，阻断残余UI按键
 		FSlateApplication::Get().ClearKeyboardFocus(EFocusCause::Cleared);
+
+		// 释放所有指针捕获，防止鼠标锁定导致UI失效
 		FSlateApplication::Get().ReleaseAllPointerCapture();
 	}
 
@@ -150,32 +191,33 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 	{
 		if (APlayerController* PC = It->Get())
 		{
-			// =====================================================================
-			// 【时间领主防线】：只对灵魂（Controller）进行操作！
-			// 这里调用的是组件公开的 API 契约（接口）。
-			// 如果你未来使用了 UE原生的 UInterface (例如 IMyTimeInterface)，
-			// 可以直接把这里替换为：IMyTimeInterface::Execute_ForceResetTime(PC); 做到绝对解耦。
-			// =====================================================================
+			// 时间领主防线：只对灵魂进行操作，安全关闭时间组件内部状态机
 			if (UTimeDilationHubComponent* TimeComp = PC->GetComponentByClass<UTimeDilationHubComponent>())
 			{
-				TimeComp->ForceResetTime(); // 强制组件内部状态机关机
+				TimeComp->ForceResetTime();
 			}
-			PC->CustomTimeDilation = 1.0f; // 消除灵魂个体的流速残留
-			// =====================================================================
 
+			// 消除灵魂个体的流速残留，防止影响新世界
+			PC->CustomTimeDilation = 1.0f;
+
+			// 清理该控制器上绑定的全部定时器，切断过场期间的异步干扰
 			World->GetTimerManager().ClearAllTimersForObject(PC);
+
 			TArray<UActorComponent*> UIComponents;
 			PC->GetComponents(UIComponents);
 			for (UActorComponent* Comp : UIComponents)
 			{
+				// 清理控制器下属组件的定时器，防止组件在后台作妖
 				World->GetTimerManager().ClearAllTimersForObject(Comp);
 			}
 
 			if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
 			{
+				// 清空增强输入系统的映射上下文，防止黑屏期间发生轴输入叠加
 				Subsystem->ClearAllMappings();
 			}
 
+			// 物理层清除粘连按键状态
 			PC->FlushPressedKeys();
 
 			// 逻辑层点穴：禁止控制器接受任何输入，绝不调用 UnPossess 以维持附身关系
@@ -185,34 +227,39 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 
 			if (UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(PC->InputComponent))
 			{
+				// 清空控制器输入组件的一切动作绑定
 				EIC->ClearActionBindings();
 			}
 
 			if (APawn* PlayerPawn = PC->GetPawn())
 			{
-				// 【剔除冗余】：肉体只配被点穴和重置个体时间，绝不去肉体蓝图里找全局时间组件！
+				// 肉体只配被重置个体时间，绝不去肉体蓝图里找全局时间组件
 				PlayerPawn->CustomTimeDilation = 1.0f;
+
+				// 物理层点穴：关闭碰撞防止穿模或掉落，摄像机完美维持原机位
 				PlayerPawn->SetActorEnableCollision(false);
 
 				if (UEnhancedInputComponent* PawnEIC = Cast<UEnhancedInputComponent>(PlayerPawn->InputComponent))
 				{
+					// 清空肉体输入组件的一切动作绑定
 					PawnEIC->ClearActionBindings();
 				}
 			}
 
-			// 重迎免死金牌 (Rename)
 			if (PC->GetLevel() != World->PersistentLevel)
 			{
+				// 重迎免死金牌：强行将控制器挂载到持久关卡，防 World Partition 导致 0x30 闪退
 				PC->Rename(nullptr, World->PersistentLevel);
 			}
+
 			if (PC->PlayerState && PC->PlayerState->GetLevel() != World->PersistentLevel)
 			{
+				// 重迎免死金牌：强行将玩家状态挂载到持久关卡，防无缝漫游期间数据链断裂
 				PC->PlayerState->Rename(nullptr, World->PersistentLevel);
 			}
 		}
 	}
 
-	// 2. 核心数据驱动与大管家查表
 	UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>();
 	if (!GI)
 	{
@@ -223,17 +270,22 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 	FName CurrentMapName = FName(*UGameplayStatics::GetCurrentLevelName(World, true));
 	FMapTransitionConfig OutConfig = GI->GetMapTransitionConfig(CurrentMapName);
 
+	// 核心数据驱动：直接记下目标地图名，落地后大管家自己会根据名字去查字典
 	GI->PendingTargetMapName = TargetLevelName;
+
+	// 通过大管家配置拉起熄屏 UI
 	GI->PlayScreenOffUI(OutConfig.ScreenOffUIClass, OutConfig.ScreenOffDuration);
 
 	float SafeTravelDelay = FMath::Max(GI->SystemSafeDelay, OutConfig.ScreenOffDuration);
 
-	// 3. 挂起计时器执行 ServerTravel
 	FTimerHandle TravelTimerHandle;
+
+	// 使用 Lambda 挂起定时器，等待熄屏动画播完后精确执行 ServerTravel 降维打击
 	World->GetTimerManager().SetTimer(TravelTimerHandle, [World, TargetLevelName]()
 		{
 			if (IsValid(World))
 			{
+				// 真正起航：命令引擎底层开启无缝旅行管线
 				World->ServerTravel(TargetLevelName.ToString());
 			}
 		}, SafeTravelDelay, false);
@@ -247,84 +299,128 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 // ==============================================================================
 #pragma region
 
-void UMyMapTravelSubsystem::ExecuteZoneTravelWithWait(AActor* TeleportingActor, const FTransform& TargetTransform)
+void UMyMapTravelSubsystem::ExecuteSameMapTravel(AActor* TeleportingActor, const FTransform& TargetTransform)
 {
+	// 状态锁拦截：防止重复调用导致时序错乱
 	if (bIsTraveling || !TeleportingActor) return;
+
+	// 开启转场锁
 	bIsTraveling = true;
 
+	// 安全获取世界上下文
 	UWorld* World = GetWorld();
 	if (!World)
 	{
+		// 获取失败时安全解锁并返回
 		bIsTraveling = false;
 		return;
 	}
 
-	// 1. 点穴：禁止玩家一切操作
+	// 全局物理破片盾牌：强制重置时间流速，防止同地图传送的倒计时被子弹时间无限拉长
+	UGameplayStatics::SetGlobalTimeDilation(World, 1.0f);
+
+	// 逻辑层点穴：安全获取真实的本地玩家控制器
 	if (APlayerController* PC = GetRealPlayerController(World))
 	{
+		// 拔掉控制器身上的时间电池，强行关闭内部状态机
+		if (UTimeDilationHubComponent* TimeComp = PC->GetComponentByClass<UTimeDilationHubComponent>())
+		{
+			TimeComp->ForceResetTime();
+		}
+
+		// 消除灵魂个体的流速残留
+		PC->CustomTimeDilation = 1.0f;
+
+		// 彻底禁止玩家一切操作
 		PC->DisableInput(PC);
+
+		// 强制切换到 UI 模式，并解除鼠标锁定
 		FInputModeUIOnly InputMode;
 		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 		PC->SetInputMode(InputMode);
 
+		// 获取肉体并进行同步点穴
 		if (APawn* Pawn = PC->GetPawn())
 		{
+			// 拔掉肉体身上的时间电池
+			if (UTimeDilationHubComponent* TimeComp = Pawn->GetComponentByClass<UTimeDilationHubComponent>())
+			{
+				TimeComp->ForceResetTime();
+			}
+
+			// 消除肉体个体的流速残留
+			Pawn->CustomTimeDilation = 1.0f;
+
+			// 彻底禁止肉体接受输入
 			Pawn->DisableInput(PC);
 		}
 	}
 
-	// =====================================================================
-	// 2. 同地图瞬移：百分百依靠大管家面板配置，消灭一切局部初值！
-	// =====================================================================
+	// 获取大管家 GameInstance
 	UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>();
 	if (!GI)
 	{
+		// 获取失败时安全解锁并返回
 		bIsTraveling = false;
 		return;
 	}
 
+	// 获取当前地图名称用于查表
 	FName CurrentMapName = FName(*FPackageName::GetShortName(World->GetMapName()));
+
+	// 核心数据驱动：直接从大管家获取当前地图专属的同地图传送配置
 	FMapTransitionConfig Config = GI->GetMapTransitionConfig(CurrentMapName);
 
-	// 【修改点】：同地图传送，目标地图名就是当前地图名，告诉大管家！
+	// 同地图传送，目标地图名就是当前地图名
 	GI->PendingTargetMapName = CurrentMapName;
 
+	// 拉起设计师定制的熄屏闭合 UI
 	GI->PlayScreenOffUI(Config.ScreenOffUIClass, Config.ScreenOffDuration);
 
+	// 取安全延迟与配置延迟的最大值，防范物理时序错乱
 	float SafeDelay = FMath::Max(GI->SystemSafeDelay, Config.ScreenOffDuration);
+
+	// 提取落地后的盲开等待时间
 	float IntroDelay = Config.MinLoadingTime;
 
-	// 【删除了那几行给旧变量赋值的冗余代码】
-
-	// 3. 卡表瞬移
+	// 构建闭包委托：用于在闭眼后执行瞬移和后续管线
 	FTimerDelegate TimerDel;
 	TimerDel.BindLambda([this, TeleportingActor, TargetTransform, IntroDelay]()
 		{
+			// 物理层瞬移：直接将目标放置到指定 Transform
 			if (IsValid(TeleportingActor)) TeleportingActor->SetActorTransform(TargetTransform);
 
+			// 瞬移完成后安全获取世界
 			if (UWorld* InnerWorld = GetWorld())
 			{
+				// 安全获取大管家
 				if (UMyGameInstance* InnerGI = InnerWorld->GetGameInstance<UMyGameInstance>())
 				{
-					// 【修改点】：直接传 nullptr，大管家内部会自己查字典！
+					// 传入 nullptr，强制大管家自己去查字典决定使用什么加载界面
 					InnerGI->ShowFakeLoadingScreen(nullptr);
 				}
-				InnerWorld->GetTimerManager().SetTimer(ZoneTravelTimerHandle, this, &UMyMapTravelSubsystem::FinishZoneTravel, IntroDelay, false);
+
+				// 挂起第二个阶段计时器：等待最小加载时间后，结束同地图切换管线
+				InnerWorld->GetTimerManager().SetTimer(ZoneTravelTimerHandle, this, &UMyMapTravelSubsystem::FinishSameMapTravel, IntroDelay, false);
 			}
 		});
 
+	// 挂起第一个阶段计时器：闭眼期间
 	World->GetTimerManager().SetTimer(ZoneTravelTimerHandle, TimerDel, SafeDelay, false);
 }
 
-void UMyMapTravelSubsystem::FinishZoneTravel()
+void UMyMapTravelSubsystem::FinishSameMapTravel()
 {
+	// 安全获取世界上下文
 	if (UWorld* World = GetWorld())
 	{
-		// 【解耦魔法】：由大管家统一撤下黑幕和 UI。
-		// UI 播放完退场动画后，会自动调用大管家的 FinalizeLoadingScreenRemoval，
-		// 进而触发下面的 RestorePlayerInput()！实现了跨地图与同地图的大一统。
+		// 解耦魔法：获取大管家实例
+		// 由大管家统一撤下黑幕和 UI
+		// UI 播放完退场动画后，会自动调用大管家的 FinalizeLoadingScreenRemoval
+		// 进而触发 RestorePlayerInput，实现了跨地图与同地图时序的大一统
 		if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
 		{
+			// 发送信号让伪加载屏退场
 			GI->HideFakeLoadingScreen();
 		}
 	}
@@ -332,34 +428,52 @@ void UMyMapTravelSubsystem::FinishZoneTravel()
 
 void UMyMapTravelSubsystem::RestorePlayerInput()
 {
+	// 安全获取世界上下文
 	UWorld* World = GetWorld();
 	if (!World) return;
 
-	// 彻底解除点穴，将控制权、物理碰撞、按键输入全部交还给玩家
+	// 彻底解除视口级别的输入忽略屏蔽
 	if (GEngine && GEngine->GameViewport)
 	{
 		GEngine->GameViewport->SetIgnoreInput(false);
 	}
 
+	// 核心解穴：安全获取本地真实的玩家控制器
 	if (APlayerController* PC = GetRealPlayerController(World))
 	{
+		// 恢复控制器本身的输入响应
 		PC->EnableInput(PC);
+
+		// 清理黑幕期间玩家盲按留下的残留物理按键状态
 		PC->FlushPressedKeys();
 
+		// 恢复为正常的游戏与UI混合输入模式
 		FInputModeGameAndUI InputMode;
+
+		// 解除鼠标对视口的强制锁定
 		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+
+		// 确保捕获期间不隐藏鼠标光标
 		InputMode.SetHideCursorDuringCapture(false);
+
+		// 应用输入模式
 		PC->SetInputMode(InputMode);
 
+		// 恢复肉体的响应
 		if (APawn* Pawn = PC->GetPawn())
 		{
+			// 恢复肉体的按键接收
 			Pawn->EnableInput(PC);
+
+			// 恢复肉体的物理碰撞
 			Pawn->SetActorEnableCollision(true);
 		}
 
+		// 强制将底层的用户焦点重新对齐到游戏视口
 		FSlateApplication::Get().SetAllUserFocusToGameViewport();
 	}
 
+	// 彻底完成管线，解除转场锁
 	bIsTraveling = false;
 }
 
@@ -371,23 +485,31 @@ void UMyMapTravelSubsystem::RestorePlayerInput()
 // ==============================================================================
 #pragma region
 
-
 void UMyMapTravelSubsystem::RegisterZoneSequence(const TArray<FZoneDataLayerPair>& InSequence)
 {
+	// 缓存滑动窗口流送序列
 	ZoneSequence = InSequence;
 }
 
 void UMyMapTravelSubsystem::RefreshSlidingWindow(UDataLayerAsset* TriggeredLayer)
 {
+	// 获取数据层管理器
 	UDataLayerManager* DLManager = UDataLayerManager::GetDataLayerManager(GetWorld());
+
+	// 防御性判定：如果管理器无效，或者未注册序列，或者触发层为空，直接返回
 	if (!DLManager || ZoneSequence.Num() == 0 || !TriggeredLayer) return;
 
+	// 状态锁：如果踩到的是相同的层，防抖拦截，避免无意义的性能损耗
 	if (LastActiveZone == TriggeredLayer) return;
+
+	// 更新最后激活的数据层记录
 	LastActiveZone = TriggeredLayer;
 
+	// 查找当前触发层在序列中的索引
 	int32 CurrentIdx = INDEX_NONE;
 	for (int32 i = 0; i < ZoneSequence.Num(); ++i)
 	{
+		// 只要艺术层或玩法层其中之一匹配上，就认为找到了当前区域
 		if (ZoneSequence[i].ArtLayer == TriggeredLayer || ZoneSequence[i].GameplayLayer == TriggeredLayer)
 		{
 			CurrentIdx = i;
@@ -395,30 +517,39 @@ void UMyMapTravelSubsystem::RefreshSlidingWindow(UDataLayerAsset* TriggeredLayer
 		}
 	}
 
+	// 如果不在注册的序列中，直接返回
 	if (CurrentIdx == INDEX_NONE) return;
 
+	// 核心滑动窗口算法：遍历整个序列进行远近维度管理
 	for (int32 i = 0; i < ZoneSequence.Num(); ++i)
 	{
+		// 提取当前遍历到的区域配置
 		const FZoneDataLayerPair& Zone = ZoneSequence[i];
+
+		// 计算它与玩家当前所在区域的绝对距离
 		int32 Distance = FMath::Abs(i - CurrentIdx);
 
 		if (Distance == 0)
 		{
+			// 距离为 0 (玩家脚下)：艺术层和玩法层必须全面激活
 			if (Zone.ArtLayer) DLManager->SetDataLayerRuntimeState(Zone.ArtLayer, EDataLayerRuntimeState::Activated);
 			if (Zone.GameplayLayer) DLManager->SetDataLayerRuntimeState(Zone.GameplayLayer, EDataLayerRuntimeState::Activated);
 		}
 		else if (Distance == 1)
 		{
+			// 距离为 1 (玩家隔壁)：艺术层加载进内存但不激活玩法，充当无缝视野和缓冲区
 			if (Zone.ArtLayer) DLManager->SetDataLayerRuntimeState(Zone.ArtLayer, EDataLayerRuntimeState::Loaded);
 			if (Zone.GameplayLayer) DLManager->SetDataLayerRuntimeState(Zone.GameplayLayer, EDataLayerRuntimeState::Unloaded);
 		}
 		else
 		{
+			// 距离 >= 2 (远方区域)：完全从内存中物理卸载，极限节省内存
 			if (Zone.ArtLayer) DLManager->SetDataLayerRuntimeState(Zone.ArtLayer, EDataLayerRuntimeState::Unloaded);
 			if (Zone.GameplayLayer) DLManager->SetDataLayerRuntimeState(Zone.GameplayLayer, EDataLayerRuntimeState::Unloaded);
 		}
 	}
 
+	// 在主线程发出指令，强制纹理流送器立刻更新，防范远处模型在激活时出现模糊糊的低级 MIP
 	if (GEngine && GetWorld())
 	{
 		GEngine->Exec(GetWorld(), TEXT("r.TextureStreaming.ForceUpdate"));
@@ -427,6 +558,7 @@ void UMyMapTravelSubsystem::RefreshSlidingWindow(UDataLayerAsset* TriggeredLayer
 
 void UMyMapTravelSubsystem::PreheatZoneBackground(const UDataLayerAsset* ArtLayerAsset)
 {
+	// 安全校验通过后，将对应的艺术层仅载入内存进行预热，不激活其内部的逻辑物理
 	if (CachedDataLayerManager.IsValid() && ArtLayerAsset)
 	{
 		CachedDataLayerManager->SetDataLayerRuntimeState(ArtLayerAsset, EDataLayerRuntimeState::Loaded);
@@ -437,10 +569,13 @@ void UMyMapTravelSubsystem::ActivateZoneGameplay(const UDataLayerAsset* Gameplay
 {
 	if (CachedDataLayerManager.IsValid())
 	{
+		// 彻底唤醒目标艺术层，开始渲染并启用碰撞
 		if (ArtLayerAsset)
 		{
 			CachedDataLayerManager->SetDataLayerRuntimeState(ArtLayerAsset, EDataLayerRuntimeState::Activated);
 		}
+
+		// 彻底唤醒目标玩法层，敌人生成器和触发器等开始工作
 		if (GameplayLayerAsset)
 		{
 			CachedDataLayerManager->SetDataLayerRuntimeState(GameplayLayerAsset, EDataLayerRuntimeState::Activated);
@@ -450,6 +585,7 @@ void UMyMapTravelSubsystem::ActivateZoneGameplay(const UDataLayerAsset* Gameplay
 
 void UMyMapTravelSubsystem::EliminateZone(const UDataLayerAsset* LayerToUnload)
 {
+	// 将指定的数据层物理级卸载出内存，强制释放占用
 	if (CachedDataLayerManager.IsValid() && LayerToUnload)
 	{
 		CachedDataLayerManager->SetDataLayerRuntimeState(LayerToUnload, EDataLayerRuntimeState::Unloaded);
@@ -458,73 +594,94 @@ void UMyMapTravelSubsystem::EliminateZone(const UDataLayerAsset* LayerToUnload)
 
 void UMyMapTravelSubsystem::UpdateEnvironment(UMyBiomeConfig* NewBiome, ADirectionalLight* MainLight, AExponentialHeightFog* MainFog)
 {
+	// 防御性安全拦截
 	if (!NewBiome || !MainLight || !MainLight->GetComponent()) return;
 	UWorld* World = GetWorld();
 	if (!World) return;
 
+	// 平滑切断旧的环境音效与 BGM 修改器
 	if (CurrentBiomeTarget && CurrentBiomeTarget->BiomeSoundMix)
 	{
 		UGameplayStatics::PopSoundMixModifier(World, CurrentBiomeTarget->BiomeSoundMix);
 	}
+
+	// 推送新的生态混音，引擎音频系统会自动处理淡入淡出
 	if (NewBiome->BiomeSoundMix)
 	{
 		UGameplayStatics::PushSoundMixModifier(World, NewBiome->BiomeSoundMix);
 	}
 
+	// 锁定新的生态插值目标以及相关光源引用
 	CurrentBiomeTarget = NewBiome;
 	CachedSunLight = MainLight;
 	CachedAtmosphereFog = MainFog;
+
+	// 重置插值进度
 	LerpAlpha = 0.0f;
 
+	// 防止配置填错导致除零崩溃，最短过渡时间限制为 0.1 秒
 	float Duration = FMath::Max(0.1f, NewBiome->TransitionDuration);
+
+	// 根据定时器的固定触发频率 (0.05s) 计算每一步的 Alpha 增量
 	LerpStep = 0.05f / Duration;
 
+	// 记录平滑插值的物理起点
 	StartSunRotation = MainLight->GetComponent()->GetComponentRotation();
 	StartSunColor = MainLight->GetComponent()->LightColor;
 
+	// 挂起后台高频定时器，开始以非阻塞方式异步过渡环境渲染
 	World->GetTimerManager().SetTimer(BiomeLerpTimer, this, &UMyMapTravelSubsystem::ProcessBiomeLerpTick, 0.05f, true);
 }
 
 void UMyMapTravelSubsystem::DebugPrintDataLayerStates()
 {
+	// 获取世界数据层管理器
 	UDataLayerManager* DLManager = UDataLayerManager::GetDataLayerManager(GetWorld());
 	if (!DLManager) return;
 
+	// 打印雷达表头
 	if (GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 15.f, FColor::Yellow, TEXT("========== 数据层真实内存状态诊断 =========="));
 	}
 
+	// 倒序遍历序列，保证在屏幕上的输出顺序符合玩家直觉（从上到下即从近到远）
 	for (int32 i = ZoneSequence.Num() - 1; i >= 0; --i)
 	{
 		const FZoneDataLayerPair& Zone = ZoneSequence[i];
 
 		if (Zone.GameplayLayer)
 		{
+			// 获取底层真实的内存加载状态
 			EDataLayerRuntimeState GPState = EDataLayerRuntimeState::Unloaded;
 			if (const UDataLayerInstance* GPInstance = DLManager->GetDataLayerInstance(Zone.GameplayLayer))
 			{
 				GPState = GPInstance->GetRuntimeState();
 			}
 
+			// 状态文本转换
 			FString StateStr = (GPState == EDataLayerRuntimeState::Activated) ? TEXT("已激活 (Activated)") :
 				(GPState == EDataLayerRuntimeState::Loaded) ? TEXT("仅加载 (Loaded)") : TEXT("已卸载 (Unloaded)");
 
+			// 警告色标红处理
 			FColor MsgColor = (GPState == EDataLayerRuntimeState::Activated) ? FColor::Red : FColor::White;
 			if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 15.f, MsgColor, FString::Printf(TEXT("Zone %d [玩法 Gameplay]: %s"), i, *StateStr));
 		}
 
 		if (Zone.ArtLayer)
 		{
+			// 获取底层真实的内存加载状态
 			EDataLayerRuntimeState ArtState = EDataLayerRuntimeState::Unloaded;
 			if (const UDataLayerInstance* ArtInstance = DLManager->GetDataLayerInstance(Zone.ArtLayer))
 			{
 				ArtState = ArtInstance->GetRuntimeState();
 			}
 
+			// 状态文本转换
 			FString StateStr = (ArtState == EDataLayerRuntimeState::Activated) ? TEXT("已激活 (Activated)") :
 				(ArtState == EDataLayerRuntimeState::Loaded) ? TEXT("仅加载 (Loaded)") : TEXT("已卸载 (Unloaded)");
 
+			// 安全色标绿处理
 			FColor MsgColor = (ArtState == EDataLayerRuntimeState::Activated) ? FColor::Green : FColor::White;
 			if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 15.f, MsgColor, FString::Printf(TEXT("Zone %d [美术 Art]:      %s"), i, *StateStr));
 		}
@@ -533,23 +690,30 @@ void UMyMapTravelSubsystem::DebugPrintDataLayerStates()
 
 void UMyMapTravelSubsystem::ProcessBiomeLerpTick()
 {
+	// 防御链条：世界失效、目标配置丢失、或主光源被外力物理销毁时，立即自尽停止 Tick
 	if (!IsValid(GetWorld()) || !CurrentBiomeTarget || !CachedSunLight.IsValid() || !CachedSunLight->GetComponent())
 	{
 		if (UWorld* World = GetWorld()) World->GetTimerManager().ClearTimer(BiomeLerpTimer);
 		return;
 	}
 
+	// 累加计算插值进度
 	LerpAlpha += LerpStep;
+
+	// 钳制范围防溢出
 	LerpAlpha = FMath::Clamp(LerpAlpha, 0.0f, 1.0f);
 
 	UDirectionalLightComponent* LightComp = CachedSunLight->GetComponent();
 
+	// 线性插值计算当前帧的物理状态
 	FRotator NewRot = FMath::Lerp(StartSunRotation, CurrentBiomeTarget->TargetSunRotation, LerpAlpha);
 	FLinearColor NewColor = FMath::Lerp(StartSunColor, CurrentBiomeTarget->SunLightColor, LerpAlpha);
 
+	// 应用状态：驱动天光旋转（时间推移）与色彩渐变
 	LightComp->SetWorldRotation(NewRot);
 	LightComp->SetLightColor(NewColor);
 
+	// 同步平滑处理大气雾的浓度
 	if (CachedAtmosphereFog.IsValid() && CachedAtmosphereFog->GetComponent())
 	{
 		CachedAtmosphereFog->GetComponent()->SetFogDensity(
@@ -557,8 +721,10 @@ void UMyMapTravelSubsystem::ProcessBiomeLerpTick()
 		);
 	}
 
+	// 检查是否到达终点
 	if (LerpAlpha >= 1.0f)
 	{
+		// 功成身退，销毁后台定时器
 		if (UWorld* World = GetWorld()) World->GetTimerManager().ClearTimer(BiomeLerpTimer);
 	}
 }
