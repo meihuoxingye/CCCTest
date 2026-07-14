@@ -15,6 +15,7 @@ AMyTransitionGameMode::AMyTransitionGameMode()
 	PrimaryActorTick.bCanEverTick = false;
 
 	// 【核心配置】：强制玩家以“观察者(Spectator)”身份进入！
+	// 在过渡地图里必须当幽灵,不能用真实角色
 	bStartPlayersAsSpectators = true;
 }
 

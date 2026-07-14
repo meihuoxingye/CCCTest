@@ -4,6 +4,8 @@
 
 #include "CoreMinimal.h"
 #include "SceneViewExtension.h"
+#include "HAL/ThreadSafeBool.h" // 【新增】：引入虚幻官方的线程安全类型
+
 
 class CCC_API FBlackoutExtension : public FSceneViewExtensionBase
 {
@@ -22,5 +24,6 @@ public:
 	// 严格对齐接口：操作 RenderTarget，天然放行后期 Slate/UMG UI
 	virtual void PostRenderViewFamily_RenderThread(FRDGBuilder& GraphBuilder, FSceneViewFamily& InViewFamily) override;
 
-	bool bIsActive = false;
+	// 【修改】：将普通的 bool 替换为 FThreadSafeBool，彻底消除跨线程读写冲突！
+	FThreadSafeBool bIsActive = false;
 };

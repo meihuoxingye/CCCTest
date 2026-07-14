@@ -29,20 +29,25 @@ bool FBlackoutExtension::IsActiveThisFrame_Internal(const FSceneViewExtensionCon
 
 void FBlackoutExtension::PostRenderViewFamily_RenderThread(FRDGBuilder& GraphBuilder, FSceneViewFamily& InViewFamily)
 {
-	// 拦截 3D 渲染画布直接涂黑，完美屏蔽漏光与残影。
-	// 新项目落地时拉起的加载 UMG 在此阶段后独立上屏，实现无缝接力！
-	if (bIsActive && InViewFamily.RenderTarget)
+	// 1. 读取线程安全变量
+	// 2. 检查 RenderTarget 指针
+	// 3. 【新增】：严格检查尺寸，防止 0x0 导致的 RDG 崩溃！
+	if (bIsActive &&
+		InViewFamily.RenderTarget &&
+		InViewFamily.RenderTarget->GetSizeXY().X > 0 &&
+		InViewFamily.RenderTarget->GetSizeXY().Y > 0)
 	{
-		FRHITexture* RHITexture = InViewFamily.RenderTarget->GetRenderTargetTexture();
-		if (RHITexture)
-		{
-			TRefCountPtr<IPooledRenderTarget> PooledRT = CreateRenderTarget(RHITexture, TEXT("BlackoutRT"));
-			if (PooledRT.IsValid())
-			{
-				FRDGTextureRef RDGTexture = GraphBuilder.RegisterExternalTexture(PooledRT);
-				AddClearRenderTargetPass(GraphBuilder, RDGTexture, FLinearColor::Black);
-			}
-		}
+		// 获取当前的 RenderTarget
+		FRHITexture* RenderTargetTexture = InViewFamily.RenderTarget->GetRenderTargetTexture();
+		if (!RenderTargetTexture) return;
+
+		// 注册外部纹理并添加到 RDG 清理 Pass
+		FRDGTextureRef RdgRenderTarget = GraphBuilder.RegisterExternalTexture(
+			CreateRenderTarget(RenderTargetTexture, TEXT("BlackoutRenderTarget"))
+		);
+
+		// 执行强制纯黑清屏，阻断残影漏光
+		AddClearRenderTargetPass(GraphBuilder, RdgRenderTarget, FLinearColor::Black);
 	}
 }
 

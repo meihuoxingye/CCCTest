@@ -4,6 +4,7 @@
 #include "Components/BoxComponent.h"
 #include "MapTravel/MyMapTravelSubsystem.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/Pawn.h"
 #include "Engine/World.h"
 
 // ==============================================================================
@@ -41,7 +42,9 @@ void AMyLevelTransitionActor::BeginPlay()
 
 void AMyLevelTransitionActor::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
-	if (OtherActor && OtherActor != this && OtherActor->IsA<ACharacter>())
+	// 【判定条件的精确化】：必须确保重叠的 Actor 是受本地玩家控制的 Pawn，防止 AI 巡逻员意外触发转场
+	APawn* OverlappedPawn = Cast<APawn>(OtherActor);
+	if (OverlappedPawn && OverlappedPawn->IsLocallyControlled())
 	{
 		TriggerBox->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 

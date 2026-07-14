@@ -109,9 +109,10 @@ void UMyLoadingScreenWidget::UpdateMaterialProgressTick()
 		}
 	}
 
-	// ------------------------------------------------------------------------------
-	// 实时日志监测：看清每帧的真实状态
-	// ------------------------------------------------------------------------------
+	// ==============================================================================
+	// 【3A级性能防线】：开发期实时监控，发行版物理抹除！
+	// ==============================================================================
+#if !UE_BUILD_SHIPPING
 	if (GEngine)
 	{
 		FString DebugMsg = FString::Printf(TEXT("[LoadingUI] 引擎Ready: %d | 重新规划: %d | 进度: %05.1f%% | 当前速度: %05.1f%%/s | 时钟: %.2f / %.2f"),
@@ -127,7 +128,8 @@ void UMyLoadingScreenWidget::UpdateMaterialProgressTick()
 
 	UE_LOG(LogTemp, Warning, TEXT("[LoadingUI] 引擎Ready: %d | 重新规划: %d | 进度: %05.1f%% | 当前速度: %05.1f%%/s | 时钟: %.2f / %.2f"),
 		bIsEngineReady ? 1 : 0, bVelocityRecomputed ? 1 : 0, CurrentVisualPercent * 100.0f, CurrentSpeed * 100.0f, ElapsedTime, TargetFillTime);
-	// ------------------------------------------------------------------------------
+#endif
+	// ==============================================================================
 
 	CurrentVisualPercent += UpdateInterval * CurrentSpeed;
 
