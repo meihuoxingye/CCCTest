@@ -20,6 +20,9 @@
 AMyUniversalDestination::AMyUniversalDestination()
 {
 	PrimaryActorTick.bCanEverTick = false;
+
+	// 【新增核心修复】：禁止被大世界分区卸载，保证跨图生成的第一帧它绝对在场！
+	bIsSpatiallyLoaded = false;
 }
 
 void AMyUniversalDestination::BeginPlay()
@@ -41,25 +44,7 @@ void AMyUniversalDestination::BeginPlay()
 		}
 	}
 
-	// 跨地图落地接机管线：在世界生成的第一帧，搜查全局大管家手中的跨界车票
-	if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
-	{
-		// 校验大管家手中持有的跨界车票是否属于自己的监听阵列
-		if (GI->PendingTravelRoute != nullptr && ListeningRoutes.Contains(GI->PendingTravelRoute))
-		{
-			// 撕毁车票：清除全局跨界状态，防止复活或二次加载时引发幽灵瞬移
-			GI->PendingTravelRoute = nullptr;
-
-			// 零感知瞬移：在玩家睁眼前，调用最高物理权限将其强行吸附至此锚点
-			if (APlayerController* PC = World->GetFirstPlayerController())
-			{
-				if (APawn* Pawn = PC->GetPawn())
-				{
-					Pawn->SetActorTransform(GetActorTransform());
-				}
-			}
-		}
-	}
+	// 注意：跨地图落地接机的烂代码已全部物理切除！寻址现已全盘移交 GameMode！
 }
 
 void AMyUniversalDestination::EndPlay(const EEndPlayReason::Type EndPlayReason)

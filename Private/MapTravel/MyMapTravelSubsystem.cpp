@@ -340,148 +340,19 @@ void UMyMapTravelSubsystem::RestorePlayerInput()
 		FSlateApplication::Get().SetAllUserFocusToGameViewport();
 	}
 
+	// ================= 追加以下代码 =================
+	// 彻底完成管线，销毁跨界车票防幽灵复活
+	if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
+	{
+		GI->PendingTravelRoute = nullptr;
+	}
+
 	// 彻底完成管线，解除转场锁
 	bIsTraveling = false;
 }
 
 #pragma endregion
 
-
-// ==============================================================================
-// 同地图硬切换管线 (Intra-Map Hard Travel)
-// ==============================================================================
-/*
-#pragma region
-
-void UMyMapTravelSubsystem::ExecuteSameMapTravel(AActor* TeleportingActor, const FTransform& TargetTransform)
-{
-	// 状态锁拦截：防止重复调用导致时序错乱
-	if (bIsTraveling || !TeleportingActor) return;
-
-	// 开启转场锁
-	bIsTraveling = true;
-
-	// 安全获取世界上下文
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		// 获取失败时安全解锁并返回
-		bIsTraveling = false;
-		return;
-	}
-
-	// 全局物理破片盾牌：强制重置时间流速，防止同地图传送的倒计时被子弹时间无限拉长
-	UGameplayStatics::SetGlobalTimeDilation(World, 1.0f);
-
-	// 逻辑层点穴：安全获取真实的本地玩家控制器
-	if (APlayerController* PC = GetRealPlayerController(World))
-	{
-		// 拔掉控制器身上的时间电池，强行关闭内部状态机
-		if (UTimeDilationHubComponent* TimeComp = PC->GetComponentByClass<UTimeDilationHubComponent>())
-		{
-			TimeComp->ForceResetTime();
-		}
-
-		// 消除灵魂个体的流速残留
-		PC->CustomTimeDilation = 1.0f;
-
-		// 彻底禁止玩家一切操作
-		PC->DisableInput(PC);
-
-		// 强制切换到 UI 模式，并解除鼠标锁定
-		FInputModeUIOnly InputMode;
-		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-		PC->SetInputMode(InputMode);
-
-		// 获取肉体并进行同步点穴
-		if (APawn* Pawn = PC->GetPawn())
-		{
-			// 拔掉肉体身上的时间电池
-			if (UTimeDilationHubComponent* TimeComp = Pawn->GetComponentByClass<UTimeDilationHubComponent>())
-			{
-				TimeComp->ForceResetTime();
-			}
-
-			// 消除肉体个体的流速残留
-			Pawn->CustomTimeDilation = 1.0f;
-
-			// 彻底禁止肉体接受输入
-			Pawn->DisableInput(PC);
-		}
-	}
-
-	// 获取大管家 GameInstance
-	UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>();
-	if (!GI)
-	{
-		// 获取失败时安全解锁并返回
-		bIsTraveling = false;
-		return;
-	}
-
-	// 获取当前地图名称用于查表
-	FName CurrentMapName = FName(*FPackageName::GetShortName(World->GetMapName()));
-
-	// 核心数据驱动：直接从大管家获取当前地图专属的同地图传送配置
-	FMapTransitionConfig Config = GI->GetMapTransitionConfig(CurrentMapName);
-
-	// 同地图传送，目标地图名就是当前地图名
-	GI->PendingTargetMapName = CurrentMapName;
-
-	// 拉起设计师定制的熄屏闭合 UI
-	GI->PlayScreenOffUI(Config.ScreenOffUIClass, Config.ScreenOffDuration);
-
-	// 取安全延迟与配置延迟的最大值，防范物理时序错乱
-	float SafeDelay = FMath::Max(GI->SystemSafeDelay, Config.ScreenOffDuration);
-
-	// 提取落地后的盲开等待时间
-	float IntroDelay = Config.MinLoadingTime;
-
-	// 构建闭包委托：用于在闭眼后执行瞬移和后续管线
-	FTimerDelegate TimerDel;
-	TimerDel.BindLambda([this, TeleportingActor, TargetTransform, IntroDelay]()
-		{
-			// 物理层瞬移：直接将目标放置到指定 Transform
-			if (IsValid(TeleportingActor)) TeleportingActor->SetActorTransform(TargetTransform);
-
-			// 瞬移完成后安全获取世界
-			if (UWorld* InnerWorld = GetWorld())
-			{
-				// 安全获取大管家
-				if (UMyGameInstance* InnerGI = InnerWorld->GetGameInstance<UMyGameInstance>())
-				{
-					// 传入 nullptr，强制大管家自己去查字典决定使用什么加载界面
-					InnerGI->ShowFakeLoadingScreen(nullptr);
-				}
-
-				// 挂起第二个阶段计时器：等待最小加载时间后，结束同地图切换管线
-				InnerWorld->GetTimerManager().SetTimer(ZoneTravelTimerHandle, this, &UMyMapTravelSubsystem::FinishSameMapTravel, IntroDelay, false);
-			}
-		});
-
-	// 挂起第一个阶段计时器：闭眼期间
-	World->GetTimerManager().SetTimer(ZoneTravelTimerHandle, TimerDel, SafeDelay, false);
-}
-
-void UMyMapTravelSubsystem::FinishSameMapTravel()
-{
-	// 安全获取世界上下文
-	if (UWorld* World = GetWorld())
-	{
-		// 解耦魔法：获取大管家实例
-		// 由大管家统一撤下黑幕和 UI
-		// UI 播放完退场动画后，会自动调用大管家的 FinalizeLoadingScreenRemoval
-		// 进而触发 RestorePlayerInput，实现了跨地图与同地图时序的大一统
-		if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
-		{
-			// 发送信号让伪加载屏退场
-			GI->HideFakeLoadingScreen();
-		}
-	}
-}
-
-#pragma endregion
-*/
 
 // ==============================================================================
 // 大一统传送路由中心 (Universal Routing Hub)
@@ -557,6 +428,18 @@ void UMyMapTravelSubsystem::ExecuteUniversalTravel(AActor* TeleportingActor, UTe
 	}
 }
 
+/*
+AActor* UMyMapTravelSubsystem::GetDestinationActor(UTeleportRoute* Route)
+{
+	// 极速 O(1) 字典寻址
+	if (Route && SameMapDestinationRegistry.Contains(Route))
+	{
+		return SameMapDestinationRegistry[Route].RegistrySource.Get();
+	}
+	return nullptr;
+}
+*/
+
 void UMyMapTravelSubsystem::ExecuteSameMapTravel(AActor* TeleportingActor, UTeleportRoute* TargetRoute)
 {
 	if (bIsTraveling || !TeleportingActor || !TargetRoute) return;
@@ -600,22 +483,23 @@ void UMyMapTravelSubsystem::ExecuteSameMapTravel(AActor* TeleportingActor, UTele
 		return;
 	}
 
-	// 调用 UI 遮挡黑幕掩护物理传送过程
-	FName CurrentMapName = FName(*FPackageName::GetShortName(World->GetMapName()));
+	// 【替换为这行：彻底剥离 PIE 前缀，让 UI 顺利加载，接管解穴流程！】
+	FName CurrentMapName = FName(*UGameplayStatics::GetCurrentLevelName(World, true));
 	FMapTransitionConfig Config = GI->GetMapTransitionConfig(CurrentMapName);
 	GI->PendingTargetMapName = CurrentMapName;
 	GI->PlayScreenOffUI(Config.ScreenOffUIClass, Config.ScreenOffDuration);
 
-	float SafeDelay = FMath::Max(GI->SystemSafeDelay, Config.ScreenOffDuration);
-	float IntroDelay = Config.MinLoadingTime;
+	// 核心修复 1：强制设定 0.01 秒的最小底线，坚决防止虚幻 SetTimer 遇到 0.0 瞬间删除定时器引发永久锁死！
+	float SafeDelay = FMath::Max(0.01f, FMath::Max(GI->SystemSafeDelay, Config.ScreenOffDuration));
+	float IntroDelay = FMath::Max(0.01f, Config.MinLoadingTime);
 
 	FTimerDelegate TimerDel;
 	TimerDel.BindLambda([this, TeleportingActor, TargetTransform, IntroDelay]()
 		{
-			// 空间折叠核心：在黑幕达到绝对黑暗时，强制覆写玩家物理坐标
+			// 核心修复 2：废弃 SetActorTransform，改用最高物理权限的 TeleportTo，绝对防止玩家跟地板穿模卡死
 			if (IsValid(TeleportingActor))
 			{
-				TeleportingActor->SetActorTransform(TargetTransform);
+				TeleportingActor->TeleportTo(TargetTransform.GetLocation(), TargetTransform.GetRotation().Rotator(), false, true);
 			}
 
 			if (UWorld* InnerWorld = GetWorld())
@@ -641,6 +525,9 @@ void UMyMapTravelSubsystem::FinishSameMapTravel()
 			GI->HideFakeLoadingScreen();
 		}
 	}
+
+	// 【必须补上这句】：同地图黑幕结束后，彻底恢复玩家的输入控制权！
+	RestorePlayerInput();
 }
 
 #pragma endregion

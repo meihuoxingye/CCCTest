@@ -55,4 +55,7 @@ public:
 public:
 	/** 重写：决定哪些正在飞行的“幽灵 Actor”能无视空间毁灭，直接跟入下一个世界 */
 	virtual void GetSeamlessTravelActorList(bool bToTransition, TArray<AActor*>& ActorList) override;
+
+	// 覆写原生出生点规则：如果手里捏着跨界车票，强制覆盖玩家出生地
+	virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
 };

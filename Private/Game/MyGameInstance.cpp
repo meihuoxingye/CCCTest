@@ -320,16 +320,14 @@ void UMyGameInstance::FinalizeLoadingScreenRemoval()
 {
 	if (ActiveTransitionUI)
 	{
-		// 物理移除，彻底释放内存
-		// 架构核心：这行代码只会被 UI 在播完退场动画后自己反向回调！实现了完美的时序解耦！
 		ActiveTransitionUI->RemoveFromParent();
-
-		// 指针安全置空
 		ActiveTransitionUI = nullptr;
 	}
 
-	// 一次完整的跨地图或同地图漫游闭环结束，将挂起的目标地图名称清空
 	PendingTargetMapName = NAME_None;
+
+	// 【新增】：一次大一统漫游彻底闭环，销毁跨界车票，防玩家死后重生依然触发幽灵传送！
+	PendingTravelRoute = nullptr;
 }
 
 #pragma endregion

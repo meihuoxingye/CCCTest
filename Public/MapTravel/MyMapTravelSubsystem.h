@@ -173,29 +173,6 @@ private:
 	// 生态渐变定时器的 Tick 回调函数
 	void ProcessBiomeLerpTick();
 
-/*
-	// ==============================================================================
-	// 同地图硬切换管线 (Intra-Map Hard Travel)
-	// ==============================================================================
-public:
-
-	// 带有黑幕 UI 与强制闭眼等待的同地图瞬移切换管线（用于同地图内进 Boss 房等）
-	UFUNCTION(BlueprintCallable, Category = "MapTravel")
-	void ExecuteSameMapTravel(AActor* TeleportingActor, const FTransform& TargetTransform);
-
-private:
-
-	// 缓存同地图漫游期间创建的加载遮罩 UI
-	UPROPERTY()
-	class UUserWidget* ZoneLoadingWidget = nullptr;
-
-	// 驱动同地图瞬移闭眼、等待及后续管线的定时器句柄
-	FTimerHandle ZoneTravelTimerHandle;
-
-	// 同地图漫游第二阶段回调：通知大管家撤下 UI 并触发恢复输入
-	UFUNCTION()
-	void FinishSameMapTravel();
-*/
 
 	// ==============================================================================
 	// 大一统传送路由中心 (Universal Routing Hub)
@@ -208,8 +185,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void UnregisterSameMapDestination(UTeleportRoute* Route);
 
+	// 大一统传送门户：由传送门调用，系统自动判别走同地图极速瞬移还是跨地图无缝流送
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void ExecuteUniversalTravel(AActor* TeleportingActor, UTeleportRoute* TargetRoute);
+
+	/*
+	// ================= 追加以下接口 =================
+	// 开放给 GameMode 的寻址探针，用于跨地图生成时精准定位目标实体
+	UFUNCTION(BlueprintCallable, Category = "MapTravel")
+	AActor* GetDestinationActor(UTeleportRoute* Route);
+	*/
 
 private:
 
