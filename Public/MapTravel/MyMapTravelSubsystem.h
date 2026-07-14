@@ -11,6 +11,7 @@ class UDataLayerManager;
 class UMyBiomeConfig;
 class ADirectionalLight;
 class AExponentialHeightFog;
+class UTeleportRoute;
 
 
 // ==============================================================================
@@ -32,6 +33,25 @@ public:
 	// 动态玩法层指针：负责敌人生成器、关卡触发器、动态物理物件等逻辑资产的流送
 	UDataLayerAsset* GameplayLayer = nullptr;
 };
+
+
+// ==============================================================================
+// 对点传送底层数据结构 (Point-to-Point Data Structure)
+// ==============================================================================
+USTRUCT(BlueprintType)
+struct FDestinationRegistrationInfo
+{
+	GENERATED_BODY()
+
+public:
+
+	UPROPERTY()
+	TWeakObjectPtr<AActor> RegistrySource = nullptr;
+
+	UPROPERTY()
+	FTransform TargetTransform;
+};
+
 
 /**
  * 负责 2.5D 横版关卡的无缝流转
@@ -153,7 +173,7 @@ private:
 	// 生态渐变定时器的 Tick 回调函数
 	void ProcessBiomeLerpTick();
 
-
+/*
 	// ==============================================================================
 	// 同地图硬切换管线 (Intra-Map Hard Travel)
 	// ==============================================================================
@@ -175,7 +195,7 @@ private:
 	// 同地图漫游第二阶段回调：通知大管家撤下 UI 并触发恢复输入
 	UFUNCTION()
 	void FinishSameMapTravel();
-
+*/
 
 	// ==============================================================================
 	// 大一统传送路由中心 (Universal Routing Hub)

@@ -4,7 +4,7 @@
 #include "Engine/World.h"
 #include "WorldPartition/DataLayer/DataLayerAsset.h"
 #include "WorldPartition/DataLayer/DataLayerManager.h"
-#include "MapTravel/MyBiomeConfig.h"
+#include "MapTravel/DataAsset/MyBiomeConfig.h"
 #include "Engine/DirectionalLight.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/LightComponent.h"
@@ -293,12 +293,64 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 		}, SafeTravelDelay, false);
 }
 
+void UMyMapTravelSubsystem::RestorePlayerInput()
+{
+	// 安全获取世界上下文
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	// 彻底解除视口级别的输入忽略屏蔽
+	if (GEngine && GEngine->GameViewport)
+	{
+		GEngine->GameViewport->SetIgnoreInput(false);
+	}
+
+	// 核心解穴：安全获取本地真实的玩家控制器
+	if (APlayerController* PC = GetRealPlayerController(World))
+	{
+		// 恢复控制器本身的输入响应
+		PC->EnableInput(PC);
+
+		// 清理黑幕期间玩家盲按留下的残留物理按键状态
+		PC->FlushPressedKeys();
+
+		// 恢复为正常的游戏与UI混合输入模式
+		FInputModeGameAndUI InputMode;
+
+		// 解除鼠标对视口的强制锁定
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+
+		// 确保捕获期间不隐藏鼠标光标
+		InputMode.SetHideCursorDuringCapture(false);
+
+		// 应用输入模式
+		PC->SetInputMode(InputMode);
+
+		// 恢复肉体的响应
+		if (APawn* Pawn = PC->GetPawn())
+		{
+			// 恢复肉体的按键接收
+			Pawn->EnableInput(PC);
+
+			// 恢复肉体的物理碰撞
+			Pawn->SetActorEnableCollision(true);
+		}
+
+		// 强制将底层的用户焦点重新对齐到游戏视口
+		FSlateApplication::Get().SetAllUserFocusToGameViewport();
+	}
+
+	// 彻底完成管线，解除转场锁
+	bIsTraveling = false;
+}
+
 #pragma endregion
 
 
 // ==============================================================================
 // 同地图硬切换管线 (Intra-Map Hard Travel)
 // ==============================================================================
+/*
 #pragma region
 
 void UMyMapTravelSubsystem::ExecuteSameMapTravel(AActor* TeleportingActor, const FTransform& TargetTransform)
@@ -428,59 +480,8 @@ void UMyMapTravelSubsystem::FinishSameMapTravel()
 	}
 }
 
-void UMyMapTravelSubsystem::RestorePlayerInput()
-{
-	// 安全获取世界上下文
-	UWorld* World = GetWorld();
-	if (!World) return;
-
-	// 彻底解除视口级别的输入忽略屏蔽
-	if (GEngine && GEngine->GameViewport)
-	{
-		GEngine->GameViewport->SetIgnoreInput(false);
-	}
-
-	// 核心解穴：安全获取本地真实的玩家控制器
-	if (APlayerController* PC = GetRealPlayerController(World))
-	{
-		// 恢复控制器本身的输入响应
-		PC->EnableInput(PC);
-
-		// 清理黑幕期间玩家盲按留下的残留物理按键状态
-		PC->FlushPressedKeys();
-
-		// 恢复为正常的游戏与UI混合输入模式
-		FInputModeGameAndUI InputMode;
-
-		// 解除鼠标对视口的强制锁定
-		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-
-		// 确保捕获期间不隐藏鼠标光标
-		InputMode.SetHideCursorDuringCapture(false);
-
-		// 应用输入模式
-		PC->SetInputMode(InputMode);
-
-		// 恢复肉体的响应
-		if (APawn* Pawn = PC->GetPawn())
-		{
-			// 恢复肉体的按键接收
-			Pawn->EnableInput(PC);
-
-			// 恢复肉体的物理碰撞
-			Pawn->SetActorEnableCollision(true);
-		}
-
-		// 强制将底层的用户焦点重新对齐到游戏视口
-		FSlateApplication::Get().SetAllUserFocusToGameViewport();
-	}
-
-	// 彻底完成管线，解除转场锁
-	bIsTraveling = false;
-}
-
 #pragma endregion
-
+*/
 
 // ==============================================================================
 // 大一统传送路由中心 (Universal Routing Hub)
