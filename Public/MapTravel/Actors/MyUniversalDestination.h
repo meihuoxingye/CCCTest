@@ -31,7 +31,7 @@ protected:
 	// ==============================================================================
 public:
 
-	// 路由监听矩阵：允许策划拖入多个路由资产，实现多路汇聚至此一点的高级拓扑结构
+	// 路由监听矩阵：允许策划拖入多个路由资产，实现多路汇聚的高级拓扑结构
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Teleport")
 	TArray<UTeleportRoute*> ListeningRoutes;
 };

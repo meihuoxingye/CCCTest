@@ -38,6 +38,8 @@
 
 #include "Component/TimeDilationHubComponent.h"
 
+#include "MapTravel/DataAsset/TeleportRoute.h"
+
 
 // 引入基类类型以供强制传参
 #include "UI/Transition/MyTransitionWidgetBase.h"
@@ -475,6 +477,169 @@ void UMyMapTravelSubsystem::RestorePlayerInput()
 
 	// 彻底完成管线，解除转场锁
 	bIsTraveling = false;
+}
+
+#pragma endregion
+
+
+// ==============================================================================
+// 大一统传送路由中心 (Universal Routing Hub)
+// ==============================================================================
+#pragma region
+
+void UMyMapTravelSubsystem::RegisterSameMapDestination(UTeleportRoute* Route, AActor* DestinationActor, const FTransform& TargetTransform)
+{
+	if (!Route || !DestinationActor) return;
+
+	// 架构级防呆：捕获并镇压由于关卡策划配置失误导致的多对一冲突
+	if (SameMapDestinationRegistry.Contains(Route))
+	{
+		FDestinationRegistrationInfo ConflictedInfo = SameMapDestinationRegistry[Route];
+		FString OldActorName = ConflictedInfo.RegistrySource.IsValid() ? ConflictedInfo.RegistrySource->GetName() : TEXT("已失效实体");
+		FString NewActorName = DestinationActor->GetName();
+
+		// 向开发者输出极度醒目的红色警告阵列，强制暴露脏数据
+		UE_LOG(LogTemp, Error, TEXT("=========================================================================="));
+		UE_LOG(LogTemp, Error, TEXT("[大一统传送系统] 致命冲突！路由资产 [%s] 被多个目标点同时监听！"), *Route->GetName());
+		UE_LOG(LogTemp, Error, TEXT(" -> 已注册生效的守卫点: [%s]"), *OldActorName);
+		UE_LOG(LogTemp, Error, TEXT(" -> 试图二次篡改的侵入点: [%s] (此入侵已被系统物理隔离并抛弃！)"), *NewActorName);
+		UE_LOG(LogTemp, Error, TEXT("=========================================================================="));
+		return;
+	}
+
+	// 组装合法数据并注入本地高速字典
+	FDestinationRegistrationInfo NewInfo;
+	NewInfo.RegistrySource = DestinationActor;
+	NewInfo.TargetTransform = TargetTransform;
+
+	SameMapDestinationRegistry.Add(Route, NewInfo);
+}
+
+void UMyMapTravelSubsystem::UnregisterSameMapDestination(UTeleportRoute* Route)
+{
+	if (Route)
+	{
+		SameMapDestinationRegistry.Remove(Route);
+	}
+}
+
+void UMyMapTravelSubsystem::ExecuteUniversalTravel(AActor* TeleportingActor, UTeleportRoute* TargetRoute)
+{
+	if (!TeleportingActor || !TargetRoute) return;
+
+	// 第一路由优先级：如果目标路由的接机点在当前内存字典中，直接劫持为同地图极速穿梭
+	if (SameMapDestinationRegistry.Contains(TargetRoute))
+	{
+		ExecuteSameMapTravel(TeleportingActor, TargetRoute);
+		return;
+	}
+
+	// 第二路由优先级：本地查无此人，断定为跨界航行，查阅资产内部的目标地图
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
+	{
+		if (!TargetRoute->TargetMap.IsNull())
+		{
+			// 铸造跨界车票并交由全局大管家保管
+			GI->PendingTravelRoute = TargetRoute;
+
+			// 从软引用萃取真实地图包名，移交跨地图无缝流送管线
+			FString TargetMapName = TargetRoute->TargetMap.GetAssetName();
+			ExecuteMapTravel(*TargetMapName);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("[大一统传送系统] 寻路瘫痪！路由资产 [%s] 既不在本图监听字典中，也未配置目标跨界地图！"), *TargetRoute->GetName());
+		}
+	}
+}
+
+void UMyMapTravelSubsystem::ExecuteSameMapTravel(AActor* TeleportingActor, UTeleportRoute* TargetRoute)
+{
+	if (bIsTraveling || !TeleportingActor || !TargetRoute) return;
+	if (!SameMapDestinationRegistry.Contains(TargetRoute)) return;
+
+	bIsTraveling = true;
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		bIsTraveling = false;
+		return;
+	}
+
+	// 提取绝对物理坐标
+	FTransform TargetTransform = SameMapDestinationRegistry[TargetRoute].TargetTransform;
+
+	// 物理层静默：强制抹平时空流速，彻底剥夺玩家控制权
+	UGameplayStatics::SetGlobalTimeDilation(World, 1.0f);
+
+	if (APlayerController* PC = GetRealPlayerController(World))
+	{
+		PC->CustomTimeDilation = 1.0f;
+		PC->DisableInput(PC);
+
+		FInputModeUIOnly InputMode;
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		PC->SetInputMode(InputMode);
+
+		if (APawn* Pawn = PC->GetPawn())
+		{
+			Pawn->CustomTimeDilation = 1.0f;
+			Pawn->DisableInput(PC);
+		}
+	}
+
+	UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>();
+	if (!GI)
+	{
+		bIsTraveling = false;
+		return;
+	}
+
+	// 调用 UI 遮挡黑幕掩护物理传送过程
+	FName CurrentMapName = FName(*FPackageName::GetShortName(World->GetMapName()));
+	FMapTransitionConfig Config = GI->GetMapTransitionConfig(CurrentMapName);
+	GI->PendingTargetMapName = CurrentMapName;
+	GI->PlayScreenOffUI(Config.ScreenOffUIClass, Config.ScreenOffDuration);
+
+	float SafeDelay = FMath::Max(GI->SystemSafeDelay, Config.ScreenOffDuration);
+	float IntroDelay = Config.MinLoadingTime;
+
+	FTimerDelegate TimerDel;
+	TimerDel.BindLambda([this, TeleportingActor, TargetTransform, IntroDelay]()
+		{
+			// 空间折叠核心：在黑幕达到绝对黑暗时，强制覆写玩家物理坐标
+			if (IsValid(TeleportingActor))
+			{
+				TeleportingActor->SetActorTransform(TargetTransform);
+			}
+
+			if (UWorld* InnerWorld = GetWorld())
+			{
+				if (UMyGameInstance* InnerGI = InnerWorld->GetGameInstance<UMyGameInstance>())
+				{
+					InnerGI->ShowFakeLoadingScreen(nullptr);
+				}
+
+				InnerWorld->GetTimerManager().SetTimer(SameMapTravelTimerHandle, this, &UMyMapTravelSubsystem::FinishSameMapTravel, IntroDelay, false);
+			}
+		});
+
+	World->GetTimerManager().SetTimer(SameMapTravelTimerHandle, TimerDel, SafeDelay, false);
+}
+
+void UMyMapTravelSubsystem::FinishSameMapTravel()
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
+		{
+			GI->HideFakeLoadingScreen();
+		}
+	}
 }
 
 #pragma endregion

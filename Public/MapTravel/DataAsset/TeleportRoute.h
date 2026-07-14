@@ -6,10 +6,6 @@
 #include "Engine/DataAsset.h"
 #include "TeleportRoute.generated.h"
 
-/**
- * 3A级解耦传送路由资产
- * 作为独立的实体路线文件，彻底消灭硬编码字符串 ID
- */
 UCLASS(BlueprintType)
 class CCC_API UTeleportRoute : public UDataAsset
 {

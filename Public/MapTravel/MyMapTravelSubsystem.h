@@ -175,4 +175,31 @@ private:
 	// 同地图漫游第二阶段回调：通知大管家撤下 UI 并触发恢复输入
 	UFUNCTION()
 	void FinishSameMapTravel();
+
+
+	// ==============================================================================
+	// 大一统传送路由中心 (Universal Routing Hub)
+	// ==============================================================================
+public:
+
+	UFUNCTION(BlueprintCallable, Category = "MapTravel")
+	void RegisterSameMapDestination(UTeleportRoute* Route, AActor* DestinationActor, const FTransform& TargetTransform);
+
+	UFUNCTION(BlueprintCallable, Category = "MapTravel")
+	void UnregisterSameMapDestination(UTeleportRoute* Route);
+
+	UFUNCTION(BlueprintCallable, Category = "MapTravel")
+	void ExecuteUniversalTravel(AActor* TeleportingActor, UTeleportRoute* TargetRoute);
+
+private:
+
+	void ExecuteSameMapTravel(AActor* TeleportingActor, UTeleportRoute* TargetRoute);
+
+	UFUNCTION()
+	void FinishSameMapTravel();
+
+	FTimerHandle SameMapTravelTimerHandle;
+
+	UPROPERTY(Transient)
+	TMap<UTeleportRoute*, FDestinationRegistrationInfo> SameMapDestinationRegistry;
 };

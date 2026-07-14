@@ -171,4 +171,13 @@ private:
 
 	// 内部收尾核验函数：当且仅当引擎物理就绪且时间契约到期时，安全触发 UI 动画退场
 	void CheckAndHideLoadingScreen();
+
+
+	// ==============================================================================
+	// 大一统传送路由管线 (Universal Routing Pipeline)
+	// ==============================================================================
+public:
+
+	UPROPERTY(Transient)
+	class UTeleportRoute* PendingTravelRoute;
 };

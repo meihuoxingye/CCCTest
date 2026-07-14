@@ -34,7 +34,7 @@ protected:
 	// ==============================================================================
 public:
 
-	// 发射路由：策划只需拖入目标路由资产，该传送门自动绑定路线
+	// 发射路由：策划只需拖入目标路由资产，该传送门自动绑定物理路线
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Teleport")
 	UTeleportRoute* EmittingRoute;
 
