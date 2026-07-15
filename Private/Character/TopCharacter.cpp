@@ -129,7 +129,8 @@ void ATopCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	// 使用局部的 const 原始指针来接取配置资产（推荐的最佳实践）
 	// 这样可以确保在当前的 BeginPlay 逻辑里，没有任何人能意外修改 Config 内部的数值
 	const UCharacterAttributeDataAsset* Config = AttributeConfig.Get();
-	if (!Config) return;
+
+	// if (!Config) return;
 
 
 	// ===================== 【友军阵亡自动注销】 =====================
@@ -187,6 +188,7 @@ void ATopCharacter::ExecuteSelfSanitization()
 		GM->FriendlyRoster.Remove(this);
 	}
 
+	/*
 	// 只有在输入组件有效时才执行阻断
 	if (InputComponent)
 	{
@@ -195,6 +197,7 @@ void ATopCharacter::ExecuteSelfSanitization()
 			EIC->ClearActionBindings();
 		}
 	}
+	*/
 
 	// 执行“完美软禁”，保留组件结构但封死一切接收路径
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))

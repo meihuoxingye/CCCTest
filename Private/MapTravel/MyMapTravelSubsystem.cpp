@@ -226,11 +226,13 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 			PC->SetIgnoreMoveInput(true);
 			PC->SetIgnoreLookInput(true);
 
+			/*
 			if (UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(PC->InputComponent))
 			{
 				// 清空控制器输入组件的一切动作绑定
 				EIC->ClearActionBindings();
 			}
+			*/
 
 			if (APawn* PlayerPawn = PC->GetPawn())
 			{
@@ -281,13 +283,16 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 
 	FTimerHandle TravelTimerHandle;
 
-	// 使用 Lambda 挂起定时器，等待熄屏动画播完后精确执行 ServerTravel 降维打击
-	World->GetTimerManager().SetTimer(TravelTimerHandle, [World, TargetLevelName]()
+	// 【核心修复】：使用 TWeakObjectPtr 包装世界指针，防止 2 秒等待期内世界被意外销毁导致野指针崩溃
+	TWeakObjectPtr<UWorld> WeakWorld(World);
+
+	World->GetTimerManager().SetTimer(TravelTimerHandle, [WeakWorld, TargetLevelName]()
 		{
-			if (IsValid(World))
+			// 唤醒时重新安全提取强引用，如果内存已经被销毁，这里会安全返回 nullptr
+			if (UWorld* SafeWorld = WeakWorld.Get())
 			{
 				// 真正起航：命令引擎底层开启无缝旅行管线
-				World->ServerTravel(TargetLevelName.ToString());
+				SafeWorld->ServerTravel(TargetLevelName.ToString());
 			}
 		}, SafeTravelDelay, false);
 }
@@ -765,8 +770,9 @@ void UMyMapTravelSubsystem::ProcessBiomeLerpTick()
 
 	UDirectionalLightComponent* LightComp = CachedSunLight->GetComponent();
 
-	// 线性插值计算当前帧的物理状态
-	FRotator NewRot = FMath::Lerp(StartSunRotation, CurrentBiomeTarget->TargetSunRotation, LerpAlpha);
+	// 【核心修复】：将欧拉角转换为四元数进行 Slerp (球面插值)，彻底防止太阳在跨越 0 度界限时发生后空翻！
+	FRotator NewRot = FQuat::Slerp(StartSunRotation.Quaternion(), CurrentBiomeTarget->TargetSunRotation.Quaternion(), LerpAlpha).Rotator();
+
 	FLinearColor NewColor = FMath::Lerp(StartSunColor, CurrentBiomeTarget->SunLightColor, LerpAlpha);
 
 	// 应用状态：驱动天光旋转（时间推移）与色彩渐变
