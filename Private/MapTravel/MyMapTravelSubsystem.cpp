@@ -42,6 +42,8 @@
 #include "EngineUtils.h"
 #include "MapTravel/Actors/MyUniversalDestination.h"
 
+#include "GameFramework/CharacterMovementComponent.h"
+
 
 // ==============================================================================
 // 内部安全获取真实玩家控制器的工具函数 (防无缝传送假身)
@@ -339,6 +341,15 @@ void UMyMapTravelSubsystem::RestorePlayerInput()
 
 			// 恢复肉体的物理碰撞
 			Pawn->SetActorEnableCollision(true);
+
+			// 【核心新增】：解穴！黑幕已散，目标地板已就绪，恢复物理引擎的重力与行走计算
+			if (ACharacter* PlayerCharacter = Cast<ACharacter>(Pawn))
+			{
+				if (UCharacterMovementComponent* CMC = PlayerCharacter->GetCharacterMovement())
+				{
+					CMC->SetMovementMode(MOVE_Walking);
+				}
+			}
 		}
 
 		// 强制将底层的用户焦点重新对齐到游戏视口
@@ -532,10 +543,20 @@ void UMyMapTravelSubsystem::ExecuteSameMapTravel(AActor* TeleportingActor, UTele
 		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 		PC->SetInputMode(InputMode);
 
+		// 【完美契合】：使用 DisableMovement() 进行极致优雅的物理冻结
 		if (APawn* Pawn = PC->GetPawn())
 		{
 			Pawn->CustomTimeDilation = 1.0f;
 			Pawn->DisableInput(PC);
+
+			// 【核心新增】：极致点穴！彻底清空速度并掐断重力计算，角色被物理死锁在虚空中，杜绝掉落
+			if (ACharacter* PlayerCharacter = Cast<ACharacter>(Pawn))
+			{
+				if (UCharacterMovementComponent* CMC = PlayerCharacter->GetCharacterMovement())
+				{
+					CMC->DisableMovement();
+				}
+			}
 		}
 	}
 
