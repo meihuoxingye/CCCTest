@@ -228,14 +228,6 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 			PC->SetIgnoreMoveInput(true);
 			PC->SetIgnoreLookInput(true);
 
-			/*
-			if (UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(PC->InputComponent))
-			{
-				// 清空控制器输入组件的一切动作绑定
-				EIC->ClearActionBindings();
-			}
-			*/
-
 			if (APawn* PlayerPawn = PC->GetPawn())
 			{
 				// 肉体只配被重置个体时间，绝不去肉体蓝图里找全局时间组件
@@ -244,10 +236,13 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 				// 物理层点穴：关闭碰撞防止穿模或掉落，摄像机完美维持原机位
 				PlayerPawn->SetActorEnableCollision(false);
 
-				if (UEnhancedInputComponent* PawnEIC = Cast<UEnhancedInputComponent>(PlayerPawn->InputComponent))
+				// 【真正遗漏的核心补丁】：跨地图踩门的一瞬间，立刻物理死锁旧肉体！防止黑幕起步时滑行或掉落
+				if (ACharacter* PlayerCharacter = Cast<ACharacter>(PlayerPawn))
 				{
-					// 清空肉体输入组件的一切动作绑定
-					PawnEIC->ClearActionBindings();
+					if (UCharacterMovementComponent* CMC = PlayerCharacter->GetCharacterMovement())
+					{
+						CMC->DisableMovement();
+					}
 				}
 			}
 
@@ -398,8 +393,8 @@ void UMyMapTravelSubsystem::SnapPlayerToDestination()
 				{
 					if (APawn* Pawn = PC->GetPawn())
 					{
-						// 提取绝对坐标，+50cm 高度冗余防穿模
-						FVector SafeLocation = TargetDest->GetActorLocation() + FVector(0.0f, 0.0f, 50.0f);
+						// 提取绝对坐标，+25cm 高度冗余防穿模
+						FVector SafeLocation = TargetDest->GetActorLocation() + FVector(0.0f, 0.0f, 25.0f);
 						FRotator SafeRotation = TargetDest->GetActorRotation();
 
 						// 趁着现在屏幕全黑，强行折叠坐标！
@@ -407,6 +402,16 @@ void UMyMapTravelSubsystem::SnapPlayerToDestination()
 
 						// 极其关键：强行把玩家控制器的相机视角也拧过去，防止镜头滞后导致的平移拖影！
 						PC->SetControlRotation(SafeRotation);
+
+						// 刚刚生成的新肉体被传送到 5 公里外，此时地板还没流送过来，
+						// 必须在这里立刻点穴，让新肉体悬浮在虚空中等待！
+						if (ACharacter* PlayerCharacter = Cast<ACharacter>(Pawn))
+						{
+							if (UCharacterMovementComponent* CMC = PlayerCharacter->GetCharacterMovement())
+							{
+								CMC->DisableMovement();
+							}
+						}
 
 						UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 💥 黑幕掩护瞬移成功！强行穿插至目标路由: %s"), *GI->PendingTravelRoute->GetName());
 					}
