@@ -293,6 +293,16 @@ void UMyGameInstance::OnSameMapScreenOffFinished(TWeakObjectPtr<AActor> Teleport
 		Actor->TeleportTo(TargetTransform.GetLocation(), TargetTransform.GetRotation().Rotator(), false, true);
 	}
 
+	// 【核心对接】：在物理坐标折叠、镜头视口刚切换的同一绝对物理帧，通知子系统进行数据层的真实切换！
+	// 此时屏幕处于百分之百纯黑状态，玩家绝对看不到脚下地板被卸载和瞬间刷新的过程。
+	if (UWorld* World = GetWorld())
+	{
+		if (UMyMapTravelSubsystem* TravelSub = World->GetSubsystem<UMyMapTravelSubsystem>())
+		{
+			TravelSub->CommitSameMapDataLayer();
+		}
+	}
+
 	// 2. 【核心排毒】：彻底物理抹杀那个死死挡住屏幕的纯黑遮罩！
 	if (ActiveScreenOffUI)
 	{

@@ -6,11 +6,10 @@
 #include "Game/MyGameInstance.h"
 #include "Engine/World.h"
 
-// ==========================================
 // 补充以下两个头文件，消除不完整类型报错
-#include "GameFramework/Pawn.h"               
-//#include "GameFramework/PlayerController.h"   
-// ==========================================
+#include "GameFramework/Pawn.h"       
+#include "WorldPartition/DataLayer/DataLayerAsset.h" // 新增引入
+
 
 // ==============================================================================
 // 核心生命周期与组件 (Core Lifecycle & Components)
@@ -37,7 +36,7 @@ void AMyUniversalDestination::BeginPlay()
 	UWorld* World = GetWorld();
 	if (!World) return;
 
-	/**/
+
 	UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 📍 目标点 [%s] 成功在世界中 BeginPlay 醒来！坐标: %s"), *GetName(), *GetActorLocation().ToString());
 
 	// 本地注册管线：遍历自身监听的所有路由，向当前世界的子系统进行高速指针映射注册
@@ -49,7 +48,9 @@ void AMyUniversalDestination::BeginPlay()
 			{
 				/**/
 				UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] -> 目标点 [%s] 成功向字典注册路由: [%s]"), *GetName(), *Route->GetName());
-				TravelSubsystem->RegisterSameMapDestination(Route, this, GetActorTransform());
+
+				// 【修改】：将绑定的数据层一同传递进注册中心
+				TravelSubsystem->RegisterSameMapDestination(Route, this, GetActorTransform(), BoundDataLayer);
 			}
 			else
 			{

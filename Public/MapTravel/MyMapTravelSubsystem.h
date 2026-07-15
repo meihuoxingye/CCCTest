@@ -50,6 +50,10 @@ public:
 
 	UPROPERTY()
 	FTransform TargetTransform;
+
+	// 【新增】：缓存的目标数据层
+	UPROPERTY()
+	UDataLayerAsset* BoundDataLayer = nullptr;
 };
 
 
@@ -140,10 +144,14 @@ private:
 
 	// 记录上一次激活的数据层，防抖拦截重复踩踏触发器
 	UPROPERTY()
-	UDataLayerAsset* LastActiveZone = nullptr;
+	TObjectPtr<UDataLayerAsset> LastActiveZone = nullptr;
 
 	// 缓存 World Partition 数据层管理器，避免运行时高频查询
 	TWeakObjectPtr<UDataLayerManager> CachedDataLayerManager;
+
+	// 【新增】：缓存同地图传送的目标数据层，等待黑幕时机进行斩杀替换
+	UPROPERTY()
+	TObjectPtr<UDataLayerAsset> PendingSameMapDataLayer = nullptr;
 
 	// 滑动窗口流送序列缓存，由关卡蓝图在初始化时推入
 	UPROPERTY()
@@ -183,8 +191,9 @@ private:
 	// ==============================================================================
 public:
 
+	// 【修改】：参数增加 BoundDataLayer
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
-	void RegisterSameMapDestination(UTeleportRoute* Route, AActor* DestinationActor, const FTransform& TargetTransform);
+	void RegisterSameMapDestination(UTeleportRoute* Route, AActor* DestinationActor, const FTransform& TargetTransform, UDataLayerAsset* BoundDataLayer = nullptr);
 
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void UnregisterSameMapDestination(UTeleportRoute* Route);
@@ -193,10 +202,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void ExecuteUniversalTravel(AActor* TeleportingActor, UTeleportRoute* TargetRoute);
 
-private:
+	// 【新增】：专门供 GameInstance 瞬移落地的同一物理帧调用的斩杀接口
+	UFUNCTION(BlueprintCallable, Category = "MapTravel")
+	void CommitSameMapDataLayer();
 
 	void ExecuteSameMapTravel(AActor* TeleportingActor, UTeleportRoute* TargetRoute);
-
 
 	UPROPERTY(Transient)
 	TMap<UTeleportRoute*, FDestinationRegistrationInfo> SameMapDestinationRegistry;

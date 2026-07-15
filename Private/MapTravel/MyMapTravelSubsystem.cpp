@@ -376,6 +376,13 @@ void UMyMapTravelSubsystem::SnapPlayerToDestination()
 
 			if (TargetDest)
 			{
+				// 【核心新增】：跨图落地时，立即根据目标点绑定的数据层刷新内存状态，触发卸载与加载！
+				if (TargetDest->BoundDataLayer)
+				{
+					UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🔄 跨图落地：立刻刷新目标点的数据层滑动窗口"));
+					RefreshSlidingWindow(TargetDest->BoundDataLayer);
+				}
+
 				if (APlayerController* PC = GetRealPlayerController(World))
 				{
 					if (APawn* Pawn = PC->GetPawn())
@@ -409,7 +416,7 @@ void UMyMapTravelSubsystem::SnapPlayerToDestination()
 // ==============================================================================
 #pragma region
 
-void UMyMapTravelSubsystem::RegisterSameMapDestination(UTeleportRoute* Route, AActor* DestinationActor, const FTransform& TargetTransform)
+void UMyMapTravelSubsystem::RegisterSameMapDestination(UTeleportRoute* Route, AActor* DestinationActor, const FTransform& TargetTransform, UDataLayerAsset* BoundDataLayer)
 {
 	if (!Route || !DestinationActor) return;
 
@@ -433,6 +440,7 @@ void UMyMapTravelSubsystem::RegisterSameMapDestination(UTeleportRoute* Route, AA
 	FDestinationRegistrationInfo NewInfo;
 	NewInfo.RegistrySource = DestinationActor;
 	NewInfo.TargetTransform = TargetTransform;
+	NewInfo.BoundDataLayer = BoundDataLayer; // 【新增保存目标数据层】
 
 	SameMapDestinationRegistry.Add(Route, NewInfo);
 }
@@ -486,18 +494,6 @@ void UMyMapTravelSubsystem::ExecuteUniversalTravel(AActor* TeleportingActor, UTe
 	}
 }
 
-/*
-AActor* UMyMapTravelSubsystem::GetDestinationActor(UTeleportRoute* Route)
-{
-	// 极速 O(1) 字典寻址
-	if (Route && SameMapDestinationRegistry.Contains(Route))
-	{
-		return SameMapDestinationRegistry[Route].RegistrySource.Get();
-	}
-	return nullptr;
-}
-*/
-
 void UMyMapTravelSubsystem::ExecuteSameMapTravel(AActor* TeleportingActor, UTeleportRoute* TargetRoute)
 {
 	if (bIsTraveling || !TeleportingActor || !TargetRoute) return;
@@ -514,6 +510,15 @@ void UMyMapTravelSubsystem::ExecuteSameMapTravel(AActor* TeleportingActor, UTele
 
 	// 提取绝对物理坐标
 	FTransform TargetTransform = SameMapDestinationRegistry[TargetRoute].TargetTransform;
+	UDataLayerAsset* TargetDataLayer = SameMapDestinationRegistry[TargetRoute].BoundDataLayer;
+
+	// 【核心新增】：在触发同地图传送黑幕及逻辑前，立刻刷新滑动窗口，趁着黑屏转场的间隙把数据层流送加载出来！
+	if (TargetDataLayer)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🔄 同图传送：触发数据层滑动窗口，开始加载目标区域并卸载远端"));
+		PreheatZoneBackground(TargetDataLayer);
+		PendingSameMapDataLayer = TargetDataLayer;
+	}
 
 	// 物理层静默：强制抹平时空流速，彻底剥夺玩家控制权
 	UGameplayStatics::SetGlobalTimeDilation(World, 1.0f);
@@ -541,6 +546,20 @@ void UMyMapTravelSubsystem::ExecuteSameMapTravel(AActor* TeleportingActor, UTele
 	}
 }
 
+void UMyMapTravelSubsystem::CommitSameMapDataLayer()
+{
+	// 当大管家的 Timer 到期并在 OnSameMapScreenOffFinished 中触发本接口时，执行数据层斩杀
+	if (PendingSameMapDataLayer)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🔲 黑幕已就位！执行同图数据层真实切换与远端卸载"));
+
+		// 瞬间刷新窗口算法：激活新区域，强行物理级卸载老区域
+		RefreshSlidingWindow(PendingSameMapDataLayer);
+
+		// 清空挂起池状态
+		PendingSameMapDataLayer = nullptr;
+	}
+}
 
 #pragma endregion
 
