@@ -200,10 +200,6 @@ private:
 
 	void ExecuteSameMapTravel(AActor* TeleportingActor, UTeleportRoute* TargetRoute);
 
-	UFUNCTION()
-	void FinishSameMapTravel();
-
-	FTimerHandle SameMapTravelTimerHandle;
 
 	UPROPERTY(Transient)
 	TMap<UTeleportRoute*, FDestinationRegistrationInfo> SameMapDestinationRegistry;

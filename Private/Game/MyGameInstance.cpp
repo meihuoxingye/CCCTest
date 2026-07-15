@@ -12,6 +12,10 @@
 
 #include "HAL/IConsoleManager.h" // 【新增】：用于直接操控底层控制台变量
 
+#include "MapTravel/MyMapTravelSubsystem.h"
+
+#include "Kismet/GameplayStatics.h"
+
 
 // ==============================================================================
 // 核心生命周期与组件 (Core Lifecycle & Components)
@@ -235,7 +239,68 @@ void UMyGameInstance::PlayScreenOffUI(TSoftClassPtr<class UMyTransitionWidgetBas
 			// 赋予极高的 ZOrder，确保黑幕能遮挡游戏内的任何层级
 			// 注：这个熄屏 UI 会在 ServerTravel 发生时，随旧世界一起自动灰飞烟灭，无需保留指针清理
 			ScreenOffWidget->AddToViewport(10000);
+
+			// 【核心修复】：必须保存指针！跨地图引擎会随旧世界销毁它，但同地图必须手动销毁！
+			ActiveScreenOffUI = ScreenOffWidget;
 		}
+	}
+}
+
+void UMyGameInstance::ExecuteSameMapTransition(AActor* TeleportingActor, const FTransform& TargetTransform)
+{
+	if (!TeleportingActor) return;
+
+	// 1. 初始化转场锁
+	bEngineIsReady = false;
+	bMinTimeElapsed = false;
+	bIsHiding = false;
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	// 2. 剥离 PIE 前缀提取配置
+	FName CurrentMapName = FName(*UGameplayStatics::GetCurrentLevelName(World, true));
+	FMapTransitionConfig Config = GetMapTransitionConfig(CurrentMapName);
+	PendingTargetMapName = CurrentMapName;
+
+	// 3. 拉起黑幕遮罩
+	PlayScreenOffUI(Config.ScreenOffUIClass, Config.ScreenOffDuration);
+
+	float SafeDelay = FMath::Max(0.01f, FMath::Max(SystemSafeDelay, Config.ScreenOffDuration));
+	TWeakObjectPtr<AActor> WeakActor(TeleportingActor);
+
+	// 4. 等待黑幕完全闭合后，执行下半场
+	World->GetTimerManager().SetTimer(SameMapScreenOffTimerHandle, [this, WeakActor, TargetTransform]()
+		{
+			OnSameMapScreenOffFinished(WeakActor, TargetTransform);
+		}, SafeDelay, false);
+}
+
+void UMyGameInstance::OnSameMapScreenOffFinished(TWeakObjectPtr<AActor> TeleportingActor, FTransform TargetTransform)
+{
+	// 1. 绝对黑暗中执行物理瞬移
+	if (AActor* Actor = TeleportingActor.Get())
+	{
+		Actor->TeleportTo(TargetTransform.GetLocation(), TargetTransform.GetRotation().Rotator(), false, true);
+	}
+
+	// 2. 【核心排毒】：彻底物理抹杀那个死死挡住屏幕的纯黑遮罩！
+	if (ActiveScreenOffUI)
+	{
+		ActiveScreenOffUI->RemoveFromParent();
+		ActiveScreenOffUI = nullptr;
+	}
+
+	// 3. 拉起正常的伪加载 UI（进度条出现）
+	ShowFakeLoadingScreen(nullptr);
+
+	// 4. 【核心排毒】：同图无需硬盘加载，瞬间宣告底层就绪！进度条 UI 将直接提速满载！
+	bEngineIsReady = true;
+
+	// 5. 校验关门时间（防呆）
+	if (bMinTimeElapsed)
+	{
+		CheckAndHideLoadingScreen();
 	}
 }
 
@@ -328,6 +393,15 @@ void UMyGameInstance::FinalizeLoadingScreenRemoval()
 
 	// 【新增】：一次大一统漫游彻底闭环，销毁跨界车票，防玩家死后重生依然触发幽灵传送！
 	PendingTravelRoute = nullptr;
+
+	// 【完美闭环】：无论跨图还是同图，UI 动画播完并销毁后，统一由大管家触发解穴！
+	if (UWorld* World = GetWorld())
+	{
+		if (UMyMapTravelSubsystem* TravelSub = World->GetSubsystem<UMyMapTravelSubsystem>())
+		{
+			TravelSub->RestorePlayerInput();
+		}
+	}
 }
 
 #pragma endregion

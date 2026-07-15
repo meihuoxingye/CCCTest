@@ -32,6 +32,9 @@ void AMyUniversalDestination::BeginPlay()
 	UWorld* World = GetWorld();
 	if (!World) return;
 
+	/**/
+	UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 目标点 [%s] BeginPlay 触发。开始注册监听..."), *GetName());
+
 	// 本地注册管线：遍历自身监听的所有路由，向当前世界的子系统进行高速指针映射注册
 	if (UMyMapTravelSubsystem* TravelSubsystem = World->GetSubsystem<UMyMapTravelSubsystem>())
 	{
@@ -39,7 +42,14 @@ void AMyUniversalDestination::BeginPlay()
 		{
 			if (Route)
 			{
+				/**/
+				UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] -> 目标点 [%s] 成功向字典注册路由: [%s]"), *GetName(), *Route->GetName());
 				TravelSubsystem->RegisterSameMapDestination(Route, this, GetActorTransform());
+			}
+			else
+			{
+				/**/
+				UE_LOG(LogTemp, Error, TEXT("[MapTravelLog] -> 错误！目标点 [%s] 的 ListeningRoutes 数组中存在空指针 (未配置路由资产)！"), *GetName());
 			}
 		}
 	}

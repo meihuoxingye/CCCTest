@@ -124,6 +124,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Loading")
 	FORCEINLINE bool IsEngineReady() const { return bEngineIsReady; }
 
+	// 【核心新增】：同地图专属转场入口，完全复用跨地图 UI 状态机
+	UFUNCTION(BlueprintCallable, Category = "MapTravel")
+	void ExecuteSameMapTransition(AActor* TeleportingActor, const FTransform& TargetTransform);
+
 private:
 
 	// 完美保命符：通过 UPROPERTY 死死抓住新世界的加载 UI 指针，防 GC 误杀导致退场断层
@@ -135,6 +139,8 @@ private:
 
 	// 自动化轮询引擎底层流送状态的高频雷达定时器句柄
 	FTimerHandle EngineReadyPollTimerHandle;
+
+	FTimerHandle SameMapScreenOffTimerHandle;
 
 	// 底层渲染断路器扩展，用于在渲染管线末端强制涂黑画面，彻底抹除转场初期的光追残影与闪烁
 	TSharedPtr<class FBlackoutExtension, ESPMode::ThreadSafe> BlackoutExt;
@@ -172,6 +178,9 @@ private:
 	// 内部收尾核验函数：当且仅当引擎物理就绪且时间契约到期时，安全触发 UI 动画退场
 	void CheckAndHideLoadingScreen();
 
+	// 【核心新增】：黑幕完全闭合后触发的物理折叠与 UI 换挡逻辑
+	void OnSameMapScreenOffFinished(TWeakObjectPtr<AActor> TeleportingActor, FTransform TargetTransform);
+
 
 	// ==============================================================================
 	// 大一统传送路由管线 (Universal Routing Pipeline)
@@ -180,4 +189,8 @@ public:
 
 	UPROPERTY(Transient)
 	class UTeleportRoute* PendingTravelRoute;
+
+	// 【核心新增】：必须记录黑幕 UI 指针，用于在同地图中物理抹杀它，防黑屏死锁
+	UPROPERTY(Transient)
+	UMyTransitionWidgetBase* ActiveScreenOffUI = nullptr;
 };

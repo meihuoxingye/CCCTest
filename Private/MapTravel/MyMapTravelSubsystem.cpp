@@ -476,59 +476,13 @@ void UMyMapTravelSubsystem::ExecuteSameMapTravel(AActor* TeleportingActor, UTele
 		}
 	}
 
-	UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>();
-	if (!GI)
+	// 【极致解耦】：时序移交！抛弃一切脏 Timer，将物理坐标抛给拥有状态机的 GameInstance
+	if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
 	{
-		bIsTraveling = false;
-		return;
+		GI->ExecuteSameMapTransition(TeleportingActor, TargetTransform);
 	}
-
-	// 【替换为这行：彻底剥离 PIE 前缀，让 UI 顺利加载，接管解穴流程！】
-	FName CurrentMapName = FName(*UGameplayStatics::GetCurrentLevelName(World, true));
-	FMapTransitionConfig Config = GI->GetMapTransitionConfig(CurrentMapName);
-	GI->PendingTargetMapName = CurrentMapName;
-	GI->PlayScreenOffUI(Config.ScreenOffUIClass, Config.ScreenOffDuration);
-
-	// 核心修复 1：强制设定 0.01 秒的最小底线，坚决防止虚幻 SetTimer 遇到 0.0 瞬间删除定时器引发永久锁死！
-	float SafeDelay = FMath::Max(0.01f, FMath::Max(GI->SystemSafeDelay, Config.ScreenOffDuration));
-	float IntroDelay = FMath::Max(0.01f, Config.MinLoadingTime);
-
-	FTimerDelegate TimerDel;
-	TimerDel.BindLambda([this, TeleportingActor, TargetTransform, IntroDelay]()
-		{
-			// 核心修复 2：废弃 SetActorTransform，改用最高物理权限的 TeleportTo，绝对防止玩家跟地板穿模卡死
-			if (IsValid(TeleportingActor))
-			{
-				TeleportingActor->TeleportTo(TargetTransform.GetLocation(), TargetTransform.GetRotation().Rotator(), false, true);
-			}
-
-			if (UWorld* InnerWorld = GetWorld())
-			{
-				if (UMyGameInstance* InnerGI = InnerWorld->GetGameInstance<UMyGameInstance>())
-				{
-					InnerGI->ShowFakeLoadingScreen(nullptr);
-				}
-
-				InnerWorld->GetTimerManager().SetTimer(SameMapTravelTimerHandle, this, &UMyMapTravelSubsystem::FinishSameMapTravel, IntroDelay, false);
-			}
-		});
-
-	World->GetTimerManager().SetTimer(SameMapTravelTimerHandle, TimerDel, SafeDelay, false);
 }
 
-void UMyMapTravelSubsystem::FinishSameMapTravel()
-{
-	if (UWorld* World = GetWorld())
-	{
-		if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
-		{
-			GI->HideFakeLoadingScreen();
-		}
-	}
-
-	// 【必须补上这句】：同地图黑幕结束后，彻底恢复玩家的输入控制权！
-	RestorePlayerInput();
-}
 
 #pragma endregion
 
