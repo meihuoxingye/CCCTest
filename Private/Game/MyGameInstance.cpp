@@ -202,6 +202,15 @@ void UMyGameInstance::PollEngineReadyStatus()
 		UE_LOG(LogTemp, Error, TEXT("[TimeTracker] 引擎宣告 Ready！绝对时间: %f | 距离落地耗时: %f 秒"), EngineReadyTime, TimeDelta);
 #endif
 
+		// =====================================================================
+		// 【时序大一统】：这里就是新世界物理构建完毕的绝对瞬间！
+		// 趁现在 UI 还在屏幕上死死遮挡，立刻由大管家亲自下令，完成跨界坐标折叠！
+		if (UMyMapTravelSubsystem* TravelSub = World->GetSubsystem<UMyMapTravelSubsystem>())
+		{
+			TravelSub->SnapPlayerToDestination();
+		}
+		// =====================================================================
+
 		// 宣布就绪！UI 此时接收到该状态变动信号，瞬间触发平滑提速变轨逻辑
 		bEngineIsReady = true;
 
@@ -392,7 +401,7 @@ void UMyGameInstance::FinalizeLoadingScreenRemoval()
 	PendingTargetMapName = NAME_None;
 
 	// 【新增】：一次大一统漫游彻底闭环，销毁跨界车票，防玩家死后重生依然触发幽灵传送！
-	PendingTravelRoute = nullptr;
+	// PendingTravelRoute = nullptr;
 
 	// 【完美闭环】：无论跨图还是同图，UI 动画播完并销毁后，统一由大管家触发解穴！
 	if (UWorld* World = GetWorld())

@@ -39,10 +39,9 @@
 #include "Component/TimeDilationHubComponent.h"
 
 #include "MapTravel/DataAsset/TeleportRoute.h"
+#include "EngineUtils.h"
+#include "MapTravel/Actors/MyUniversalDestination.h"
 
-
-// 引入基类类型以供强制传参
-#include "UI/Transition/MyTransitionWidgetBase.h"
 
 // ==============================================================================
 // 内部安全获取真实玩家控制器的工具函数 (防无缝传送假身)
@@ -306,7 +305,8 @@ void UMyMapTravelSubsystem::RestorePlayerInput()
 	}
 
 	// 核心解穴：安全获取本地真实的玩家控制器
-	if (APlayerController* PC = GetRealPlayerController(World))
+	APlayerController* PC = GetRealPlayerController(World);
+	if (PC)
 	{
 		// 恢复控制器本身的输入响应
 		PC->EnableInput(PC);
@@ -340,15 +340,60 @@ void UMyMapTravelSubsystem::RestorePlayerInput()
 		FSlateApplication::Get().SetAllUserFocusToGameViewport();
 	}
 
-	// ================= 追加以下代码 =================
-	// 彻底完成管线，销毁跨界车票防幽灵复活
-	if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
-	{
-		GI->PendingTravelRoute = nullptr;
-	}
-
 	// 彻底完成管线，解除转场锁
 	bIsTraveling = false;
+}
+
+void UMyMapTravelSubsystem::SnapPlayerToDestination()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
+	{
+		// 仅当手中持有跨界车票时触发
+		if (GI->PendingTravelRoute)
+		{
+			AMyUniversalDestination* TargetDest = nullptr;
+
+			// 此时引擎已 Ready，目标必然在内存中，执行扫盘
+			for (TActorIterator<AMyUniversalDestination> It(World); It; ++It)
+			{
+				if (AMyUniversalDestination* Dest = *It)
+				{
+					if (Dest->ListeningRoutes.Contains(GI->PendingTravelRoute))
+					{
+						TargetDest = Dest;
+						break;
+					}
+				}
+			}
+
+			if (TargetDest)
+			{
+				if (APlayerController* PC = GetRealPlayerController(World))
+				{
+					if (APawn* Pawn = PC->GetPawn())
+					{
+						// 提取绝对坐标，+50cm 高度冗余防穿模
+						FVector SafeLocation = TargetDest->GetActorLocation() + FVector(0.0f, 0.0f, 50.0f);
+						FRotator SafeRotation = TargetDest->GetActorRotation();
+
+						// 趁着现在屏幕全黑，强行折叠坐标！
+						Pawn->TeleportTo(SafeLocation, SafeRotation, false, true);
+
+						// 极其关键：强行把玩家控制器的相机视角也拧过去，防止镜头滞后导致的平移拖影！
+						PC->SetControlRotation(SafeRotation);
+
+						UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 💥 黑幕掩护瞬移成功！强行穿插至目标路由: %s"), *GI->PendingTravelRoute->GetName());
+					}
+				}
+			}
+
+			// 物理坐标锁死完成，撕毁车票
+			GI->PendingTravelRoute = nullptr;
+		}
+	}
 }
 
 #pragma endregion
@@ -399,12 +444,18 @@ void UMyMapTravelSubsystem::ExecuteUniversalTravel(AActor* TeleportingActor, UTe
 {
 	if (!TeleportingActor || !TargetRoute) return;
 
+	UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] ==============================================="));
+	UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🚀 玩家踩上传送门！开始大一统路由寻址。收到的目标路线: [%s]"), *TargetRoute->GetName());
+
 	// 第一路由优先级：如果目标路由的接机点在当前内存字典中，直接劫持为同地图极速穿梭
 	if (SameMapDestinationRegistry.Contains(TargetRoute))
 	{
+		UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] -> 🔍 字典查表成功：本地有监听点，判定为【同地图传送】！"));
 		ExecuteSameMapTravel(TeleportingActor, TargetRoute);
 		return;
 	}
+
+	UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] -> 🔍 字典查表失败：本地无此目标点，判定为【跨地图漫游】！"));
 
 	// 第二路由优先级：本地查无此人，断定为跨界航行，查阅资产内部的目标地图
 	UWorld* World = GetWorld();
@@ -419,11 +470,13 @@ void UMyMapTravelSubsystem::ExecuteUniversalTravel(AActor* TeleportingActor, UTe
 
 			// 从软引用萃取真实地图包名，移交跨地图无缝流送管线
 			FString TargetMapName = TargetRoute->TargetMap.GetAssetName();
+			UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] -> 🎫 成功购买跨图车票: [%s]，准备前往新世界: [%s]"), *TargetRoute->GetName(), *TargetMapName);
 			ExecuteMapTravel(*TargetMapName);
 		}
 		else
 		{
 			UE_LOG(LogTemp, Error, TEXT("[大一统传送系统] 寻路瘫痪！路由资产 [%s] 既不在本图监听字典中，也未配置目标跨界地图！"), *TargetRoute->GetName());
+			UE_LOG(LogTemp, Error, TEXT("[MapTravelLog] ❌ 致命错误：路由资产 [%s] 中没有配置任何目标地图！"), *TargetRoute->GetName());
 		}
 	}
 }

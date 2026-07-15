@@ -90,6 +90,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void RestorePlayerInput();
 
+	// 【新增】：剥离出来的独立接口，专职负责在绝对黑幕下执行物理空间折叠！
+	UFUNCTION(BlueprintCallable, Category = "MapTravel")
+	void SnapPlayerToDestination();
+
 
 	// ==============================================================================
 	// 动态滑动窗口与流送管线 (Dynamic Sliding Window & Streaming Pipeline)
@@ -188,13 +192,6 @@ public:
 	// 大一统传送门户：由传送门调用，系统自动判别走同地图极速瞬移还是跨地图无缝流送
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void ExecuteUniversalTravel(AActor* TeleportingActor, UTeleportRoute* TargetRoute);
-
-	/*
-	// ================= 追加以下接口 =================
-	// 开放给 GameMode 的寻址探针，用于跨地图生成时精准定位目标实体
-	UFUNCTION(BlueprintCallable, Category = "MapTravel")
-	AActor* GetDestinationActor(UTeleportRoute* Route);
-	*/
 
 private:
 

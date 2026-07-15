@@ -33,7 +33,7 @@ void AMyUniversalDestination::BeginPlay()
 	if (!World) return;
 
 	/**/
-	UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 目标点 [%s] BeginPlay 触发。开始注册监听..."), *GetName());
+	UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 📍 目标点 [%s] 成功在世界中 BeginPlay 醒来！坐标: %s"), *GetName(), *GetActorLocation().ToString());
 
 	// 本地注册管线：遍历自身监听的所有路由，向当前世界的子系统进行高速指针映射注册
 	if (UMyMapTravelSubsystem* TravelSubsystem = World->GetSubsystem<UMyMapTravelSubsystem>())

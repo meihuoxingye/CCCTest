@@ -11,13 +11,11 @@
 #include "SaveGame/Subsystem/MySaveSubsystem.h"
 
 // 无缝流转所需的头文件
-#include "EngineUtils.h"
 #include "Weapon/Projectile/MyBaseProjectile.h"
 
 #include "Game/MyGameInstance.h"
 #include "MapTravel/MyMapTravelSubsystem.h"
 #include "MapTravel/DataAsset/TeleportRoute.h"
-#include "MapTravel/Actors/MyUniversalDestination.h"
 
 
 // ==============================================================================
@@ -152,34 +150,6 @@ void AMyGameModeBase::GetSeamlessTravelActorList(bool bToTransition, TArray<AAct
 	// 目前保持完全空白，不强制干涉任何飞行物或 Actor 的跨地图流转。
 	// 一切由引擎默认规则处理，新关卡将是一个干干净净的新开局。
 	// (如果你以后有特定的剧情道具需要保留，再由你自己决定是否写进这个 ActorList 里)
-}
-
-AActor* AMyGameModeBase::ChoosePlayerStart_Implementation(AController* Player)
-{
-	if (UWorld* World = GetWorld())
-	{
-		if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
-		{
-			// 如果大管家手里捏着跨界车票
-			if (GI->PendingTravelRoute)
-			{
-				// 暴力扫盘：直接在内存里揪出那个常驻的目标点
-				for (TActorIterator<AMyUniversalDestination> It(World); It; ++It)
-				{
-					if (AMyUniversalDestination* Dest = *It)
-					{
-						// 核对车票！
-						if (Dest->ListeningRoutes.Contains(GI->PendingTravelRoute))
-						{
-							// 劫持成功！让玩家在这个坐标生成
-							return Dest;
-						}
-					}
-				}
-			}
-		}
-	}
-	return Super::ChoosePlayerStart_Implementation(Player);
 }
 
 #pragma endregion
