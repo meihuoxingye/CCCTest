@@ -103,7 +103,7 @@ void ATopPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void ATopPlayerController::SetupInputComponent()
 {
 	Super::SetupInputComponent();
-
+	
 	// 虚幻5.8：【最安全的全局底层搭桥地点】
 	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
 	{
