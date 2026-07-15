@@ -83,4 +83,7 @@ protected:
 
 	// 【之前被我漏掉的变量 2】：好电脑就绪时，瞬间算出的平滑抵达终点的完美匀速
 	float DynamicCalculatedSpeed = 0.0f;
+
+	// 记录上一帧的绝对物理时间戳，防范主线程 Hitch
+	double LastRealTime = 0.0;
 };

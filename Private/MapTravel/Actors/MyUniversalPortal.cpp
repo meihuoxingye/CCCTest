@@ -46,8 +46,8 @@ void AMyUniversalPortal::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AAc
 		// 校验防呆：确保已配置合法路由
 		if (EmittingRoute)
 		{
-			// 物理封锁：一旦触发立即关闭碰撞，绝对防止玩家在黑屏期间抖动导致二次重入
-			TriggerBox->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			// 【删掉那句 TriggerBox->SetCollisionEnabled(ECollisionEnabled::NoCollision);】
+			// 绝对不要在这里永久关闭碰撞！防连踩的互斥锁（bIsTraveling）已经在 TravelSubsystem 里做得很完美了。
 
 			if (UMyMapTravelSubsystem* TravelSubsystem = GetWorld()->GetSubsystem<UMyMapTravelSubsystem>())
 			{

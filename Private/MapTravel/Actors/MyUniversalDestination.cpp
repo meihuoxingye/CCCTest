@@ -21,6 +21,11 @@ AMyUniversalDestination::AMyUniversalDestination()
 {
 	PrimaryActorTick.bCanEverTick = false;
 
+	// 【必须加回这个物理根节点！】
+	// 无论蓝图怎么配，C++底层必须拥有绝对的空间锚点，否则大管家抓取坐标必定报错！
+	USceneComponent* SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
+	RootComponent = SceneRoot;
+
 	// 【新增核心修复】：禁止被大世界分区卸载，保证跨图生成的第一帧它绝对在场！
 	bIsSpatiallyLoaded = false;
 }

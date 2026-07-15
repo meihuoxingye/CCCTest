@@ -73,6 +73,9 @@ void UMyLoadingScreenWidget::SetLoadingTimeConfig(float InMinLoadingTime, float 
 	// 每次接受新契约时，必须重置内部的计时与重新规划锁
 	ElapsedTime = 0.0f;
 	bVelocityRecomputed = false;
+
+	// 在契约注入时，立即初始化起始物理时间，消除首帧跳变
+	LastRealTime = FPlatformTime::Seconds();
 }
 
 void UMyLoadingScreenWidget::NotifyEngineReady()
@@ -88,8 +91,15 @@ void UMyLoadingScreenWidget::UpdateMaterialProgressTick()
 	// 极速防线：如果大管家已销毁或材质实例尚未就绪，直接截断本次计算
 	if (!GI || !DynamicProgressMID) return;
 
+	// 获取现实世界真实的绝对物理时间
+	double CurrentRealTime = FPlatformTime::Seconds();
+
+	// 算出真实物理耗时（防范初次运行时的巨型 Delta）
+	float RealDeltaTime = (LastRealTime > 0.0) ? (float)(CurrentRealTime - LastRealTime) : 0.0f;
+	LastRealTime = CurrentRealTime;
+
 	// 累加绝对物理消逝时间
-	ElapsedTime += UpdateInterval;
+	ElapsedTime += RealDeltaTime;
 
 	// 算出留给进度条去跑完 0%~100% 的纯净填充时间（总耗时扣除最后满条的悬停期）
 	float TargetFillTime = TargetMinLoadingTime - TargetHoldTime;
@@ -161,7 +171,7 @@ void UMyLoadingScreenWidget::UpdateMaterialProgressTick()
 
 
 	// 应用本帧计算好的物理步长，推进当前的视觉百分比
-	CurrentVisualPercent += UpdateInterval * CurrentSpeed;
+	CurrentVisualPercent += RealDeltaTime * CurrentSpeed;
 
 	if (CurrentVisualPercent >= 1.0f)
 	{
