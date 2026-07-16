@@ -10,7 +10,6 @@
 #include "Engine/Engine.h" 
 #include "MyGameInstance.generated.h"
 
-
 // ==============================================================================
 // 地图专属转场配置 (Map Transition Config)
 // ==============================================================================
@@ -43,7 +42,6 @@ public:
 	float HoldTimeAtFull = 0.5f;
 };
 
-
 // ==============================================================================
 // 大管家：全局游戏实例 (Global Game Instance)
 // ==============================================================================
@@ -58,11 +56,24 @@ class CCC_API UMyGameInstance : public UGameInstance
 	// ==============================================================================
 public:
 
-	// 覆写原生生命周期：引擎启动、大管家实例化时调用，用于注册底层渲染钩子和漫游委托
+	// 覆写原生生命周期：引擎启动、大管家实例化时调用，用于注册底层渲染钩子 and 漫游委托
 	virtual void Init() override;
 
 	// 覆写原生生命周期：游戏关闭、大管家销毁时调用，用于安全解绑委托、物理处决悬空 UI
 	virtual void Shutdown() override;
+
+
+	// ==============================================================================
+	// 大一统传送路由管线 (Universal Routing Pipeline)
+	// ==============================================================================
+public:
+
+	UPROPERTY(Transient)
+	class UTeleportRoute* PendingTravelRoute;
+
+	// 【核心新增】：必须记录黑幕 UI 指针，用于在同地图中物理抹杀它，防黑屏死锁
+	UPROPERTY(Transient)
+	UMyTransitionWidgetBase* ActiveScreenOffUI = nullptr;
 
 
 	// ==============================================================================
@@ -128,6 +139,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void ExecuteSameMapTransition(AActor* TeleportingActor, const FTransform& TargetTransform);
 
+
 private:
 
 	// 完美保命符：通过 UPROPERTY 死死抓住新世界的加载 UI 指针，防 GC 误杀导致退场断层
@@ -180,17 +192,4 @@ private:
 
 	// 【核心新增】：黑幕完全闭合后触发的物理折叠与 UI 换挡逻辑
 	void OnSameMapScreenOffFinished(TWeakObjectPtr<AActor> TeleportingActor, FTransform TargetTransform);
-
-
-	// ==============================================================================
-	// 大一统传送路由管线 (Universal Routing Pipeline)
-	// ==============================================================================
-public:
-
-	UPROPERTY(Transient)
-	class UTeleportRoute* PendingTravelRoute;
-
-	// 【核心新增】：必须记录黑幕 UI 指针，用于在同地图中物理抹杀它，防黑屏死锁
-	UPROPERTY(Transient)
-	UMyTransitionWidgetBase* ActiveScreenOffUI = nullptr;
 };

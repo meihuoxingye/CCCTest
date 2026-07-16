@@ -3,11 +3,9 @@
 #include "MapTravel/Actors/MyUniversalDestination.h"
 #include "MapTravel/MyMapTravelSubsystem.h"
 #include "MapTravel/DataAsset/TeleportRoute.h"
-#include "Game/MyGameInstance.h"
 #include "Engine/World.h"
 
-// 补充以下两个头文件，消除不完整类型报错
-#include "GameFramework/Pawn.h"       
+// 补充以下两个头文件，消除不完整类型报错      
 #include "WorldPartition/DataLayer/DataLayerAsset.h" // 新增引入
 
 

@@ -13,7 +13,6 @@ class ADirectionalLight;
 class AExponentialHeightFog;
 class UTeleportRoute;
 
-
 // ==============================================================================
 // 关卡双轨数据结构 (Dual-Track Zone Structure)
 // ==============================================================================
@@ -33,7 +32,6 @@ public:
 	// 动态玩法层指针：负责敌人生成器、关卡触发器、动态物理物件等逻辑资产的流送
 	UDataLayerAsset* GameplayLayer = nullptr;
 };
-
 
 // ==============================================================================
 // 对点传送底层数据结构 (Point-to-Point Data Structure)
@@ -56,9 +54,7 @@ public:
 	UDataLayerAsset* BoundDataLayer = nullptr;
 };
 
-
-/**
- * 负责 2.5D 横版关卡的无缝流转
+/** * 负责 2.5D 横版关卡的无缝流转
  * 统筹 DataLayer 预热，深度集成 LSP 流转与独立加载蒙版
  */
 UCLASS()
@@ -66,11 +62,11 @@ class CCC_API UMyMapTravelSubsystem : public UWorldSubsystem
 {
 	GENERATED_BODY()
 
-
 	// ==============================================================================
 	// 生命周期与初始化 (Lifecycle & Initialization)
 	// ==============================================================================
 public:
+
 	// 覆写子系统原生初始化函数，在世界创建且子系统被拉起时执行
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
@@ -79,6 +75,29 @@ public:
 
 	// 覆写世界准备就绪钩子，在新地图加载完毕后的第一帧触发
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
+
+
+	// ==============================================================================
+	// 大一统传送路由中心 (Universal Routing Hub)
+	// ==============================================================================
+public:
+
+	// 【修改】：参数增加 BoundDataLayer
+	UFUNCTION(BlueprintCallable, Category = "MapTravel")
+	void RegisterSameMapDestination(UTeleportRoute* Route, AActor* DestinationActor, const FTransform& TargetTransform, UDataLayerAsset* BoundDataLayer = nullptr);
+
+	UFUNCTION(BlueprintCallable, Category = "MapTravel")
+	void UnregisterSameMapDestination(UTeleportRoute* Route);
+
+	// 大一统传送门户：由传送门调用，系统自动判别走同地图极速瞬移还是跨地图无缝流送
+	UFUNCTION(BlueprintCallable, Category = "MapTravel")
+	void ExecuteUniversalTravel(AActor* TeleportingActor, UTeleportRoute* TargetRoute);
+
+	// 【新增】：专门供 GameInstance 瞬移落地的同一物理帧调用的斩杀接口
+	UFUNCTION(BlueprintCallable, Category = "MapTravel")
+	void CommitSameMapDataLayer();
+
+	void ExecuteSameMapTravel(AActor* TeleportingActor, UTeleportRoute* TargetRoute);
 
 
 	// ==============================================================================
@@ -184,29 +203,6 @@ private:
 
 	// 生态渐变定时器的 Tick 回调函数
 	void ProcessBiomeLerpTick();
-
-
-	// ==============================================================================
-	// 大一统传送路由中心 (Universal Routing Hub)
-	// ==============================================================================
-public:
-
-	// 【修改】：参数增加 BoundDataLayer
-	UFUNCTION(BlueprintCallable, Category = "MapTravel")
-	void RegisterSameMapDestination(UTeleportRoute* Route, AActor* DestinationActor, const FTransform& TargetTransform, UDataLayerAsset* BoundDataLayer = nullptr);
-
-	UFUNCTION(BlueprintCallable, Category = "MapTravel")
-	void UnregisterSameMapDestination(UTeleportRoute* Route);
-
-	// 大一统传送门户：由传送门调用，系统自动判别走同地图极速瞬移还是跨地图无缝流送
-	UFUNCTION(BlueprintCallable, Category = "MapTravel")
-	void ExecuteUniversalTravel(AActor* TeleportingActor, UTeleportRoute* TargetRoute);
-
-	// 【新增】：专门供 GameInstance 瞬移落地的同一物理帧调用的斩杀接口
-	UFUNCTION(BlueprintCallable, Category = "MapTravel")
-	void CommitSameMapDataLayer();
-
-	void ExecuteSameMapTravel(AActor* TeleportingActor, UTeleportRoute* TargetRoute);
 
 	UPROPERTY(Transient)
 	TMap<UTeleportRoute*, FDestinationRegistrationInfo> SameMapDestinationRegistry;

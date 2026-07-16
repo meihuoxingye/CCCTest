@@ -7,41 +7,26 @@
 #include "MapTravel/DataAsset/MyBiomeConfig.h"
 #include "Engine/DirectionalLight.h"
 #include "Components/DirectionalLightComponent.h"
-#include "Components/LightComponent.h"
 #include "Engine/ExponentialHeightFog.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
-#include "Sound/SoundMix.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
 #include "Engine/Engine.h"
-#include "Engine/GameInstance.h"
-
 #include "Engine/LocalPlayer.h"
 #include "EnhancedInputSubsystems.h"
 #include "Framework/Application/SlateApplication.h" 
 #include "Engine/GameViewportClient.h"
-
-#include "Game/MyGameModeBase.h"
-#include "Character/TopCharacter.h"
+#include "GameFramework/Character.h" // 【新增】：替换原来的 TopCharacter.h
 #include "EnhancedInputComponent.h"
-
 #include "GameFramework/PlayerState.h"
-#include "Blueprint/UserWidget.h"
-
 #include "Game/MyGameInstance.h"
 #include "Misc/PackageName.h"
-
-#include "RenderingThread.h"
-#include "HAL/IConsoleManager.h"
-
 #include "Component/TimeDilationHubComponent.h"
-
 #include "MapTravel/DataAsset/TeleportRoute.h"
 #include "EngineUtils.h"
 #include "MapTravel/Actors/MyUniversalDestination.h"
-
 #include "GameFramework/CharacterMovementComponent.h"
 
 
@@ -75,6 +60,7 @@ namespace
 		return nullptr;
 	}
 }
+
 
 // ==============================================================================
 // 生命周期与初始化 (Lifecycle & Initialization)
@@ -152,6 +138,169 @@ void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 			// 直接返回，不执行后续新世界的任何初始化逻辑
 			return;
 		}
+	}
+}
+
+#pragma endregion
+
+
+// ==============================================================================
+// 大一统传送路由中心 (Universal Routing Hub)
+// ==============================================================================
+#pragma region
+
+void UMyMapTravelSubsystem::RegisterSameMapDestination(UTeleportRoute* Route, AActor* DestinationActor, const FTransform& TargetTransform, UDataLayerAsset* BoundDataLayer)
+{
+	if (!Route || !DestinationActor) return;
+
+	// 架构级防呆：捕获并镇压由于关关策划配置失误导致的多对一冲突
+	if (SameMapDestinationRegistry.Contains(Route))
+	{
+		FDestinationRegistrationInfo ConflictedInfo = SameMapDestinationRegistry[Route];
+		FString OldActorName = ConflictedInfo.RegistrySource.IsValid() ? ConflictedInfo.RegistrySource->GetName() : TEXT("已失效实体");
+		FString NewActorName = DestinationActor->GetName();
+
+		// 向开发者输出极度醒目的红色警告阵列，强制暴露脏数据
+		UE_LOG(LogTemp, Error, TEXT("=========================================================================="));
+		UE_LOG(LogTemp, Error, TEXT("[大一统传送系统] 致命冲突！路由资产 [%s] 被多个目标点同时监听！"), *Route->GetName());
+		UE_LOG(LogTemp, Error, TEXT(" -> 已注册生效的守卫点: [%s]"), *OldActorName);
+		UE_LOG(LogTemp, Error, TEXT(" -> 试图二次篡改的侵入点: [%s] (此入侵已被系统物理隔离并抛弃！)"), *NewActorName);
+		UE_LOG(LogTemp, Error, TEXT("=========================================================================="));
+		return;
+	}
+
+	// 组装合法数据并注入本地高速字典
+	FDestinationRegistrationInfo NewInfo;
+	NewInfo.RegistrySource = DestinationActor;
+	NewInfo.TargetTransform = TargetTransform;
+	NewInfo.BoundDataLayer = BoundDataLayer; // 【新增保存目标数据层】
+
+	SameMapDestinationRegistry.Add(Route, NewInfo);
+}
+
+void UMyMapTravelSubsystem::UnregisterSameMapDestination(UTeleportRoute* Route)
+{
+	if (Route)
+	{
+		SameMapDestinationRegistry.Remove(Route);
+	}
+}
+
+void UMyMapTravelSubsystem::ExecuteUniversalTravel(AActor* TeleportingActor, UTeleportRoute* TargetRoute)
+{
+	if (!TeleportingActor || !TargetRoute) return;
+
+	UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] ==============================================="));
+	UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🚀 玩家踩上传送门！开始大一统路由寻址。收到的目标路线: [%s]"), *TargetRoute->GetName());
+
+	// 第一路由优先级：如果目标路由的接机点在当前内存字典中，直接劫持为同地图极速穿梭
+	if (SameMapDestinationRegistry.Contains(TargetRoute))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] -> 🔍 字典查表成功：本地有监听点，判定为【同地图传送】！"));
+		ExecuteSameMapTravel(TeleportingActor, TargetRoute);
+		return;
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] -> 🔍 字典查表失败：本地无此目标点，判定为【跨地图漫游】！"));
+
+	// 第二路由优先级：本地查无此人，断定为跨界航行，查阅资产内部的目标地图
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
+	{
+		if (!TargetRoute->TargetMap.IsNull())
+		{
+			// 铸造跨界车票并交由全局大管家保管
+			GI->PendingTravelRoute = TargetRoute;
+
+			// 从软引用萃取真实地图包名，移交跨地图无缝流送管线
+			FString TargetMapName = TargetRoute->TargetMap.GetAssetName();
+			UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] -> 🎫 成功购买跨图车票: [%s]，准备前往新世界: [%s]"), *TargetRoute->GetName(), *TargetMapName);
+			ExecuteMapTravel(*TargetMapName);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("[大一统传送系统] 寻路瘫痪！路由资产 [%s] 既不在本图监听字典中，也未配置目标跨界地图！"), *TargetRoute->GetName());
+			UE_LOG(LogTemp, Error, TEXT("[MapTravelLog] ❌ 致命错误：路由资产 [%s] 中没有配置任何目标地图！"), *TargetRoute->GetName());
+		}
+	}
+}
+
+void UMyMapTravelSubsystem::ExecuteSameMapTravel(AActor* TeleportingActor, UTeleportRoute* TargetRoute)
+{
+	if (bIsTraveling || !TeleportingActor || !TargetRoute) return;
+	if (!SameMapDestinationRegistry.Contains(TargetRoute)) return;
+
+	bIsTraveling = true;
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		bIsTraveling = false;
+		return;
+	}
+
+	// 提取绝对物理坐标
+	FTransform TargetTransform = SameMapDestinationRegistry[TargetRoute].TargetTransform;
+	UDataLayerAsset* TargetDataLayer = SameMapDestinationRegistry[TargetRoute].BoundDataLayer;
+
+	// 【核心新增】：在触发同地图传送黑幕及逻辑前，立刻刷新滑动窗口，趁着黑屏转场的间隙把数据层流送加载出来！
+	if (TargetDataLayer)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🔄 同图传送：触发数据层滑动窗口，开始加载目标区域并卸载远端"));
+		PreheatZoneBackground(TargetDataLayer);
+		PendingSameMapDataLayer = TargetDataLayer;
+	}
+
+	// 物理层静默：强制抹平时空流速，彻底剥夺玩家控制权
+	UGameplayStatics::SetGlobalTimeDilation(World, 1.0f);
+
+	if (APlayerController* PC = GetRealPlayerController(World))
+	{
+		PC->CustomTimeDilation = 1.0f;
+		PC->DisableInput(PC);
+
+		FInputModeUIOnly InputMode;
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		PC->SetInputMode(InputMode);
+
+		// 【完美契合】：使用 DisableMovement() 进行极致优雅的物理冻结
+		if (APawn* Pawn = PC->GetPawn())
+		{
+			Pawn->CustomTimeDilation = 1.0f;
+			Pawn->DisableInput(PC);
+
+			// 【核心新增】：极致点穴！彻底清空速度并掐断重力计算，角色被物理死锁在虚空中，杜绝掉落
+			if (ACharacter* PlayerCharacter = Cast<ACharacter>(Pawn))
+			{
+				if (UCharacterMovementComponent* CMC = PlayerCharacter->GetCharacterMovement())
+				{
+					CMC->DisableMovement();
+				}
+			}
+		}
+	}
+
+	// 【极致解耦】：时序移交！抛弃一切脏 Timer，将物理坐标抛给拥有状态机的 GameInstance
+	if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
+	{
+		GI->ExecuteSameMapTransition(TeleportingActor, TargetTransform);
+	}
+}
+
+void UMyMapTravelSubsystem::CommitSameMapDataLayer()
+{
+	// 当大管家的 Timer 到期并在 OnSameMapScreenOffFinished 中触发本接口时，执行数据层斩杀
+	if (PendingSameMapDataLayer)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🔲 黑幕已就位！执行同图数据层真实切换与远端卸载"));
+
+		// 瞬间刷新窗口算法：激活新区域，强行物理级卸载老区域
+		RefreshSlidingWindow(PendingSameMapDataLayer);
+
+		// 清空挂起池状态
+		PendingSameMapDataLayer = nullptr;
 	}
 }
 
@@ -393,8 +542,8 @@ void UMyMapTravelSubsystem::SnapPlayerToDestination()
 				{
 					if (APawn* Pawn = PC->GetPawn())
 					{
-						// 提取绝对坐标，+25cm 高度冗余防穿模
-						FVector SafeLocation = TargetDest->GetActorLocation() + FVector(0.0f, 0.0f, 25.0f);
+						// 提取绝对坐标，+15cm 高度冗余防穿模
+						FVector SafeLocation = TargetDest->GetActorLocation() + FVector(0.0f, 0.0f, 15.0f);
 						FRotator SafeRotation = TargetDest->GetActorRotation();
 
 						// 趁着现在屏幕全黑，强行折叠坐标！
@@ -421,169 +570,6 @@ void UMyMapTravelSubsystem::SnapPlayerToDestination()
 			// 物理坐标锁死完成，撕毁车票
 			GI->PendingTravelRoute = nullptr;
 		}
-	}
-}
-
-#pragma endregion
-
-
-// ==============================================================================
-// 大一统传送路由中心 (Universal Routing Hub)
-// ==============================================================================
-#pragma region
-
-void UMyMapTravelSubsystem::RegisterSameMapDestination(UTeleportRoute* Route, AActor* DestinationActor, const FTransform& TargetTransform, UDataLayerAsset* BoundDataLayer)
-{
-	if (!Route || !DestinationActor) return;
-
-	// 架构级防呆：捕获并镇压由于关卡策划配置失误导致的多对一冲突
-	if (SameMapDestinationRegistry.Contains(Route))
-	{
-		FDestinationRegistrationInfo ConflictedInfo = SameMapDestinationRegistry[Route];
-		FString OldActorName = ConflictedInfo.RegistrySource.IsValid() ? ConflictedInfo.RegistrySource->GetName() : TEXT("已失效实体");
-		FString NewActorName = DestinationActor->GetName();
-
-		// 向开发者输出极度醒目的红色警告阵列，强制暴露脏数据
-		UE_LOG(LogTemp, Error, TEXT("=========================================================================="));
-		UE_LOG(LogTemp, Error, TEXT("[大一统传送系统] 致命冲突！路由资产 [%s] 被多个目标点同时监听！"), *Route->GetName());
-		UE_LOG(LogTemp, Error, TEXT(" -> 已注册生效的守卫点: [%s]"), *OldActorName);
-		UE_LOG(LogTemp, Error, TEXT(" -> 试图二次篡改的侵入点: [%s] (此入侵已被系统物理隔离并抛弃！)"), *NewActorName);
-		UE_LOG(LogTemp, Error, TEXT("=========================================================================="));
-		return;
-	}
-
-	// 组装合法数据并注入本地高速字典
-	FDestinationRegistrationInfo NewInfo;
-	NewInfo.RegistrySource = DestinationActor;
-	NewInfo.TargetTransform = TargetTransform;
-	NewInfo.BoundDataLayer = BoundDataLayer; // 【新增保存目标数据层】
-
-	SameMapDestinationRegistry.Add(Route, NewInfo);
-}
-
-void UMyMapTravelSubsystem::UnregisterSameMapDestination(UTeleportRoute* Route)
-{
-	if (Route)
-	{
-		SameMapDestinationRegistry.Remove(Route);
-	}
-}
-
-void UMyMapTravelSubsystem::ExecuteUniversalTravel(AActor* TeleportingActor, UTeleportRoute* TargetRoute)
-{
-	if (!TeleportingActor || !TargetRoute) return;
-
-	UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] ==============================================="));
-	UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🚀 玩家踩上传送门！开始大一统路由寻址。收到的目标路线: [%s]"), *TargetRoute->GetName());
-
-	// 第一路由优先级：如果目标路由的接机点在当前内存字典中，直接劫持为同地图极速穿梭
-	if (SameMapDestinationRegistry.Contains(TargetRoute))
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] -> 🔍 字典查表成功：本地有监听点，判定为【同地图传送】！"));
-		ExecuteSameMapTravel(TeleportingActor, TargetRoute);
-		return;
-	}
-
-	UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] -> 🔍 字典查表失败：本地无此目标点，判定为【跨地图漫游】！"));
-
-	// 第二路由优先级：本地查无此人，断定为跨界航行，查阅资产内部的目标地图
-	UWorld* World = GetWorld();
-	if (!World) return;
-
-	if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
-	{
-		if (!TargetRoute->TargetMap.IsNull())
-		{
-			// 铸造跨界车票并交由全局大管家保管
-			GI->PendingTravelRoute = TargetRoute;
-
-			// 从软引用萃取真实地图包名，移交跨地图无缝流送管线
-			FString TargetMapName = TargetRoute->TargetMap.GetAssetName();
-			UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] -> 🎫 成功购买跨图车票: [%s]，准备前往新世界: [%s]"), *TargetRoute->GetName(), *TargetMapName);
-			ExecuteMapTravel(*TargetMapName);
-		}
-		else
-		{
-			UE_LOG(LogTemp, Error, TEXT("[大一统传送系统] 寻路瘫痪！路由资产 [%s] 既不在本图监听字典中，也未配置目标跨界地图！"), *TargetRoute->GetName());
-			UE_LOG(LogTemp, Error, TEXT("[MapTravelLog] ❌ 致命错误：路由资产 [%s] 中没有配置任何目标地图！"), *TargetRoute->GetName());
-		}
-	}
-}
-
-void UMyMapTravelSubsystem::ExecuteSameMapTravel(AActor* TeleportingActor, UTeleportRoute* TargetRoute)
-{
-	if (bIsTraveling || !TeleportingActor || !TargetRoute) return;
-	if (!SameMapDestinationRegistry.Contains(TargetRoute)) return;
-
-	bIsTraveling = true;
-
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		bIsTraveling = false;
-		return;
-	}
-
-	// 提取绝对物理坐标
-	FTransform TargetTransform = SameMapDestinationRegistry[TargetRoute].TargetTransform;
-	UDataLayerAsset* TargetDataLayer = SameMapDestinationRegistry[TargetRoute].BoundDataLayer;
-
-	// 【核心新增】：在触发同地图传送黑幕及逻辑前，立刻刷新滑动窗口，趁着黑屏转场的间隙把数据层流送加载出来！
-	if (TargetDataLayer)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🔄 同图传送：触发数据层滑动窗口，开始加载目标区域并卸载远端"));
-		PreheatZoneBackground(TargetDataLayer);
-		PendingSameMapDataLayer = TargetDataLayer;
-	}
-
-	// 物理层静默：强制抹平时空流速，彻底剥夺玩家控制权
-	UGameplayStatics::SetGlobalTimeDilation(World, 1.0f);
-
-	if (APlayerController* PC = GetRealPlayerController(World))
-	{
-		PC->CustomTimeDilation = 1.0f;
-		PC->DisableInput(PC);
-
-		FInputModeUIOnly InputMode;
-		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-		PC->SetInputMode(InputMode);
-
-		// 【完美契合】：使用 DisableMovement() 进行极致优雅的物理冻结
-		if (APawn* Pawn = PC->GetPawn())
-		{
-			Pawn->CustomTimeDilation = 1.0f;
-			Pawn->DisableInput(PC);
-
-			// 【核心新增】：极致点穴！彻底清空速度并掐断重力计算，角色被物理死锁在虚空中，杜绝掉落
-			if (ACharacter* PlayerCharacter = Cast<ACharacter>(Pawn))
-			{
-				if (UCharacterMovementComponent* CMC = PlayerCharacter->GetCharacterMovement())
-				{
-					CMC->DisableMovement();
-				}
-			}
-		}
-	}
-
-	// 【极致解耦】：时序移交！抛弃一切脏 Timer，将物理坐标抛给拥有状态机的 GameInstance
-	if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
-	{
-		GI->ExecuteSameMapTransition(TeleportingActor, TargetTransform);
-	}
-}
-
-void UMyMapTravelSubsystem::CommitSameMapDataLayer()
-{
-	// 当大管家的 Timer 到期并在 OnSameMapScreenOffFinished 中触发本接口时，执行数据层斩杀
-	if (PendingSameMapDataLayer)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🔲 黑幕已就位！执行同图数据层真实切换与远端卸载"));
-
-		// 瞬间刷新窗口算法：激活新区域，强行物理级卸载老区域
-		RefreshSlidingWindow(PendingSameMapDataLayer);
-
-		// 清空挂起池状态
-		PendingSameMapDataLayer = nullptr;
 	}
 }
 
