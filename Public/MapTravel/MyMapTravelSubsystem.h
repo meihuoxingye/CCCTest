@@ -8,9 +8,6 @@
 
 class UDataLayerAsset;
 class UDataLayerManager;
-class UMyBiomeConfig;
-class ADirectionalLight;
-class AExponentialHeightFog;
 class UTeleportRoute;
 
 // ==============================================================================
@@ -149,10 +146,6 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void EliminateZone(const UDataLayerAsset* LayerToUnload);
 
-	// 平滑切断旧环境音效与雾气，异步过渡到目标生态的环境渲染参数
-	UFUNCTION(BlueprintCallable, Category = "MapTravel")
-	void UpdateEnvironment(UMyBiomeConfig* NewBiome, ADirectionalLight* MainLight, AExponentialHeightFog* MainFog);
-
 	// 在屏幕上打印当前序列中所有艺术层与玩法层的真实底层内存加载状态
 	UFUNCTION(BlueprintCallable, Category = "MapTravel|Debug")
 	void DebugPrintDataLayerStates();
@@ -181,34 +174,6 @@ private:
 	// 滑动窗口流送序列缓存，由关卡蓝图在初始化时推入
 	UPROPERTY()
 	TArray<FZoneDataLayerPair> ZoneSequence;
-
-	// 当前正在过渡的生态环境目标配置
-	UPROPERTY()
-	UMyBiomeConfig* CurrentBiomeTarget = nullptr;
-
-	// 缓存的主光源弱指针，防范目标光源被外力物理销毁导致野指针崩溃
-	TWeakObjectPtr<ADirectionalLight> CachedSunLight;
-
-	// 缓存的大气雾弱指针
-	TWeakObjectPtr<AExponentialHeightFog> CachedAtmosphereFog;
-
-	// 驱动生态环境平滑渐变的后台异步定时器句柄
-	FTimerHandle BiomeLerpTimer;
-
-	// 生态环境渐变的当前进度 (0.0 到 1.0)
-	float LerpAlpha = 0.0f;
-
-	// 根据配置计算出的每次 Tick 的 Alpha 增量步长
-	float LerpStep = 0.02f;
-
-	// 记录生态渐变起点的太阳光旋转角度
-	FRotator StartSunRotation;
-
-	// 记录生态渐变起点的太阳光颜色
-	FLinearColor StartSunColor;
-
-	// 生态渐变定时器的 Tick 回调函数
-	void ProcessBiomeLerpTick();
 
 	// 高速本地路由字典：以路由资产为 Key，缓存当前大世界内存中所有已就绪的接机点注册信息
 	UPROPERTY(Transient)
