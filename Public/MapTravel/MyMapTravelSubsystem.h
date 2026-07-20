@@ -43,9 +43,11 @@ struct FDestinationRegistrationInfo
 
 public:
 
+	// 注册源实体弱引用：绑定该目标点的具体 Actor，使用弱指针防止阻碍垃圾回收
 	UPROPERTY()
 	TWeakObjectPtr<AActor> RegistrySource = nullptr;
 
+	// 绝对物理变换矩阵：记录落地接机点在世界中的绝对空间坐标与旋转
 	UPROPERTY()
 	FTransform TargetTransform;
 
@@ -54,13 +56,15 @@ public:
 	UDataLayerAsset* BoundDataLayer = nullptr;
 };
 
-/** * 负责 2.5D 横版关卡的无缝流转
+/**
+ * 负责 2.5D 横版关卡的无缝流转
  * 统筹 DataLayer 预热，深度集成 LSP 流转与独立加载蒙版
  */
 UCLASS()
 class CCC_API UMyMapTravelSubsystem : public UWorldSubsystem
 {
 	GENERATED_BODY()
+
 
 	// ==============================================================================
 	// 生命周期与初始化 (Lifecycle & Initialization)
@@ -86,6 +90,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void RegisterSameMapDestination(UTeleportRoute* Route, AActor* DestinationActor, const FTransform& TargetTransform, UDataLayerAsset* BoundDataLayer = nullptr);
 
+	// 安全注销接口：目标点被物理销毁时调用，从内存字典中清洗自身，防野指针崩溃
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void UnregisterSameMapDestination(UTeleportRoute* Route);
 
@@ -97,6 +102,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void CommitSameMapDataLayer();
 
+	// 同地图专属执行实体：接管同图时空流速，执行绝对物理点穴，随后将坐标抛给大管家折叠
 	void ExecuteSameMapTravel(AActor* TeleportingActor, UTeleportRoute* TargetRoute);
 
 
@@ -204,6 +210,7 @@ private:
 	// 生态渐变定时器的 Tick 回调函数
 	void ProcessBiomeLerpTick();
 
+	// 高速本地路由字典：以路由资产为 Key，缓存当前大世界内存中所有已就绪的接机点注册信息
 	UPROPERTY(Transient)
 	TMap<UTeleportRoute*, FDestinationRegistrationInfo> SameMapDestinationRegistry;
 };

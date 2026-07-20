@@ -197,22 +197,31 @@ void UMyGameInstance::HideFakeLoadingScreen()
 
 void UMyGameInstance::FinalizeLoadingScreenRemoval()
 {
+	// 终极清理防线：检查当前内存中是否还有存活的转场 UI 实例
 	if (ActiveTransitionUI)
 	{
+		// 从视口中物理抹除该 UI，彻底结束它在黑幕期间的屏幕霸权
 		ActiveTransitionUI->RemoveFromParent();
+
+		// 强制置空指针，切断强引用链，将其残躯完全移交给虚幻底层的垃圾回收系统 (GC)
 		ActiveTransitionUI = nullptr;
 	}
 
+	// 状态机重置：清空挂起的目标地图名称缓存，确保下一次传送判定是一张纯净的白纸
 	PendingTargetMapName = NAME_None;
 
 	// 【新增】：一次大一统漫游彻底闭环，销毁跨界车票，防玩家死后重生依然触发幽灵传送！
+	// (注：此代码目前被注释掉，若后续架构中存在车票生命周期泄漏风险，可随时在此解除封印)
 	// PendingTravelRoute = nullptr;
 
 	// 【完美闭环】：无论跨图还是同图，UI 动画播完并销毁后，统一由大管家触发解穴！
+	// 安全获取当前世界上下文，防范世界正在被销毁的极端情况
 	if (UWorld* World = GetWorld())
 	{
+		// 跨系统通信：从世界中提取负责处理底层物理与状态流转的传送子系统
 		if (UMyMapTravelSubsystem* TravelSub = World->GetSubsystem<UMyMapTravelSubsystem>())
 		{
+			// 终极解穴令：大管家向子系统下达最终指令，正式恢复玩家的物理碰撞、重力坠落与一切输入控制权！
 			TravelSub->RestorePlayerInput();
 		}
 	}
@@ -274,32 +283,48 @@ void UMyGameInstance::HandleEndTravel(UWorld* NewWorld)
 
 void UMyGameInstance::ExecuteSameMapTransition(AActor* TeleportingActor, const FTransform& TargetTransform)
 {
+	// 基础防线：拦截空实体，没有合法的传送发起者则直接中断管线
 	if (!TeleportingActor) return;
 
 	// 1. 初始化转场锁
+	// 彻底重置大管家内部的转场状态机，确保上一次的遗留状态不会污染本次同图漫游
 	bEngineIsReady = false;
 	bMinTimeElapsed = false;
 	bIsHiding = false;
 
+	// 安全获取当前世界上下文，防范世界正在被销毁或未初始化的极端情况
 	UWorld* World = GetWorld();
 	if (!World) return;
 
 	// 2. 剥离 PIE 前缀提取配置
+	// 提取当前关卡名，传入 true 代表强行剔除编辑器模式下的 "UEDPIE_0_" 前缀，保证字典哈希查表绝对准确
 	FName CurrentMapName = FName(*UGameplayStatics::GetCurrentLevelName(World, true));
+
+	// 通过当前真实的关卡名称，向大管家的全局配置字典请求对应的转场配置信息
 	FMapTransitionConfig Config = GetMapTransitionConfig(CurrentMapName);
+
+	// 狸猫换太子：同图传送的本质也是重载状态，将目标地图伪装成当前地图，骗过底层 UI 状态机的核验
 	PendingTargetMapName = CurrentMapName;
 
 	// 3. 拉起黑幕遮罩
+	// 依据查表得出的配置，拉起专属的熄屏（闭眼）UI，并强行注入设计师规定的淡出时间
 	PlayScreenOffUI(Config.ScreenOffUIClass, Config.ScreenOffDuration);
 
+	// 物理防死锁计算：取系统极限底线 (0.01s)、全局安全延迟与 UI 动画时长的最大值
+	// 确保无论策划怎么填表，定时器都拥有充足的物理缓冲时间，绝不穿帮
 	float SafeDelay = FMath::Max(0.01f, FMath::Max(SystemSafeDelay, Config.ScreenOffDuration));
+
+	// 内存安全闭环：使用弱指针包装传送实体，防范在这零点几秒的黑屏等待期内，该 Actor 意外死亡或被 GC 销毁造成的野指针崩溃
 	TWeakObjectPtr<AActor> WeakActor(TeleportingActor);
 
 	// 4. 等待黑幕完全闭合后，执行下半场
+	// 挂起后台高频定时器，让引擎继续跑完这几帧的 UI 渲染
 	World->GetTimerManager().SetTimer(SameMapScreenOffTimerHandle, [this, WeakActor, TargetTransform]()
 		{
+			// 此时屏幕已经达到 100% 绝对纯黑，安全触发物理坐标的瞬间折叠与新数据层的唤醒
 			OnSameMapScreenOffFinished(WeakActor, TargetTransform);
-		}, SafeDelay, false);
+
+		}, SafeDelay, false); // false 代表该闭包回调仅执行一次，绝不循环
 }
 
 void UMyGameInstance::OnBeginStreamingPause(FViewport* Viewport)
@@ -384,37 +409,53 @@ void UMyGameInstance::CheckAndHideLoadingScreen()
 void UMyGameInstance::OnSameMapScreenOffFinished(TWeakObjectPtr<AActor> TeleportingActor, FTransform TargetTransform)
 {
 	// 1. 绝对黑暗中执行物理瞬移
+	// 内存防线：安全解包弱指针，确保在黑屏等待期间，传送目标实体没有被意外销毁或回收
 	if (AActor* Actor = TeleportingActor.Get())
 	{
+		// 强行折叠空间坐标！
+		// 参数 false：关闭 Sweep 碰撞检测，无视沿途障碍物强行瞬移。
+		// 参数 true：TeleportPhysics，瞬移后保留物理属性（由于我们在前置函数已将其完全冻结，此处绝对安全）。
 		Actor->TeleportTo(TargetTransform.GetLocation(), TargetTransform.GetRotation().Rotator(), false, true);
 	}
 
 	// 【核心对接】：在物理坐标折叠、镜头视口刚切换的同一绝对物理帧，通知子系统进行数据层的真实切换！
 	// 此时屏幕处于百分之百纯黑状态，玩家绝对看不到脚下地板被卸载和瞬间刷新的过程。
+	// 安全获取世界上下文，准备进行全局子系统的调用
 	if (UWorld* World = GetWorld())
 	{
+		// 跨系统通信：精准抓取负责大世界底层数据层流送的大一统传送子系统
 		if (UMyMapTravelSubsystem* TravelSub = World->GetSubsystem<UMyMapTravelSubsystem>())
 		{
+			// 核心斩杀：下达换地指令！趁着 UI 纯黑，瞬间卸载远端地板并加载新区域，实现视觉 0 穿帮
 			TravelSub->CommitSameMapDataLayer();
 		}
 	}
 
 	// 2. 【核心排毒】：彻底物理抹杀那个死死挡住屏幕的纯黑遮罩！
+	// 检查当前内存中是否还残留着强引用锁定的大黑幕 UI
 	if (ActiveScreenOffUI)
 	{
+		// 毫不留情地从视口层级中物理根除黑幕，为接下来的加载进度条腾出空间
 		ActiveScreenOffUI->RemoveFromParent();
+
+		// 强制断开引用链，将黑幕 UI 的残骸移交引擎底层的垃圾回收系统 (GC)
 		ActiveScreenOffUI = nullptr;
 	}
 
 	// 3. 拉起正常的伪加载 UI（进度条出现）
+	// 传入 nullptr 空指针以触发大管家底层的字典查表机制，自动拉起目标区域专属的“睁眼/加载”UI
 	ShowFakeLoadingScreen(nullptr);
 
 	// 4. 【核心排毒】：同图无需硬盘加载，瞬间宣告底层就绪！进度条 UI 将直接提速满载！
+	// 状态机欺骗：同图穿梭没有跨地图漫游那漫长的硬盘反序列化过程，
+	// 直接强行点亮引擎 Ready 信号！UI 进度条接收到此信号后，内部电池会直接平滑提速冲刺到 100%。
 	bEngineIsReady = true;
 
 	// 5. 校验关门时间（防呆）
+	// 双重锁核验：虽然引擎瞬间 Ready，但必须校验设计师定下的“最短观赏时间”是否也已耗尽
 	if (bMinTimeElapsed)
 	{
+		// 双锁全开，满足所有关门条件！直接发送撤退信号，触发进度条 UI 的退场动画与最终物理解穴
 		CheckAndHideLoadingScreen();
 	}
 }
