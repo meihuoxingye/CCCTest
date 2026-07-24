@@ -1,13 +1,10 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "MapTravel/MyMapTravelSubsystem.h"
 #include "Engine/World.h"
+// 【修改】：跨系统呼叫专职的流送子系统
+#include "Streaming/MyDataLayerStreamingSubsystem.h" 
 #include "WorldPartition/DataLayer/DataLayerAsset.h"
-#include "WorldPartition/DataLayer/DataLayerManager.h"
-#include "Engine/DirectionalLight.h"
-#include "Components/DirectionalLightComponent.h"
-#include "Engine/ExponentialHeightFog.h"
-#include "Components/ExponentialHeightFogComponent.h"
 #include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/PlayerController.h"
@@ -71,33 +68,17 @@ void UMyMapTravelSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	// 调用父类初始化
 	Super::Initialize(Collection);
 
-	// 安全获取当前世界上下文
-	if (UWorld* World = GetWorld())
-	{
-		// 缓存 DataLayerManager 指针，避免运行时高频调用造成的开销
-		CachedDataLayerManager = UDataLayerManager::GetDataLayerManager(World);
-	}
-
 	// 物理重置所有内部状态机参数与转场锁
 	bIsTraveling = false;
 
-	// 重置上一次激活的数据层为空
-	LastActiveZone = nullptr;
-
-	// 清空滑动窗口的数据层序列缓存
-	ZoneSequence.Empty();
+	// 【修改】：重置同图数据层挂起池为空
+	PendingSameMapDataLayer = nullptr;
 }
 
 void UMyMapTravelSubsystem::Deinitialize()
 {
-	// 释放弱指针缓存，防止旧世界的管理器变成野指针
-	CachedDataLayerManager.Reset();
-
-	// 清空数据层序列，释放内存
-	ZoneSequence.Empty();
-
-	// 清除对旧世界数据层资产的引用
-	LastActiveZone = nullptr;
+	// 【修改】：清空数据层挂起池
+	PendingSameMapDataLayer = nullptr;
 
 	// 安全获取当前世界
 	if (UWorld* World = GetWorld())
@@ -286,10 +267,14 @@ void UMyMapTravelSubsystem::ExecuteSameMapTravel(AActor* TeleportingActor, UTele
 		// 输出预热日志
 		UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🔄 同图传送：触发数据层滑动窗口，开始加载目标区域并卸载远端"));
 
-		// 调用预热函数：把目标艺术层丢进后台静默加载，但不唤醒碰撞和逻辑
-		PreheatZoneBackground(TargetDataLayer);
+		// 【修改】：呼叫流送子系统执行底层预热加载
+		if (UMyDataLayerStreamingSubsystem* StreamingSub = World->GetSubsystem<UMyDataLayerStreamingSubsystem>())
+		{
+			// 调用预热函数：把目标艺术层丢进后台静默加载，但不唤醒碰撞和逻辑
+			StreamingSub->PreheatZoneBackground(TargetDataLayer);
+		}
 
-		// 将目标数据层塞入挂起池，等待黑幕完全闭合时再执行真正的斩杀和激活
+		// 将目标数据层塞入挂起池，等待黑幕完全闭合时再由大管家触发交接
 		PendingSameMapDataLayer = TargetDataLayer;
 	}
 
@@ -352,8 +337,13 @@ void UMyMapTravelSubsystem::CommitSameMapDataLayer()
 		// 输出斩杀与替换确认日志
 		UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🔲 黑幕已就位！执行同图数据层真实切换与远端卸载"));
 
-		// 瞬间刷新窗口算法：利用当前身处的目标地块重新计算远近维度，激活新区域，强行物理级卸载老区域
-		RefreshSlidingWindow(PendingSameMapDataLayer);
+		// 【修改】：呼叫流送子系统刷新滑动窗口
+		if (UMyDataLayerStreamingSubsystem* StreamingSub = GetWorld()->GetSubsystem<UMyDataLayerStreamingSubsystem>())
+		{
+			// 瞬间刷新窗口算法：利用当前身处的目标地块重新计算远近维度，激活新区域，强行物理级卸载老区域
+			// 同图传送是在黑幕下进行的，传入 true 强制刷新纹理 MIP
+			StreamingSub->RefreshSlidingWindow(PendingSameMapDataLayer, true);
+		}
 
 		// 清空同图数据层挂起池，完成本次数据流转的历史使命
 		PendingSameMapDataLayer = nullptr;
@@ -507,7 +497,7 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 	GI->PendingTargetMapName = TargetLevelName;
 
 	// 通过大管家配置拉起熄屏 UI，传入软引用与设计师配置的淡出时间
-	GI->PlayScreenOffUI(OutConfig.ScreenOffUIClass, OutConfig.ScreenOffDuration);
+	GI->PlayScreenOffPhaseUI(OutConfig.ScreenOffUIClass, OutConfig.ScreenOffDuration);
 
 	// 计算系统安全延迟：取系统强锁底线（0.1s）与 UI 动画时长的最大值
 	float SafeTravelDelay = FMath::Max(GI->SystemSafeDelay, OutConfig.ScreenOffDuration);
@@ -632,8 +622,12 @@ void UMyMapTravelSubsystem::SnapPlayerToDestination()
 					// 记录数据层滑动窗口触发日志
 					UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🔄 跨图落地：立刻刷新目标点的数据层滑动窗口"));
 
-					// 强制拉起目标地块的硬盘流送任务，确保黑幕散去前地板加载完毕
-					RefreshSlidingWindow(TargetDest->BoundDataLayer);
+					// 【修改】：呼叫流送子系统，强制拉起目标地块的硬盘流送任务，确保黑幕散去前地板加载完毕
+					if (UMyDataLayerStreamingSubsystem* StreamingSub = World->GetSubsystem<UMyDataLayerStreamingSubsystem>())
+					{
+						// 跨图落地是在黑幕下进行的，传入 true 强制刷新纹理 MIP
+						StreamingSub->RefreshSlidingWindow(TargetDest->BoundDataLayer, true);
+					}
 				}
 
 				// 核心安全获取：提取绝对真实的本地玩家控制器，防死无缝漫游产生的幽灵假身
@@ -677,176 +671,6 @@ void UMyMapTravelSubsystem::SnapPlayerToDestination()
 			// 物理坐标锁死完成，彻底撕毁车票！
 			// 防止玩家在新图死后重生，大管家手里的车票还在，导致无限幽灵传送的恶性 Bug
 			GI->PendingTravelRoute = nullptr;
-		}
-	}
-}
-
-#pragma endregion
-
-
-// ==============================================================================
-// 动态滑动窗口与流送管线 (Dynamic Sliding Window & Streaming Pipeline)
-// ==============================================================================
-#pragma region
-
-void UMyMapTravelSubsystem::RegisterZoneSequence(const TArray<FZoneDataLayerPair>& InSequence)
-{
-	// 缓存滑动窗口流送序列
-	ZoneSequence = InSequence;
-}
-
-void UMyMapTravelSubsystem::RefreshSlidingWindow(UDataLayerAsset* TriggeredLayer)
-{
-	// 获取数据层管理器
-	UDataLayerManager* DLManager = UDataLayerManager::GetDataLayerManager(GetWorld());
-
-	// 防御性判定：如果管理器无效，或者未注册序列，或者触发层为空，直接返回
-	if (!DLManager || ZoneSequence.Num() == 0 || !TriggeredLayer) return;
-
-	// 状态锁：如果踩到的是相同的层，防抖拦截，避免无意义的性能损耗
-	if (LastActiveZone == TriggeredLayer) return;
-
-	// 更新最后激活的数据层记录
-	LastActiveZone = TriggeredLayer;
-
-	// 查找当前触发层在序列中的索引
-	int32 CurrentIdx = INDEX_NONE;
-	for (int32 i = 0; i < ZoneSequence.Num(); ++i)
-	{
-		// 只要艺术层或玩法层其中之一匹配上，就认为找到了当前区域
-		if (ZoneSequence[i].ArtLayer == TriggeredLayer || ZoneSequence[i].GameplayLayer == TriggeredLayer)
-		{
-			CurrentIdx = i;
-			break;
-		}
-	}
-
-	// 如果不在注册的序列中，直接返回
-	if (CurrentIdx == INDEX_NONE) return;
-
-	// 核心滑动窗口算法：遍历整个序列进行远近维度管理
-	for (int32 i = 0; i < ZoneSequence.Num(); ++i)
-	{
-		// 提取当前遍历到的区域配置
-		const FZoneDataLayerPair& Zone = ZoneSequence[i];
-
-		// 计算它与玩家当前所在区域的绝对距离
-		int32 Distance = FMath::Abs(i - CurrentIdx);
-
-		if (Distance == 0)
-		{
-			// 距离为 0 (玩家脚下)：艺术层和玩法层必须全面激活
-			if (Zone.ArtLayer) DLManager->SetDataLayerRuntimeState(Zone.ArtLayer, EDataLayerRuntimeState::Activated);
-			if (Zone.GameplayLayer) DLManager->SetDataLayerRuntimeState(Zone.GameplayLayer, EDataLayerRuntimeState::Activated);
-		}
-		else if (Distance == 1)
-		{
-			// 距离为 1 (玩家隔壁)：艺术层加载进内存但不激活玩法，充当无缝视野和缓冲区
-			if (Zone.ArtLayer) DLManager->SetDataLayerRuntimeState(Zone.ArtLayer, EDataLayerRuntimeState::Loaded);
-			if (Zone.GameplayLayer) DLManager->SetDataLayerRuntimeState(Zone.GameplayLayer, EDataLayerRuntimeState::Unloaded);
-		}
-		else
-		{
-			// 距离 >= 2 (远方区域)：完全从内存中物理卸载，极限节省内存
-			if (Zone.ArtLayer) DLManager->SetDataLayerRuntimeState(Zone.ArtLayer, EDataLayerRuntimeState::Unloaded);
-			if (Zone.GameplayLayer) DLManager->SetDataLayerRuntimeState(Zone.GameplayLayer, EDataLayerRuntimeState::Unloaded);
-		}
-	}
-
-	// 在主线程发出指令，强制纹理流送器立刻更新，防范远处模型在激活时出现模糊糊的低级 MIP
-	if (GEngine && GetWorld())
-	{
-		GEngine->Exec(GetWorld(), TEXT("r.TextureStreaming.ForceUpdate"));
-	}
-}
-
-void UMyMapTravelSubsystem::PreheatZoneBackground(const UDataLayerAsset* ArtLayerAsset)
-{
-	// 安全校验通过后，将对应的艺术层仅载入内存进行预热，不激活其内部的逻辑物理
-	if (CachedDataLayerManager.IsValid() && ArtLayerAsset)
-	{
-		CachedDataLayerManager->SetDataLayerRuntimeState(ArtLayerAsset, EDataLayerRuntimeState::Loaded);
-	}
-}
-
-void UMyMapTravelSubsystem::ActivateZoneGameplay(const UDataLayerAsset* GameplayLayerAsset, const UDataLayerAsset* ArtLayerAsset)
-{
-	if (CachedDataLayerManager.IsValid())
-	{
-		// 彻底唤醒目标艺术层，开始渲染并启用碰撞
-		if (ArtLayerAsset)
-		{
-			CachedDataLayerManager->SetDataLayerRuntimeState(ArtLayerAsset, EDataLayerRuntimeState::Activated);
-		}
-
-		// 彻底唤醒目标玩法层，敌人生成器和触发器等开始工作
-		if (GameplayLayerAsset)
-		{
-			CachedDataLayerManager->SetDataLayerRuntimeState(GameplayLayerAsset, EDataLayerRuntimeState::Activated);
-		}
-	}
-}
-
-void UMyMapTravelSubsystem::EliminateZone(const UDataLayerAsset* LayerToUnload)
-{
-	// 将指定的数据层物理级卸载出内存，强制释放占用
-	if (CachedDataLayerManager.IsValid() && LayerToUnload)
-	{
-		CachedDataLayerManager->SetDataLayerRuntimeState(LayerToUnload, EDataLayerRuntimeState::Unloaded);
-	}
-}
-
-void UMyMapTravelSubsystem::DebugPrintDataLayerStates()
-{
-	// 获取世界数据层管理器
-	UDataLayerManager* DLManager = UDataLayerManager::GetDataLayerManager(GetWorld());
-	if (!DLManager) return;
-
-	// 打印雷达表头
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 15.f, FColor::Yellow, TEXT("========== 数据层真实内存状态诊断 =========="));
-	}
-
-	// 倒序遍历序列，保证在屏幕上的输出顺序符合玩家直觉（从上到下即从近到远）
-	for (int32 i = ZoneSequence.Num() - 1; i >= 0; --i)
-	{
-		const FZoneDataLayerPair& Zone = ZoneSequence[i];
-
-		if (Zone.GameplayLayer)
-		{
-			// 获取底层真实的内存加载状态
-			EDataLayerRuntimeState GPState = EDataLayerRuntimeState::Unloaded;
-			if (const UDataLayerInstance* GPInstance = DLManager->GetDataLayerInstance(Zone.GameplayLayer))
-			{
-				GPState = GPInstance->GetRuntimeState();
-			}
-
-			// 状态文本转换
-			FString StateStr = (GPState == EDataLayerRuntimeState::Activated) ? TEXT("已激活 (Activated)") :
-				(GPState == EDataLayerRuntimeState::Loaded) ? TEXT("仅加载 (Loaded)") : TEXT("已卸载 (Unloaded)");
-
-			// 警告色标红处理
-			FColor MsgColor = (GPState == EDataLayerRuntimeState::Activated) ? FColor::Red : FColor::White;
-			if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 15.f, MsgColor, FString::Printf(TEXT("Zone %d [玩法 Gameplay]: %s"), i, *StateStr));
-		}
-
-		if (Zone.ArtLayer)
-		{
-			// 获取底层真实的内存加载状态
-			EDataLayerRuntimeState ArtState = EDataLayerRuntimeState::Unloaded;
-			if (const UDataLayerInstance* ArtInstance = DLManager->GetDataLayerInstance(Zone.ArtLayer))
-			{
-				ArtState = ArtInstance->GetRuntimeState();
-			}
-
-			// 状态文本转换
-			FString StateStr = (ArtState == EDataLayerRuntimeState::Activated) ? TEXT("已激活 (Activated)") :
-				(ArtState == EDataLayerRuntimeState::Loaded) ? TEXT("仅加载 (Loaded)") : TEXT("已卸载 (Unloaded)");
-
-			// 安全色标绿处理
-			FColor MsgColor = (ArtState == EDataLayerRuntimeState::Activated) ? FColor::Green : FColor::White;
-			if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 15.f, MsgColor, FString::Printf(TEXT("Zone %d [美术 Art]:      %s"), i, *StateStr));
 		}
 	}
 }

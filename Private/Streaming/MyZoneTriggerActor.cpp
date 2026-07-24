@@ -1,8 +1,9 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
-#include "MapTravel/Actors/MyZoneTriggerActor.h"
+#include "Streaming/MyZoneTriggerActor.h"
 #include "Components/BoxComponent.h"
-#include "MapTravel/MyMapTravelSubsystem.h"
+// 【修改】：原本包含的是 MyMapTravelSubsystem，现在改为流送专用子系统
+#include "Streaming/MyDataLayerStreamingSubsystem.h" 
 #include "GameFramework/Character.h"
 #include "GameFramework/Pawn.h"
 #include "Engine/World.h"
@@ -56,15 +57,15 @@ void AMyZoneTriggerActor::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AA
 		// 注意：作为滑动窗口流送触发器，玩家在探索时必然会来回走动并反复进出该区域
 		// 绝不能像地图传送门那样在触发后关闭碰撞 (SetCollisionEnabled)，必须保持长效监听！
 
-		// 安全获取当前世界的转场大管家
-		if (UMyMapTravelSubsystem* TravelSubsystem = GetWorld()->GetSubsystem<UMyMapTravelSubsystem>())
+		// 【修改】：安全获取全新的数据层流送大管家
+		if (UMyDataLayerStreamingSubsystem* StreamingSubsystem = GetWorld()->GetSubsystem<UMyDataLayerStreamingSubsystem>())
 		{
 			// 确保关卡设计师在细节面板里正确绑定了目标数据层资产
 			if (AssociatedDataLayer)
 			{
-				// 拨乱反正：将本触发器绑定的核心数据层喂给大管家的滑动窗口
-				// 由子系统统一推演和接管远近格子的内存分配，实现极低耦合
-				TravelSubsystem->RefreshSlidingWindow(AssociatedDataLayer);
+				// 拨乱反正：将本触发器绑定的核心数据层喂给流送大管家的滑动窗口
+				// 由流送子系统统一推演和接管远近格子的内存分配，实现极低耦合
+				StreamingSubsystem->RefreshSlidingWindow(AssociatedDataLayer);
 			}
 		}
 	}

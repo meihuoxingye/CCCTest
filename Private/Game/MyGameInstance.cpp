@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Game/MyGameInstance.h"
 #include "Game/BlackoutExtension.h"
@@ -11,6 +11,9 @@
 #include "HAL/IConsoleManager.h" // 【新增】：用于直接操控底层控制台变量
 #include "MapTravel/MyMapTravelSubsystem.h"
 #include "Kismet/GameplayStatics.h"
+
+#include "UI/Transition/MyScreenOffWidget.h"
+#include "UI/Transition/MyLoadingScreenWidget.h"
 
 
 // ==============================================================================
@@ -77,13 +80,24 @@ void UMyGameInstance::Shutdown()
 		BlackoutExt.Reset();
 	}
 
-	if (ActiveTransitionUI)
+	if (ActiveLoadingScreenUI)
 	{
 		// 崩溃修复：引擎已进入销毁时序，绝对禁止调用 UMG 的延迟动画系统
-		ActiveTransitionUI->RemoveFromParent();
+		ActiveLoadingScreenUI->RemoveFromParent();
 
 		// 直接从内存层面物理抹杀 Widget 控件，强制置空切断引用链，不留任何触发退场动画的遗言
-		ActiveTransitionUI = nullptr;
+		ActiveLoadingScreenUI = nullptr;
+	}
+
+	// =========================================================================
+	// 【新增核心修复】：跨界前物理处决旧世界的黑幕 UI！
+	// 绝对禁止大管家把旧世界的 UI 强引用带到新世界，防范 GC 扫描时爆出 
+	// "Object from PIE level still referenced" 的致命闪退！
+	// =========================================================================
+	if (ActiveScreenOffUI)
+	{
+		ActiveScreenOffUI->RemoveFromParent();
+		ActiveScreenOffUI = nullptr;
 	}
 
 	// 归还控制权，执行父类的原生销毁
@@ -110,13 +124,13 @@ FMapTransitionConfig UMyGameInstance::GetMapTransitionConfig(FName MapName) cons
 	return DefaultTransitionConfig;
 }
 
-void UMyGameInstance::PlayScreenOffUI(TSoftClassPtr<class UMyTransitionWidgetBase> ScreenOffUIClass, float InDuration)
+void UMyGameInstance::PlayScreenOffPhaseUI(TSoftClassPtr<class UMyScreenOffWidget> ScreenOffUIClass, float InDuration)
 {
 	if (ScreenOffUIClass.IsNull()) return;
 
 	if (UClass* WidgetClass = ScreenOffUIClass.LoadSynchronous())
 	{
-		if (UMyTransitionWidgetBase* ScreenOffWidget = CreateWidget<UMyTransitionWidgetBase>(this, WidgetClass))
+		if (UMyScreenOffWidget* ScreenOffWidget = CreateWidget<UMyScreenOffWidget>(this, WidgetClass))
 		{
 			// 铁律执行：在上屏（NativeConstruct）触发动画前，强行将设计师规定的时间注入 UI 内部电池
 			ScreenOffWidget->SetTransitionDuration(InDuration);
@@ -131,29 +145,29 @@ void UMyGameInstance::PlayScreenOffUI(TSoftClassPtr<class UMyTransitionWidgetBas
 	}
 }
 
-void UMyGameInstance::ShowFakeLoadingScreen(TSoftClassPtr<class UMyTransitionWidgetBase> CustomUI)
+void UMyGameInstance::PlayLoadingPhaseUI(TSoftClassPtr<class UMyLoadingScreenWidget> CustomUI)
 {
-	if (ActiveTransitionUI) return;
+	if (ActiveLoadingScreenUI) return;
 
 	// 核心魔法：大管家自己用 PendingTargetMapName 去查字典提取目标配置
 	FMapTransitionConfig Config = GetMapTransitionConfig(PendingTargetMapName);
 
 	// 优先使用外部强制传入的 CustomUI 软指针，如果外部没传，就使用字典里查到的默认加载界面
-	TSoftClassPtr<UMyTransitionWidgetBase> TargetUIClass = CustomUI.IsNull() ? Config.LoadingScreenUIClass : CustomUI;
+	TSoftClassPtr<UMyLoadingScreenWidget> TargetUIClass = CustomUI.IsNull() ? Config.LoadingScreenUIClass : CustomUI;
 
 	// 提取设计师在字典中配置的目标最短等待时间
 	float ActualDuration = Config.MinLoadingTime;
 
 	if (UClass* WidgetClass = TargetUIClass.LoadSynchronous())
 	{
-		ActiveTransitionUI = CreateWidget<UMyTransitionWidgetBase>(this, WidgetClass);
-		if (ActiveTransitionUI)
+		ActiveLoadingScreenUI = CreateWidget<UMyLoadingScreenWidget>(this, WidgetClass);
+		if (ActiveLoadingScreenUI)
 		{
 			// 在 UI 上屏前，把字典里的时间契约强行压入 UI 的状态机中，接管其动画生命周期
-			ActiveTransitionUI->SetLoadingTimeConfig(Config.MinLoadingTime, Config.HoldTimeAtFull);
+			ActiveLoadingScreenUI->SetLoadingTimeConfig(Config.MinLoadingTime, Config.HoldTimeAtFull);
 
 			// 将加载界面加到视口，ZOrder 设为极高的 10001
-			ActiveTransitionUI->AddToViewport(10001);
+			ActiveLoadingScreenUI->AddToViewport(10001);
 		}
 	}
 
@@ -183,10 +197,10 @@ void UMyGameInstance::ShowFakeLoadingScreen(TSoftClassPtr<class UMyTransitionWid
 
 void UMyGameInstance::HideFakeLoadingScreen()
 {
-	if (ActiveTransitionUI)
+	if (ActiveLoadingScreenUI)
 	{
 		// 引擎就绪且倒计时已到！直接通知 UI，UI 内部的电池会切到退场状态，开始擦除动画！
-		ActiveTransitionUI->NotifyEngineReady();
+		ActiveLoadingScreenUI->NotifyEngineReady();
 	}
 	else
 	{
@@ -198,13 +212,13 @@ void UMyGameInstance::HideFakeLoadingScreen()
 void UMyGameInstance::FinalizeLoadingScreenRemoval()
 {
 	// 终极清理防线：检查当前内存中是否还有存活的转场 UI 实例
-	if (ActiveTransitionUI)
+	if (ActiveLoadingScreenUI)
 	{
 		// 从视口中物理抹除该 UI，彻底结束它在黑幕期间的屏幕霸权
-		ActiveTransitionUI->RemoveFromParent();
+		ActiveLoadingScreenUI->RemoveFromParent();
 
 		// 强制置空指针，切断强引用链，将其残躯完全移交给虚幻底层的垃圾回收系统 (GC)
-		ActiveTransitionUI = nullptr;
+		ActiveLoadingScreenUI = nullptr;
 	}
 
 	// 状态机重置：清空挂起的目标地图名称缓存，确保下一次传送判定是一张纯净的白纸
@@ -235,12 +249,23 @@ void UMyGameInstance::HandleStartTravel(UWorld* CurrentWorld)
 		BlackoutExt->bIsActive = true;
 	}
 
-	if (ActiveTransitionUI)
+	if (ActiveLoadingScreenUI)
 	{
 		// 新增防线：防止被打断导致的僵尸UI内存泄漏
 		// 如果漫游发生时居然还有 UI 活着，立刻物理处决，确保新旧交替绝对纯净
-		ActiveTransitionUI->RemoveFromParent();
-		ActiveTransitionUI = nullptr;
+		ActiveLoadingScreenUI->RemoveFromParent();
+		ActiveLoadingScreenUI = nullptr;
+	}
+
+	// =========================================================================
+	// 【新增核心修复】：跨界前物理处决旧世界的黑幕 UI！
+	// 绝对禁止大管家把旧世界的 UI 强引用带到新世界，防范 GC 扫描时爆出 
+	// "Object from PIE level still referenced" 的致命闪退！
+	// =========================================================================
+	if (ActiveScreenOffUI)
+	{
+		ActiveScreenOffUI->RemoveFromParent();
+		ActiveScreenOffUI = nullptr;
 	}
 
 	// 漫游开始，彻底重置所有状态锁与互斥锁，为新一轮加载做纯净准备
@@ -272,7 +297,7 @@ void UMyGameInstance::HandleEndTravel(UWorld* NewWorld)
 
 	// Persistent Level 进内存后立刻拉起 UI 遮罩
 	// 此时引擎流送还没完 (bEngineIsReady 默认为 false)，UI 老老实实走 15% 盲开步进
-	ShowFakeLoadingScreen(nullptr);
+	PlayLoadingPhaseUI(nullptr);
 
 	if (UWorld* World = GetWorld())
 	{
@@ -308,7 +333,7 @@ void UMyGameInstance::ExecuteSameMapTransition(AActor* TeleportingActor, const F
 
 	// 3. 拉起黑幕遮罩
 	// 依据查表得出的配置，拉起专属的熄屏（闭眼）UI，并强行注入设计师规定的淡出时间
-	PlayScreenOffUI(Config.ScreenOffUIClass, Config.ScreenOffDuration);
+	PlayScreenOffPhaseUI(Config.ScreenOffUIClass, Config.ScreenOffDuration);
 
 	// 物理防死锁计算：取系统极限底线 (0.01s)、全局安全延迟与 UI 动画时长的最大值
 	// 确保无论策划怎么填表，定时器都拥有充足的物理缓冲时间，绝不穿帮
@@ -444,7 +469,7 @@ void UMyGameInstance::OnSameMapScreenOffFinished(TWeakObjectPtr<AActor> Teleport
 
 	// 3. 拉起正常的伪加载 UI（进度条出现）
 	// 传入 nullptr 空指针以触发大管家底层的字典查表机制，自动拉起目标区域专属的“睁眼/加载”UI
-	ShowFakeLoadingScreen(nullptr);
+	PlayLoadingPhaseUI(nullptr);
 
 	// 4. 【核心排毒】：同图无需硬盘加载，瞬间宣告底层就绪！进度条 UI 将直接提速满载！
 	// 状态机欺骗：同图穿梭没有跨地图漫游那漫长的硬盘反序列化过程，

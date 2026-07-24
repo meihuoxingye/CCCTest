@@ -1,11 +1,9 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstance.h"
-// 引入我们的转场基类
-#include "UI/Transition/MyTransitionWidgetBase.h"
 #include "Engine/TimerHandle.h"
 #include "Engine/Engine.h" 
 #include "MyGameInstance.generated.h"
@@ -23,7 +21,7 @@ public:
 	// 离开本地图时的表现 (本世界为主)：播放“熄屏/闭眼”遮罩 UI 的软引用
 	// 使用软指针防止硬加载导致的内存滚雪球
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition|Outro")
-	TSoftClassPtr<class UMyTransitionWidgetBase> ScreenOffUIClass;
+	TSoftClassPtr<class UMyScreenOffWidget> ScreenOffUIClass;
 
 	// 离开本地图时的绝对物理等待时间，用于给屏幕完全变黑提供足够的缓冲期
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition|Outro", meta = (ClampMin = "0.1"))
@@ -31,7 +29,7 @@ public:
 
 	// 抵达本地图时的表现 (目标世界为主)：播放“加载/睁眼”进度条 UI 的软引用
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition|Intro")
-	TSoftClassPtr<class UMyTransitionWidgetBase> LoadingScreenUIClass;
+	TSoftClassPtr<class UMyLoadingScreenWidget> LoadingScreenUIClass;
 
 	// 设计师期望的最短加载时间契约（物理防线），即使引擎瞬间加载完，UI 也必须演足这个时间
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Transition|Intro", meta = (ClampMin = "0.5"))
@@ -69,11 +67,11 @@ public:
 public:
 
 	UPROPERTY(Transient)
-	class UTeleportRoute* PendingTravelRoute;
+	TObjectPtr<class UTeleportRoute> PendingTravelRoute;
 
 	// 【核心新增】：必须记录黑幕 UI 指针，用于在同地图中物理抹杀它，防黑屏死锁
 	UPROPERTY(Transient)
-	UMyTransitionWidgetBase* ActiveScreenOffUI = nullptr;
+	TObjectPtr<class UMyScreenOffWidget> ActiveScreenOffUI;
 
 
 	// ==============================================================================
@@ -110,10 +108,10 @@ public:
 
 	// 跨地图或同地图漫游起航前，根据配置拉起指定的熄屏闭合 UI
 	UFUNCTION(BlueprintCallable, Category = "Loading")
-	void PlayScreenOffUI(TSoftClassPtr<class UMyTransitionWidgetBase> ScreenOffUIClass, float InDuration);
+	void PlayScreenOffPhaseUI(TSoftClassPtr<class UMyScreenOffWidget> ScreenOffUIClass, float InDuration);
 
 	// 引擎落地新世界时调用，盲开拉起伪加载屏，并为其注入字典中的时间契约
-	void ShowFakeLoadingScreen(TSoftClassPtr<class UMyTransitionWidgetBase> CustomUI);
+	void PlayLoadingPhaseUI(TSoftClassPtr<class UMyLoadingScreenWidget> CustomUI);
 
 	// 外部或内部时间契约到期时调用，发送撤退信号给活跃的加载 UI
 	UFUNCTION(BlueprintCallable, Category = "Loading")
@@ -144,7 +142,7 @@ private:
 
 	// 完美保命符：通过 UPROPERTY 死死抓住新世界的加载 UI 指针，防 GC 误杀导致退场断层
 	UPROPERTY(Transient)
-	UMyTransitionWidgetBase* ActiveTransitionUI;
+	TObjectPtr<class UMyLoadingScreenWidget> ActiveLoadingScreenUI;
 
 	// 驱动大管家最高主宰倒计时（最少等待时间契约）的物理定时器句柄
 	FTimerHandle FakeLoadingTimerHandle;
