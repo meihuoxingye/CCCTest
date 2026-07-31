@@ -40,34 +40,46 @@ DECLARE_LOG_CATEGORY_EXTERN(LogEOSTest, Log, All);
 }
 
 
+// 声明一个配置类，将其关联到 Game 的默认配置文件，并在虚幻引擎的项目设置面板中注册为 "EOS联机单机双开测试"
 UCLASS(Config = Game, defaultconfig, meta = (DisplayName = "EOS联机单机双开测试"))
 class UEOSTestInjectorSettings : public UDeveloperSettings
 {
     GENERATED_BODY()
 
 public:
+    // 将该变量暴露给项目设置面板的 "EOS Test" 分类，并存入 Config 文件，用于全局控制是否启用本地发号器注入
     UPROPERTY(Config, EditAnywhere, Category = "EOS Test")
     bool bEnableTestInjection = false;
 
+    // 将该变量暴露给项目设置面板，用于全局控制是否在屏幕和控制台输出注入器相关的成功日志及系统提示
     UPROPERTY(Config, EditAnywhere, Category = "EOS Test")
     bool bEnableSuccessLog = false;
 
-    // 新增：每次登录前强制清除本地缓存的开关
+    // 控制是否在执行登录逻辑前，自动抹除本地系统凭据里的 Epic 账号令牌和匿名设备码缓存
     UPROPERTY(Config, EditAnywhere, Category = "EOS Test")
     bool bForceClearCacheBeforeLogin = false;
 };
 
+// 声明测试注入器核心工具类，将所有的注入、拦截、诊断函数统一封装在此
 class FEOSTestInjector
 {
     // ==============================================================================
     // 联机测试注入器 (Multiplayer Test Injector)
     // ==============================================================================
 public:
+    // 尝试拦截并修改登录参数。内部会根据运行环境（编辑器或 Bat 传参）判断，如果条件符合则向 OutParams 注入发号器凭证，并返回 true
     static bool TryInjectLoginParams(UE::Online::FAuthLogin::Params& OutParams);
+
+    // 登录成功后的统一日志分发函数，根据 bWasInjected 标记区分，输出不同的前缀（真实号/测试号）和屏幕颜色
     static void LogLoginSuccess(const FString& AccountId, bool bWasInjected);
+
+    // 缓存清理入口函数，其内部会读取设置面板的清理开关，只有开启时才会真正调用底层 C-API 抹除本地凭据
     static void ClearEOSCacheIfNeeded();
 
-    // 【新增】：集中接管来自 Manager 的所有系统报错、提示与心跳日志
+    // 集中接管来自 Manager 的所有系统报错、提示与心跳日志
+    // 作为兼容函数，处理那些未使用 INJECTOR_LOG 宏而是通过函数调用的系统级信息，同样受日志开关严格管控
     static void LogSystemMessage(const FString& Message, bool bIsError = false);
+
+    // 专用的网络心跳监测日志函数，负责解析底层的 EOS_ENetworkStatus 枚举状态，并在屏幕上使用固定 Key 刷新绿字或红字警告
     static void LogHeartbeat(int32 NetworkStatus);
 };

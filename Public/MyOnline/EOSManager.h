@@ -6,7 +6,7 @@
 #include "EOSManager.generated.h"
 
 UCLASS()
-class CCC_API UEOSManager : public UGameInstanceSubsystem // 【核心修复】：已将 MYONLINE_API 修正为 CCC_API
+class CCC_API UEOSManager : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
