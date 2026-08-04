@@ -79,9 +79,22 @@ public:
 	// 核心跳转管线 (Core Travel Pipeline)
 	// ==============================================================================
 public:
-	// 极致瘦身：仅需传入目标地图名称，其余加载参数、UI全自动从大管家字典中获取
+	// 【核心功能】：大一统漫游管线的终极总闸，全自动统筹物理点穴、黑幕遮罩、时序挂起及最终的跨界跳跃传送。
+	// 极致瘦身：仅需传入目标地图名称，其余加载参数、UI全自动从大管家字典中获取。
+	// 【架构进化】：彻底废弃基于字符串盲猜的“智能分流”，改为由调用方明确下达跳转指令，消除底层隐患。
+	// 本函数专职负责【默认普通单机跨图】，强制走无缝漫游 (Seamless Travel，bAbsolute = false)。
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void ExecuteMapTravel(FName TargetLevelName);
+
+	// 【联机专线】：房主专属建房跳转（带队发车）
+	// 强制剥夺旧世界的无缝漫游面具，使用绝对跳转 (Absolute Travel) 从零创建网络驱动，并自动附加 ?listen 监听参数。
+	UFUNCTION(BlueprintCallable, Category = "MapTravel")
+	void ExecuteHostTravel(FName TargetLevelName);
+
+	// 【联机专线】：客户端专属飞线加入
+	// 绕过所有地图查表机制，拿着纯净的 P2P 隧道地址 (如 "[EOS:0002d6...]")，强制使用 ClientTravel 飞线接入房主主机。
+	UFUNCTION(BlueprintCallable, Category = "MapTravel")
+	void ExecuteClientJoin(const FString& ConnectString);
 
 	// 跨地图与同地图漫游的终极收尾解穴函数：恢复玩家输入与物理碰撞
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
@@ -90,6 +103,11 @@ public:
 	// 剥离出来的独立接口，专职负责在绝对黑幕下执行物理空间折叠！
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void SnapPlayerToDestination();
+
+private:
+	// 内部大一统收束管线：抹平单机、房主、客机在点穴、剥夺输入和黑幕掩护上的底层差异。
+	// 统一执行极其严格的物理级时序锁定，最后再根据指令精准呼叫虚幻的底层 ServerTravel 或 ClientTravel API。
+	void InternalExecuteTravel(FName TargetLevelName, const FString& TravelURL, bool bIsAbsolute, bool bIsClientJoin);
 
 	// ==============================================================================
 	// 内部状态锁 (Internal State Locks)

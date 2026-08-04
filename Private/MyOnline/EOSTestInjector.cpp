@@ -41,18 +41,11 @@ bool FEOSTestInjector::TryInjectLoginParams(UE::Online::FAuthLogin::Params& OutP
     {
         // 成功拿到 .bat 传来的 Alpha 或 Beta
     }
-    // 智能判断：如果是在编辑器 (PIE) 里点运行，默认分配 Alpha 号！
-    // 如果命令行里没有 -LocalUser，但当前是在虚幻编辑器内部运行（测试）
-    else if (GIsEditor)
-    {
-        // 则自动给当前窗口分配 "Alpha" 作为身份标识，省去手动配参数的麻烦
-        TestLocalUser = TEXT("Alpha");
-    }
-    // 如果既不是从包含参数的 bat 启动，也不是在编辑器里运行
     else
     {
-        // 说明当前环境不满足双开注入条件，返回 false 退回标准流程
-        return false;
+        // 【核心修正】：废除 GIsEditor 与独立进程的判定！
+        // 既然总开关已开启，如果没有命令行传参，不管是 PIE 还是 独立进程，一律强制分配 "Alpha" 作为身份标识
+        TestLocalUser = TEXT("Alpha");
     }
 
     // 强制将登录凭据类型篡改为 Developer（开发者工具模式），绕过默认的外部设备码模式

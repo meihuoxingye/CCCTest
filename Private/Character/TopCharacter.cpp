@@ -42,6 +42,13 @@ ATopCharacter::ATopCharacter()
 	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
 
+	// ==============================================================================
+	// 【防堵门装甲】：专属于玩家角色的物理豁免权
+	// 联机时房主必然会占住接机点。强制要求 GameMode：即使碰撞重叠，也必须把副机挤开并强行生出来！
+	// 绝对不允许因为物理阻挡而导致玩家的肉体流产！
+	// ==============================================================================
+	SpawnCollisionHandlingMethod = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
 	MMCComponent = CreateDefaultSubobject<UMyMovementControlComponent>(TEXT("MyMovementControlComponent"));
 
 	// 【新增】：初始化交互探测球
@@ -446,6 +453,31 @@ void ATopCharacter::OnInteractKeyPressed()
 		// 接收者 AMySavePointActor::Interact_Implementation
 		IMyInteractableInterface::Execute_Interact(TargetActor, this);
 	}
+}
+
+#pragma endregion
+
+
+// ==============================================================================
+// 联机底层探针 (Network Probes)
+// ==============================================================================
+#pragma region
+
+void ATopCharacter::PossessedBy(AController* NewController)
+{
+	Super::PossessedBy(NewController);
+
+	FString ControllerName = NewController ? NewController->GetName() : TEXT("空(Null)");
+	UE_LOG(LogTemp, Warning, TEXT("⚔️ [Character探针-服务器端] 玩家专属肉体被注入灵魂! Character: %s <- Controller: %s"), *GetName(), *ControllerName);
+}
+
+void ATopCharacter::OnRep_Controller()
+{
+	Super::OnRep_Controller();
+
+	AController* CurrentController = GetController();
+	FString ControllerName = CurrentController ? CurrentController->GetName() : TEXT("空(Null)");
+	UE_LOG(LogTemp, Warning, TEXT("📡 [Character探针-客户端端] 玩家专属肉体收到灵魂同步广播! Character: %s <- Controller: %s"), *GetName(), *ControllerName);
 }
 
 #pragma endregion

@@ -10,6 +10,8 @@
 #include "TimerManager.h"
 #include "SaveGame/Subsystem/MySaveSubsystem.h"
 
+#include "EngineUtils.h"
+
 
 // ==============================================================================
 // 生命周期 (Lifecycle)
@@ -143,6 +145,106 @@ void AMyGameModeBase::GetSeamlessTravelActorList(bool bToTransition, TArray<AAct
 	// 目前保持完全空白，不强制干涉任何飞行物或 Actor 的跨地图流转。
 	// 一切由引擎默认规则处理，新关卡将是一个干干净净的新开局。
 	// (如果你以后有特定的剧情道具需要保留，再由你自己决定是否写进这个 ActorList 里)
+}
+
+AActor* AMyGameModeBase::ChoosePlayerStart_Implementation(AController* Player)
+{
+	// 1. 全局遍历寻找当前世界中的“大一统接机点”
+	for (TActorIterator<AMyUniversalDestination> It(GetWorld()); It; ++It)
+	{
+		if (AMyUniversalDestination* Dest = *It)
+		{
+			// 找到后，直接把它当成玩家的合法产房，强塞给引擎底层！
+			// 服务器会瞬间在这里为连入的客机生成肉体 (BaseCharacter)
+			return Dest;
+		}
+	}
+
+	// 2. 极端兜底：如果连接机点都没放，只能走引擎默认老路
+	return Super::ChoosePlayerStart_Implementation(Player);
+}
+
+#pragma endregion
+
+// ==============================================================================
+// 联机底层探针与接客管线 (Network Probes & Player Spawning)
+// ==============================================================================
+#pragma region
+
+void AMyGameModeBase::PostLogin(APlayerController* NewPlayer)
+{
+	UE_LOG(LogTemp, Warning, TEXT("========================================================="));
+	UE_LOG(LogTemp, Warning, TEXT("🟢 [GameMode探针 - 1步] 客机玩家正式完成连接！Controller: %s"), *GetNameSafe(NewPlayer));
+
+	// 调用父类逻辑，底层会自动去调 RestartPlayer
+	Super::PostLogin(NewPlayer);
+}
+
+void AMyGameModeBase::RestartPlayer(AController* NewPlayer)
+{
+	UE_LOG(LogTemp, Warning, TEXT("🟢 [GameMode探针 - 2步] 服务器开始为玩家制造肉体... Controller: %s"), *GetNameSafe(NewPlayer));
+
+	Super::RestartPlayer(NewPlayer);
+
+	// 验证肉体是否制造成功并完成附身
+	if (NewPlayer->GetPawn())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("✅ [GameMode探针 - 终点] 成功！肉体生成并附身完毕！Pawn: %s"), *GetNameSafe(NewPlayer->GetPawn()));
+		UE_LOG(LogTemp, Warning, TEXT("========================================================="));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("❌ [GameMode探针 - 致命失败] RestartPlayer 执行完毕，但玩家仍然没有 Pawn！"));
+		UE_LOG(LogTemp, Error, TEXT("========================================================="));
+	}
+}
+
+AActor* AMyGameModeBase::FindPlayerStart_Implementation(AController* Player, const FString& IncomingName)
+{
+	UE_LOG(LogTemp, Warning, TEXT("🟡 [GameMode探针 - 3步] 准备开始寻找出生点..."));
+
+	// 调用父类逻辑，它底层会自动去调用上面无缝旅行分区里的 ChoosePlayerStart_Implementation
+	AActor* StartSpot = Super::FindPlayerStart_Implementation(Player, IncomingName);
+
+	if (StartSpot)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("🟡 [GameMode探针 - 3步] 寻找完毕！最终确定的出生点是: %s"), *StartSpot->GetName());
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("🔴 [GameMode探针 - 3步致命错误] 未能找到任何合法出生点！"));
+	}
+
+	return StartSpot;
+}
+
+APawn* AMyGameModeBase::SpawnDefaultPawnAtTransform_Implementation(AController* NewPlayer, const FTransform& SpawnTransform)
+{
+	UE_LOG(LogTemp, Warning, TEXT("🟡 [GameMode探针 - 4步] 准备在坐标 %s 物理生成肉体..."), *SpawnTransform.GetLocation().ToString());
+
+	// 查看 GameMode 到底有没有配置默认肉体类
+	if (!DefaultPawnClass)
+	{
+		UE_LOG(LogTemp, Error, TEXT("🔴 [GameMode探针 - 4步致命错误] GameMode 的 DefaultPawnClass 是空的！请检查世界设置或蓝图配置！"));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("🟡 [GameMode探针 - 4步] 即将生成的肉体类型是: %s"), *DefaultPawnClass->GetName());
+	}
+
+	// 执行底层生成 (注意：Super 调用也必须加 _Implementation)
+	APawn* SpawnedPawn = Super::SpawnDefaultPawnAtTransform_Implementation(NewPlayer, SpawnTransform);
+
+	if (!SpawnedPawn)
+	{
+		UE_LOG(LogTemp, Error, TEXT("🔴 [GameMode探针 - 4步致命错误] 肉体物理生成失败！可能是发生严重物理碰撞，或蓝图类损坏！"));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("🟡 [GameMode探针 - 4步] 肉体实体已成功诞生于世界中！"));
+	}
+
+	return SpawnedPawn;
 }
 
 #pragma endregion

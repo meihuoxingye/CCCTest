@@ -71,7 +71,4 @@ public:
 	// 给外接开放一个获取战斗组件的接口
 	FORCEINLINE TObjectPtr<UMyCombatComponent> GetCombatComponent() const { return MCComponent; }
 
-private:
-
-
 };

@@ -41,6 +41,25 @@ void UMyGameInstance::Init()
 	// 注册全局无缝漫游开始钩子，当旧世界准备好断连并起航时触发
 	FWorldDelegates::OnSeamlessTravelTransition.AddUObject(this, &UMyGameInstance::HandleStartTravel);
 
+	// ==============================================================================
+	// 【终极解药】：填补非无缝（硬跳转）的物理真空！
+	// 房主建房（带 ?listen）或客机飞线连接时，引擎必定执行非无缝的 Hard Travel。
+	// 这时 OnSeamlessTravelTransition 绝对不会触发！必须监听引擎底层的 PreLoadMap，
+	// 在旧世界被毁灭的前一刻，强行呼叫大管家重置 bIsHiding 等转场锁，否则必定死锁！
+	// ==============================================================================
+	FCoreUObjectDelegates::PreLoadMap.AddLambda([this](const FString& MapName)
+		{
+			if (UWorld* World = GetWorld())
+			{
+				// 引擎级别的容错：只要不是在正常的无缝漫游中，就代表是硬跳转
+				// 立刻复用无缝的清洗逻辑，将脏数据彻底洗净！
+				if (!World->IsInSeamlessTravel())
+				{
+					HandleStartTravel(World);
+				}
+			}
+		});
+
 	// 注册全局关卡加载完毕钩子，当新世界反序列化完毕且进内存后第一时间触发
 	FCoreUObjectDelegates::PostLoadMapWithWorld.AddUObject(this, &UMyGameInstance::HandleEndTravel);
 

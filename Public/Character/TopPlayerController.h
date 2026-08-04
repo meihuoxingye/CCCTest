@@ -100,6 +100,9 @@ protected:
 	// 当控制器不再控制时将指针清空
 	virtual void OnUnPossess() override;
 
+	// 新增的函数,客户端专属的确认函数
+	virtual void AcknowledgePossession(APawn* P) override;
+
 private:
 	// 增强输入资产配置，蓝图中配置
 	UPROPERTY(EditAnywhere, Category = "Input")

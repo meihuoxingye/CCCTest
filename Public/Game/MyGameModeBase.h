@@ -4,6 +4,9 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
+
+#include "MapTravel/Actors/MyUniversalDestination.h" // 记得引入头文件
+
 #include "MyGameModeBase.generated.h"
 
 // 定义一个多播委托，当友军名册发生变动时广播信号
@@ -56,5 +59,23 @@ public:
 	/** 重写：决定哪些正在飞行的“幽灵 Actor”能无视空间毁灭，直接跟入下一个世界 */
 	virtual void GetSeamlessTravelActorList(bool bToTransition, TArray<AActor*>& ActorList) override;
 
+	// 核心覆盖：强行接管虚幻底层的出生点寻址，将大一统接机点作为联机合法出生地
+	virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
 
+
+	// ==============================================================================
+	// 联机底层探针与接客管线 (Network Probes & Player Spawning)
+	// ==============================================================================
+public:
+	// 第 1 步：客机彻底连入房间，向服务器报到
+	virtual void PostLogin(APlayerController* NewPlayer) override;
+
+	// 第 2 步：服务器准备为客机的灵魂分配肉体
+	virtual void RestartPlayer(AController* NewPlayer) override;
+
+	// 第 3 步：服务器开始寻找出生点 (用 FindPlayerStart 充当探针，绝不抢 ChoosePlayerStart)
+	virtual AActor* FindPlayerStart_Implementation(AController* Player, const FString& IncomingName) override;
+
+	// 第 4 步：服务器在指定的地点，物理生成肉体 (蓝图原生事件，必须加 _Implementation 后缀！)
+	virtual APawn* SpawnDefaultPawnAtTransform_Implementation(AController* NewPlayer, const FTransform& SpawnTransform) override;
 };

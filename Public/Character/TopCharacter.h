@@ -106,4 +106,11 @@ private:
 	void AttackEnd();
 	// 【新增】：交互触发回调
 	void OnInteractKeyPressed();
+
+	// ==============================================================================
+	// 联机底层探针 (Network Probes)
+	// ==============================================================================
+public:
+	virtual void PossessedBy(AController* NewController) override;
+	virtual void OnRep_Controller() override;
 };

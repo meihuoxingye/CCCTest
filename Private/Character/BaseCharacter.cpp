@@ -28,12 +28,21 @@
 
 #include "Engine/World.h" // <-- 5.8 修复：必须显式包含 UWorld 的定义以使用 GetWorld()->
 
+#include "Net/UnrealNetwork.h"
+
 
 // Sets default values
 ABaseCharacter::ABaseCharacter()
 {
  	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
+
+	// 开启躯体的网络同步
+	bReplicates = true;
+	SetReplicateMovement(true);
+
+	// 开启 Iris 推送模型列表，引擎会自动把下面带同步标记的默认组件抓取进列表
+	bReplicateUsingRegisteredSubObjectList = true;
 
 	MMAComponent = CreateDefaultSubobject<UMyMovementAttributeComponent>(TEXT("MyMovementAttributeComponent"));
 	MCComponent = CreateDefaultSubobject<UMyCombatComponent>(TEXT("MyCombatComponent"));

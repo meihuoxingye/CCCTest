@@ -38,7 +38,8 @@ UMyCombatComponent::UMyCombatComponent()
 	// off to improve performance if you don't need them.
 	PrimaryComponentTick.bCanEverTick = false;
 
-	// ...
+	// 基础声明：该类组件具备同步潜质
+	SetIsReplicatedByDefault(true);
 }
 
 // Called when the game starts

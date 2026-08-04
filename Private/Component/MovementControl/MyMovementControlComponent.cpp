@@ -17,6 +17,14 @@ UMyMovementControlComponent::UMyMovementControlComponent()
 	PrimaryComponentTick.bCanEverTick = true;
 	// 初始状态为每帧不更新
 	PrimaryComponentTick.bStartWithTickEnabled = false;
+
+	// ==============================================================================
+	// 【废除网络同步】：本组件为“纯视觉表现层推演”
+	// 官方 CharacterMovementComponent 已经在底层极其精准地向全服同步了物理速度 (Velocity)。
+	// 在联机中，别人的电脑只需读取这套共享的速度数据，即可在各自本地独立推演出一模一样的平滑转身动画。
+	// 绝不应该浪费宝贵的网络带宽，去跨服同步“模型转到了几度”这种靠纯数学算出来的本地表现数据。
+	// ==============================================================================
+	// SetIsReplicatedByDefault(true);
 }
 
 void UMyMovementControlComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)

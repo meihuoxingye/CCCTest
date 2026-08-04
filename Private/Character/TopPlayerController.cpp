@@ -26,7 +26,10 @@
 
 ATopPlayerController::ATopPlayerController()
 {
-	bReplicates = false;
+	/**/
+	// 在虚幻引擎中，PlayerController 是连接服务器和客户端的“网线本体”
+	// 如果你在 C++ 构造函数里把它设为 false，服务器在生成副机的灵魂时，会拒绝将这个灵魂同步给副机的电脑。
+	bReplicates = true;
 
 	// ==============================================================================
 	// 【核心修复：防 0x30 闪退的最高豁免权】
@@ -65,6 +68,17 @@ void ATopPlayerController::BeginPlay()
 			TimeDilationHub->SetComponentTickEnabled(false);
 		}
 	}
+
+	// === 【新增：探针】 ===
+	if (IsLocalController())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("🟢 [Controller探针] 【本地灵魂已苏醒】! Controller名字: %s"), *GetName());
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("🔴 [Controller探针] 【远程代理灵魂已生成】! Controller名字: %s"), *GetName());
+	}
+	// =====================
 
 	// 显示鼠标
 	bShowMouseCursor = true;
@@ -130,6 +144,11 @@ void ATopPlayerController::OnPossess(APawn* InPawn)
 
 	if (!InPawn) return;
 
+	// === 【新增：探针】 ===
+	FString PawnName = InPawn ? InPawn->GetName() : TEXT("空(Null)");
+	UE_LOG(LogTemp, Warning, TEXT("⚡ [Controller探针-服务器端] 成功执行附身! Controller: %s -> Pawn: %s"), *GetName(), *PawnName);
+	// =====================
+
 	// 缓存角色
 	CachedMyCharacter = Cast<ATopCharacter>(InPawn);
 	if (!CachedMyCharacter) return;
@@ -178,6 +197,14 @@ void ATopPlayerController::OnUnPossess()
 	Super::OnUnPossess();
 
 	CachedMyCharacter = nullptr;
+}
+
+void ATopPlayerController::AcknowledgePossession(APawn* P)
+{
+	Super::AcknowledgePossession(P);
+
+	FString PawnName = P ? P->GetName() : TEXT("空(Null)");
+	UE_LOG(LogTemp, Warning, TEXT("✅ [Controller探针-客户端本地] 确认附身指令! Controller: %s -> Pawn: %s"), *GetName(), *PawnName);
 }
 
 #pragma endregion

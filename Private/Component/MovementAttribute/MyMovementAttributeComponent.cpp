@@ -16,8 +16,14 @@ UMyMovementAttributeComponent::UMyMovementAttributeComponent()
 	// Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
 	// off to improve performance if you don't need them.
 	PrimaryComponentTick.bCanEverTick = false;
-
 	PrimaryComponentTick.bStartWithTickEnabled = false;
+
+	// ==============================================================================
+	// 【废除网络同步】：本组件为“本地数据搬运工”
+	// 联机时主客机会在各自的 BeginPlay 中，独立从本地数据资产读取固定数值并填给官方移动组件。
+	// 本组件不包含任何 RPC（远程调用）或独有的动态变量，开启网络同步只会白白占用服务器的 Actor Channel。
+	// ==============================================================================
+	// SetIsReplicatedByDefault(true);
 }
 
 

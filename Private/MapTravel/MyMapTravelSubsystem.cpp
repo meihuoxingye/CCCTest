@@ -25,6 +25,8 @@
 #include "MapTravel/Actors/MyUniversalDestination.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
+#include "GameFramework/GameModeBase.h"
+
 
 // ==============================================================================
 // 内部安全获取真实玩家控制器的工具函数 (防无缝传送假身)
@@ -360,6 +362,25 @@ void UMyMapTravelSubsystem::CommitSameMapDataLayer()
 
 void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 {
+	// 默认的普通单机跨图漫游：走无缝漫游 (bAbsolute = false)
+	InternalExecuteTravel(TargetLevelName, TargetLevelName.ToString(), false, false);
+}
+
+void UMyMapTravelSubsystem::ExecuteHostTravel(FName TargetLevelName)
+{
+	// 房主专属建房跳转（带队）：强制绝对跳转 (bAbsolute = true)，附加 ?listen
+	FString HostURL = FString::Printf(TEXT("%s?listen"), *TargetLevelName.ToString());
+	InternalExecuteTravel(TargetLevelName, HostURL, true, false);
+}
+
+void UMyMapTravelSubsystem::ExecuteClientJoin(const FString& ConnectString)
+{
+	// 客户端专属飞线加入：强制绝对跳转 (bAbsolute = true)
+	InternalExecuteTravel(NAME_None, ConnectString, true, true);
+}
+
+void UMyMapTravelSubsystem::InternalExecuteTravel(FName TargetLevelName, const FString& TravelURL, bool bIsAbsolute, bool bIsClientJoin)
+{
 	// 转场状态互斥锁：防止玩家在黑屏淡出期间狂按按键或连踩触发器导致状态机重复执行
 	if (bIsTraveling) return;
 
@@ -369,8 +390,9 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 	// 安全获取当前世界上下文
 	UWorld* World = GetWorld();
 
-	// 终极防呆校验：如果世界不存在，或者传入的目标关卡名为空，直接中止并解锁状态
-	if (!IsValid(World) || TargetLevelName.IsNone())
+	// 终极防呆校验：如果世界不存在，或者传入的地址为空，直接中止并解锁状态
+	// (注意：客户端飞线加入时 TargetLevelName 为空是合法的，所以校验 TravelURL)
+	if (!IsValid(World) || TravelURL.IsEmpty())
 	{
 		bIsTraveling = false;
 		return;
@@ -509,13 +531,38 @@ void UMyMapTravelSubsystem::ExecuteMapTravel(FName TargetLevelName)
 	TWeakObjectPtr<UWorld> WeakWorld(World);
 
 	// 开启定时器，等待 UI 黑幕完全闭合后执行匿名回调
-	World->GetTimerManager().SetTimer(TravelTimerHandle, [WeakWorld, TargetLevelName]()
+	World->GetTimerManager().SetTimer(TravelTimerHandle, [WeakWorld, TravelURL, bIsAbsolute, bIsClientJoin]()
 		{
 			// 唤醒时重新安全提取强引用，如果内存已经被销毁，这里会安全返回 nullptr
 			if (UWorld* SafeWorld = WeakWorld.Get())
 			{
-				// 真正起航：命令引擎底层开启无缝旅行管线，跨越位面
-				SafeWorld->ServerTravel(TargetLevelName.ToString());
+				// ==============================================================================
+				// 【时序归位】：真正起航！根据明确传递的指令，执行对应的底层跃迁 API
+				// ⚠️ 核心备忘录：绝对跳转 (TRAVEL_Absolute) 确实不会触发引擎的 OnSeamlessTravelTransition。
+				// 但是，我们绝不能在这里越权手动调用 HandleStartTravel！
+				// 物理粉碎与状态清理的补救措施，已转移至 UMyGameInstance::Init() 中，
+				// 由引擎底层的 PreLoadMap 钩子全自动接管，严丝合缝！
+				// ==============================================================================
+				if (bIsClientJoin)
+				{
+					if (APlayerController* PC = SafeWorld->GetFirstPlayerController())
+					{
+						PC->ClientTravel(TravelURL, TRAVEL_Absolute);
+					}
+				}
+				else
+				{
+					if (bIsAbsolute)
+					{
+						// 房主建房必须剥夺旧世界的无缝漫游防截断
+						if (AGameModeBase* CurrentGM = SafeWorld->GetAuthGameMode())
+						{
+							CurrentGM->bUseSeamlessTravel = false;
+						}
+					}
+					// 命令引擎底层开启旅行管线，跨越位面
+					SafeWorld->ServerTravel(TravelURL, bIsAbsolute);
+				}
 			}
 		}, SafeTravelDelay, false);
 }
@@ -590,12 +637,15 @@ void UMyMapTravelSubsystem::SnapPlayerToDestination()
 	// 尝试获取全局大管家 (GameInstance)
 	if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
 	{
+		// 声明目标接机点指针，准备进行全图搜索
+		AMyUniversalDestination* TargetDest = nullptr;
+
+		// ==============================================================================
+		// 【核心修复：主客机智能接机寻址】
+		// ==============================================================================
 		// 验证通行证：仅当大管家手中确实持有跨界车票 (PendingTravelRoute) 时才触发后续管线
 		if (GI->PendingTravelRoute)
 		{
-			// 声明目标接机点指针，准备进行全图搜索
-			AMyUniversalDestination* TargetDest = nullptr;
-
 			// 此时新世界的 Persistent Level 已 Ready，目标必然在内存中，执行全局 Actor 扫盘
 			for (TActorIterator<AMyUniversalDestination> It(World); It; ++It)
 			{
@@ -612,66 +662,82 @@ void UMyMapTravelSubsystem::SnapPlayerToDestination()
 					}
 				}
 			}
-
-			// 如果成功找到了对应的接机点
-			if (TargetDest)
+		}
+		else
+		{
+			// 客机落地，直接认准当前新世界里的第一个大一统接机点作为绝对锚点
+			for (TActorIterator<AMyUniversalDestination> It(World); It; ++It)
 			{
-				// 【核心新增】：跨图落地时，立即根据目标点绑定的数据层刷新内存状态，触发卸载与加载！
-				if (TargetDest->BoundDataLayer)
+				TargetDest = *It;
+				break;
+			}
+		}
+
+		// 如果成功找到了对应的接机点
+		if (TargetDest)
+		{
+			// 【核心新增】：跨图落地时，立即根据目标点绑定的数据层刷新内存状态，触发卸载与加载！
+			if (TargetDest->BoundDataLayer)
+			{
+				// 记录数据层滑动窗口触发日志
+				UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🔄 跨图落地：立刻刷新目标点的数据层滑动窗口"));
+
+				// 【修改】：呼叫流送子系统，强制拉起目标地块的硬盘流送任务，确保黑幕散去前地板加载完毕
+				if (UMyDataLayerStreamingSubsystem* StreamingSub = World->GetSubsystem<UMyDataLayerStreamingSubsystem>())
 				{
-					// 记录数据层滑动窗口触发日志
-					UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🔄 跨图落地：立刻刷新目标点的数据层滑动窗口"));
-
-					// 【修改】：呼叫流送子系统，强制拉起目标地块的硬盘流送任务，确保黑幕散去前地板加载完毕
-					if (UMyDataLayerStreamingSubsystem* StreamingSub = World->GetSubsystem<UMyDataLayerStreamingSubsystem>())
-					{
-						// 跨图落地是在黑幕下进行的，传入 true 强制刷新纹理 MIP
-						StreamingSub->RefreshSlidingWindow(TargetDest->BoundDataLayer, true);
-					}
-				}
-
-				// 核心安全获取：提取绝对真实的本地玩家控制器，防死无缝漫游产生的幽灵假身
-				if (APlayerController* PC = GetRealPlayerController(World))
-				{
-					// 提取玩家控制器当前附身的新世界肉体 (Pawn)
-					if (APawn* Pawn = PC->GetPawn())
-					{
-						// 提取目标点的绝对坐标，Z轴强制增加 15cm 的高度冗余，作为完美防穿模的下落空间
-						FVector SafeLocation = TargetDest->GetActorLocation() + FVector(0.0f, 0.0f, 15.0f);
-
-						// 提取目标点设定的视口朝向
-						FRotator SafeRotation = TargetDest->GetActorRotation();
-
-						// 趁着现在屏幕全黑，强行折叠宇宙坐标，将玩家肉体瞬移至接机点！
-						// false, true 分别代表：不进行碰撞测试(强扫)，且瞬移后维持物理速度(稍后会手动清空)
-						Pawn->TeleportTo(SafeLocation, SafeRotation, false, true);
-
-						// 极其关键：强行把玩家控制器的相机视角也拧过去，防止镜头滞后导致的平移拖影！
-						PC->SetControlRotation(SafeRotation);
-
-						// 【核心防坠落点穴】：跨图落地悬浮锁死！
-						// 刚刚生成的新肉体被传送到 5 公里外，此时脚下的数据层地板还没流送过来，
-						// 必须在这里立刻点穴，让新肉体悬浮在纯黑的虚空中绝对静止等待！
-						if (ACharacter* PlayerCharacter = Cast<ACharacter>(Pawn))
-						{
-							// 提取角色移动组件 (CMC)
-							if (UCharacterMovementComponent* CMC = PlayerCharacter->GetCharacterMovement())
-							{
-								// 物理闭包：挂起所有重力与动力计算，彻底冻结肉体
-								CMC->DisableMovement();
-							}
-						}
-
-						// 记录成功斩杀旧坐标并落地新坐标的胜利日志
-						UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 💥 黑幕掩护瞬移成功！强行穿插至目标路由: %s"), *GI->PendingTravelRoute->GetName());
-					}
+					// 跨图落地是在黑幕下进行的，传入 true 强制刷新纹理 MIP
+					StreamingSub->RefreshSlidingWindow(TargetDest->BoundDataLayer, true);
 				}
 			}
 
-			// 物理坐标锁死完成，彻底撕毁车票！
-			// 防止玩家在新图死后重生，大管家手里的车票还在，导致无限幽灵传送的恶性 Bug
-			GI->PendingTravelRoute = nullptr;
+			// 核心安全获取：提取绝对真实的本地玩家控制器，防死无缝漫游产生的幽灵假身
+			if (APlayerController* PC = GetRealPlayerController(World))
+			{
+				// 提取玩家控制器当前附身的新世界肉体 (Pawn)
+				if (APawn* Pawn = PC->GetPawn())
+				{
+					// 提取目标点的绝对坐标，Z轴强制增加 15cm 的高度冗余，作为完美防穿模的下落空间
+					FVector SafeLocation = TargetDest->GetActorLocation() + FVector(0.0f, 0.0f, 15.0f);
+
+					// 提取目标点设定的视口朝向
+					FRotator SafeRotation = TargetDest->GetActorRotation();
+
+					// 趁着现在屏幕全黑，强行折叠宇宙坐标，将玩家肉体瞬移至接机点！
+					// false, true 分别代表：不进行碰撞测试(强扫)，且瞬移后维持物理速度(稍后会手动清空)
+					Pawn->TeleportTo(SafeLocation, SafeRotation, false, true);
+
+					// 极其关键：强行把玩家控制器的相机视角也拧过去，防止镜头滞后导致的平移拖影！
+					PC->SetControlRotation(SafeRotation);
+
+					// 【核心防坠落点穴】：跨图落地悬浮锁死！
+					// 刚刚生成的新肉体被传送到 5 公里外，此时脚下的数据层地板还没流送过来，
+					// 必须在这里立刻点穴，让新肉体悬浮在纯黑的虚空中绝对静止等待！
+					if (ACharacter* PlayerCharacter = Cast<ACharacter>(Pawn))
+					{
+						// 提取角色移动组件 (CMC)
+						if (UCharacterMovementComponent* CMC = PlayerCharacter->GetCharacterMovement())
+						{
+							// 物理闭包：挂起所有重力与动力计算，彻底冻结肉体
+							CMC->DisableMovement();
+						}
+					}
+
+					// 记录成功斩杀旧坐标并落地新坐标的胜利日志
+					if (GI->PendingTravelRoute)
+					{
+						UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 💥 黑幕掩护瞬移成功！强行穿插至目标路由: %s"), *GI->PendingTravelRoute->GetName());
+					}
+					else
+					{
+						UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 💥 黑幕掩护瞬移成功！客机强行穿插至目标接机点"));
+					}
+				}
+			}
 		}
+
+		// 物理坐标锁死完成，彻底撕毁车票！
+		// 防止玩家在新图死后重生，大管家手里的车票还在，导致无限幽灵传送的恶性 Bug
+		GI->PendingTravelRoute = nullptr;
 	}
 }
 
