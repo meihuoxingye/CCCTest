@@ -40,7 +40,7 @@ public:
 
 	// 副机：动作 3 —— 寻找大厅
 	UFUNCTION(BlueprintCallable, Category = "EOS|Lobby")
-	void FindEOSLobbies();
+	void FindEOSLobbies(ULobbyConfigAsset* LobbyConfig = nullptr);
 
 	// 副机：加入大厅并通过 P2P 隧道穿梭（被 FindEOSLobbies 自动调用）
 	void JoinEOSLobby(const UE::Online::FLobbyId& LobbyIdToJoin);

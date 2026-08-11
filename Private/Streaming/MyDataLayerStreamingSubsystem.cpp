@@ -8,6 +8,8 @@
 #include "Engine/Engine.h"
 #include "TimerManager.h" // 【新增】：引入引擎定时器管理器
 
+#include "Game/MyGameInstance.h"
+
 // ==============================================================================
 // 核心生命周期与初始化 (Lifecycle & Initialization)
 // ==============================================================================
@@ -236,6 +238,41 @@ void UMyDataLayerStreamingSubsystem::DebugPrintDataLayerStates()
 			// 安全色标绿处理
 			FColor MsgColor = (ArtState == EDataLayerRuntimeState::Activated) ? FColor::Green : FColor::White;
 			if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 15.f, MsgColor, FString::Printf(TEXT("Zone %d [美术 Art]:      %s"), i, *StateStr));
+		}
+	}
+}
+
+void UMyDataLayerStreamingSubsystem::ResolveStarterDataLayer(const UDataLayerAsset* StarterLayer)
+{
+	// 安全拦截：空资产直接驳回
+	if (!StarterLayer) return;
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>();
+	// 【架构统一】：严格使用 UE5.8 标准的 DataLayerManager
+	UDataLayerManager* DLManager = UDataLayerManager::GetDataLayerManager(World);
+
+	if (GI && DLManager)
+	{
+		FString CurrentMapName = World->GetMapName();
+
+		// 【核心架构：O(0) 性能损耗的数据层阻断】
+		// 查大管家字典，如果这个图之前来过，说明是“回访”
+		if (GI->VisitedMaps.Contains(CurrentMapName))
+		{
+			// 回访地图：直接从底层将状态锁死为 Unloaded，彻底阻断初始角色（假人）的硬盘流送与实例化
+			DLManager->SetDataLayerRuntimeState(StarterLayer, EDataLayerRuntimeState::Unloaded);
+			UE_LOG(LogTemp, Warning, TEXT("🚫 [DataLayer管线] 回访地图 %s，已阻断初始预设角色的加载！"), *CurrentMapName);
+		}
+		else
+		{
+			// 首次开荒：激活数据层，让关卡中手动摆放的角色正常加载，供玩家夺舍
+			DLManager->SetDataLayerRuntimeState(StarterLayer, EDataLayerRuntimeState::Activated);
+			// 将当前地图名称正式登记录入大管家的历史访问名单，打上“已开荒”烙印，防止下次进入产生双重肉体
+			GI->VisitedMaps.Add(CurrentMapName);
+			UE_LOG(LogTemp, Warning, TEXT("✅ [DataLayer管线] 首次进入 %s，初始预设角色已激活！"), *CurrentMapName);
 		}
 	}
 }

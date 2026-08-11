@@ -15,7 +15,6 @@ USTRUCT(BlueprintType)
 struct FMapTransitionConfig
 {
 	GENERATED_BODY()
-
 public:
 
 	// 离开本地图时的表现 (本世界为主)：播放“熄屏/闭眼”遮罩 UI 的软引用
@@ -48,7 +47,6 @@ class CCC_API UMyGameInstance : public UGameInstance
 {
 	GENERATED_BODY()
 
-
 	// ==============================================================================
 	// 核心生命周期与组件 (Core Lifecycle & Components)
 	// ==============================================================================
@@ -62,20 +60,27 @@ public:
 
 
 	// ==============================================================================
-	// 大一统传送路由管线 (Universal Routing Pipeline)
+	// 跨地图核心记忆库 (Cross-Map Memory)
 	// ==============================================================================
 public:
 
-	UPROPERTY(Transient)
-	TObjectPtr<class UTeleportRoute> PendingTravelRoute;
+	// 记录已访问地图的集合，跨地图跳转不销毁。用于大世界流送中心判定是否压制开荒数据层
+	UPROPERTY()
+	TSet<FString> VisitedMaps;
 
-	// 【核心新增】：必须记录黑幕 UI 指针，用于在同地图中物理抹杀它，防黑屏死锁
-	UPROPERTY(Transient)
-	TObjectPtr<class UMyScreenOffWidget> ActiveScreenOffUI;
+	// 1. 玩家真身记忆 (网络ID -> 离开时正在控制的蓝图类)，用于 RestartPlayer 捏造玩家真身
+	// 【架构界限】：此字典仅为“真人玩家”提供跨地图重连的物理凭证。
+	UPROPERTY()
+	TMap<FString, TSubclassOf<class ATopCharacter>> PlayerClassMemory;
+
+	// 2. 全小队图纸记忆库！由 GameMode 的 FriendlyRoster 统一管理打包装车
+	// 无论当前有没有人控制，只要是小队成员，全部存入此库跨界，由落地管线统一释放！
+	UPROPERTY()
+	TArray<TSubclassOf<class ATopCharacter>> SquadClassMemory;
 
 
 	// ==============================================================================
-	// 伪加载管线 UI 管理 (Fake Loading Pipeline UI)
+	// 转场配置与字典 (Transition Config & Registry)
 	// ==============================================================================
 public:
 
@@ -106,6 +111,16 @@ public:
 	UPROPERTY(Transient)
 	FName PendingTargetMapName;
 
+
+	// ==============================================================================
+	// 表现层总枢纽：纯净 UI 管线 (Presentation Layer: Pure UI Pipeline)
+	// ==============================================================================
+public:
+
+	// 必须记录黑幕 UI 指针，用于在同地图中物理抹杀它，防黑屏死锁
+	UPROPERTY(Transient)
+	TObjectPtr<class UMyScreenOffWidget> ActiveScreenOffUI;
+
 	// 跨地图或同地图漫游起航前，根据配置拉起指定的熄屏闭合 UI
 	UFUNCTION(BlueprintCallable, Category = "Loading")
 	void PlayScreenOffPhaseUI(TSoftClassPtr<class UMyScreenOffWidget> ScreenOffUIClass, float InDuration);
@@ -133,27 +148,20 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Loading")
 	FORCEINLINE bool IsEngineReady() const { return bEngineIsReady; }
 
-	// 【核心新增】：同地图专属转场入口，完全复用跨地图 UI 状态机
-	UFUNCTION(BlueprintCallable, Category = "MapTravel")
-	void ExecuteSameMapTransition(AActor* TeleportingActor, const FTransform& TargetTransform);
-
-
 private:
 
 	// 完美保命符：通过 UPROPERTY 死死抓住新世界的加载 UI 指针，防 GC 误杀导致退场断层
 	UPROPERTY(Transient)
 	TObjectPtr<class UMyLoadingScreenWidget> ActiveLoadingScreenUI;
 
+	// 底层渲染断路器扩展，用于在渲染管线末端强制涂黑画面，彻底抹除转场初期的光追残影与闪烁
+	TSharedPtr<class FBlackoutExtension, ESPMode::ThreadSafe> BlackoutExt;
+
 	// 驱动大管家最高主宰倒计时（最少等待时间契约）的物理定时器句柄
 	FTimerHandle FakeLoadingTimerHandle;
 
 	// 自动化轮询引擎底层流送状态的高频雷达定时器句柄
 	FTimerHandle EngineReadyPollTimerHandle;
-
-	FTimerHandle SameMapScreenOffTimerHandle;
-
-	// 底层渲染断路器扩展，用于在渲染管线末端强制涂黑画面，彻底抹除转场初期的光追残影与闪烁
-	TSharedPtr<class FBlackoutExtension, ESPMode::ThreadSafe> BlackoutExt;
 
 	// 绑定引擎底层流送暂停挂起钩子的多线程委托实体
 	FBeginStreamingPauseDelegate BeginStreamingPauseDelegate;
@@ -170,6 +178,9 @@ private:
 	// 高频雷达的执行体：底层自动化侦测函数，每隔 0.05 秒轮询拷问一次引擎的真实流送状态
 	void PollEngineReadyStatus();
 
+	// 内部收尾核验函数：当且仅当引擎物理就绪且时间契约到期时，安全触发 UI 动画退场
+	void CheckAndHideLoadingScreen();
+
 	// 记录加载进度条正式上屏播放的绝对物理时间
 	double UIStartTime = 0.0;
 
@@ -185,9 +196,31 @@ private:
 	// 核心时间探针：专门记录 Persistent 关卡进内存的绝对物理时间戳，用于反算引擎加载耗时
 	double PersistentLevelLoadTime = 0.0;
 
-	// 内部收尾核验函数：当且仅当引擎物理就绪且时间契约到期时，安全触发 UI 动画退场
-	void CheckAndHideLoadingScreen();
 
-	// 【核心新增】：黑幕完全闭合后触发的物理折叠与 UI 换挡逻辑
+	// ==============================================================================
+	// 网络表现协同与同图握手 (Network Sync & Same-Map Handshake)
+	// ==============================================================================
+public:
+
+	// 用于缓存跨图连入后的目标路由，落地时供服务器判定出生点
+	UPROPERTY(Transient)
+	TObjectPtr<class UTeleportRoute> PendingTravelRoute;
+
+	// 【核心重构】：同地图专属转场入口（表现层统筹）
+	// 拉起黑幕，剥离物理操作，将后续的物理执行全权交由网络组件跨网线握手
+	UFUNCTION(BlueprintCallable, Category = "MapTravel")
+	void ExecuteSameMapTransition(AActor* TeleportingActor, const FTransform& TargetTransform);
+
+	// 接收服务器物理搬运完毕的反馈后，执行本地数据层真替换及退场表现
+	UFUNCTION(BlueprintCallable, Category = "MapTravel")
+	void FinalizeSameMapTransition();
+
+private:
+
+	// 【网络同步重构】：黑幕 100% 闭合后的表现层回调
+	// 铁律：客机本地坚决不碰 TeleportTo！仅向服务器发送 Client_Ready 信号，等待服务器上帝视角排队搬运
 	void OnSameMapScreenOffFinished(TWeakObjectPtr<AActor> TeleportingActor, FTransform TargetTransform);
+
+	// 挂起同地图转场状态机的物理倒计时句柄
+	FTimerHandle SameMapScreenOffTimerHandle;
 };

@@ -35,6 +35,9 @@
 // 【修复 UE5.8】：替换为 Manager，DataLayer 状态改变委托已被移至此处
 #include "WorldPartition/DataLayer/DataLayerManager.h"
 
+// 【新增】：引入大一统传送子系统，用于 O(1) 缓存注册
+#include "MapTravel/MyMapTravelSubsystem.h"
+
 
 // Sets default values
 ATopCharacter::ATopCharacter()
@@ -53,10 +56,15 @@ ATopCharacter::ATopCharacter()
 
 	// 【新增】：初始化交互探测球
 	InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
+	// 将交互探测球挂载到角色的根组件（胶囊体）上，跟随肉体实时移动
 	InteractionSphere->SetupAttachment(RootComponent);
+	// 划定 150 厘米的雷达探测半径，作为玩家可交互的物理极限距离
 	InteractionSphere->SetSphereRadius(150.f);
+	// 纯逻辑探测：关闭物理阻挡，仅允许空间查询（Query），节约 Chaos 物理引擎算力
 	InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	// 初始化防御网：默认无视场景中的所有碰撞体，防止被复杂场景频繁唤醒
 	InteractionSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
+	// 精准打击：仅对动态世界物体（WorldDynamic，通常是可交互 Actor）开放重叠（Overlap）响应
 	InteractionSphere->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Overlap);
 }
 
@@ -76,6 +84,15 @@ void ATopCharacter::Tick(float DeltaTime)
 void ATopCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// 【新增】：角色诞生，立刻向大一统传送子系统报到，注入全局 O(1) 物理黑名单缓存！
+	if (UWorld* World = GetWorld())
+	{
+		if (UMyMapTravelSubsystem* TravelSub = World->GetSubsystem<UMyMapTravelSubsystem>())
+		{
+			TravelSub->RegisterCharacterToCache(this);
+		}
+	}
 
 	// 允许没有控制器附身的躯壳继续受物理引擎控制（保持重力下落和惯性）
 	// 这行代码会打破虚幻“无魂则静”的默认优化，彻底修复半空切人定格的 Bug！
@@ -122,63 +139,97 @@ void ATopCharacter::BeginPlay()
 	}
 }
 
-void ATopCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+void ATopCharacter::PerformCleanup()
 {
-	// 【修复 UE5.8】：从管理器 (Manager) 注销警报，防止引擎在 GC 前给野指针发消息
+	// 状态锁校验：如果清理流程已经执行过，直接驳回以防止重复注销导致的崩溃
+	if (bHasDoneCleanup) return;
+
+	// ===================== 【生命周期闭环：统一注销】 =====================
+
+	// 安全提取当前世界上下文
 	if (UWorld* World = GetWorld())
 	{
+		// 提取虚幻5标准的大世界数据层管理器
 		if (UDataLayerManager* DLManager = UDataLayerManager::GetDataLayerManager(World))
 		{
+			// 彻底断开数据层状态变化的委托监听，物理切断引擎底层的无效广播
 			DLManager->OnDataLayerInstanceRuntimeStateChanged.RemoveDynamic(this, &ATopCharacter::OnDataLayerStateChanged);
 		}
 	}
 
-	// 使用局部的 const 原始指针来接取配置资产（推荐的最佳实践）
-	// 这样可以确保在当前的 BeginPlay 逻辑里，没有任何人能意外修改 Config 内部的数值
+	// 提取角色属性配置以判定其阵营归属
 	const UCharacterAttributeDataAsset* Config = AttributeConfig.Get();
 
-	// if (!Config) return;
-
-
-	// ===================== 【友军阵亡自动注销】 =====================
+	// 阵营校验：仅当该角色属于玩家的“友方”小队成员时才执行注销
 	if (Config && Config->CharacterType == ECharacterType::Friendly)
 	{
-		if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(GetWorld()->GetAuthGameMode()))
+		// 再次安全提取当前世界上下文
+		if (UWorld* World = GetWorld())
 		{
-			// 将此角色从友军名册中移除，名册内部的变动会自动触发整个 UI 视图层的刷新
-			GM->UnregisterFriendly(this);
+			// 提取当前世界的权威游戏模式 (仅服务器端有效)
+			if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(World->GetAuthGameMode()))
+			{
+				// 无论角色是被伤害击杀，还是在跨地图时被系统强制清除，必须确保它从 GameMode 的大名单里滚蛋
+				GM->UnregisterFriendly(this);
+				UE_LOG(LogTemp, Warning, TEXT("🗑️ [小队名册] 角色肉体被物理销毁/收回，已自动从系统名册中彻底注销: %s"), *GetName());
+			}
 		}
 	}
+
+	// 落下原子锁：宣告该角色的底层清盘流程已物理终结，封死重入路径
+	bHasDoneCleanup = true;
+}
+
+void ATopCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// 【新增】：角色死亡或被跨图销毁，必须立刻从大一统缓存中除名，彻底防止 Set 内存膨胀！
+	if (UWorld* World = GetWorld())
+	{
+		if (UMyMapTravelSubsystem* TravelSub = World->GetSubsystem<UMyMapTravelSubsystem>())
+		{
+			TravelSub->UnregisterCharacterFromCache(this);
+		}
+	}
+
+	// 【架构优化实装】：统一清理
+	PerformCleanup();
 
 	Super::EndPlay(EndPlayReason);
 }
 
 void ATopCharacter::OnDataLayerStateChanged(const UDataLayerInstance* DataLayer, EDataLayerRuntimeState State)
 {
-	// 【终极加固】：如果对象正在销毁或世界正在关闭，拒绝响应
+	// 终极加固：如果角色自身正在被销毁，或者整个世界正在关闭/切换，拒绝响应以防野指针
 	if (!IsValid(this) || !GetWorld() || GetWorld()->bIsTearingDown)
 	{
 		return;
 	}
 
+	// 状态过滤：仅抓取数据层被彻底卸载（Unloaded）的致命时刻，无视其他中间状态
 	if (!DataLayer || State != EDataLayerRuntimeState::Unloaded)
 	{
 		return;
 	}
 
-	// 自我裁决：检查崩塌的数据层是否在自身的依赖列表中
+	// 声明状态标记：用于记录自身所依赖的数据层是否正在崩塌
 	bool bIsMyLayerCollapsing = false;
+
+	// 提取正在卸载的数据层资产底层指针
 	const UDataLayerAsset* CollapsingAsset = DataLayer->GetAsset();
 
+	// 遍历当前角色实体所绑定的所有数据层资产
 	for (const UDataLayerAsset* MyAsset : GetDataLayerAssets())
 	{
+		// 匹配校验：如果自身绑定的某一层刚好就是正在卸载的这层
 		if (MyAsset == CollapsingAsset)
 		{
+			// 命中目标，将崩塌标记置为真并跳出循环
 			bIsMyLayerCollapsing = true;
 			break;
 		}
 	}
 
+	// 确认大难临头：如果脚下的大地正在崩溃，立刻启动隔离管线防止卡位或崩溃
 	if (bIsMyLayerCollapsing)
 	{
 		ExecuteSelfSanitization();
@@ -189,31 +240,59 @@ void ATopCharacter::ExecuteSelfSanitization()
 {
 	UE_LOG(LogTemp, Warning, TEXT(">>> [响应式自治] 角色 %s 侦测到所在 physical/solid assets 数据层即将卸载，开始自我净化！"), *GetName());
 
+	// 【架构优化实装】：功成身退，断开监听，节省 CPU 广播开销
+	if (UWorld* World = GetWorld())
+	{
+		// 获取数据层管理器，准备提前断开监听，节省 CPU 广播开销
+		if (UDataLayerManager* DLManager = UDataLayerManager::GetDataLayerManager(World))
+		{
+			DLManager->OnDataLayerInstanceRuntimeStateChanged.RemoveDynamic(this, &ATopCharacter::OnDataLayerStateChanged);
+		}
+	}
+
 	// 从总线名册中自首注销
 	if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(GetWorld()->GetAuthGameMode()))
 	{
 		GM->FriendlyRoster.Remove(this);
 	}
 
-	/*
-	// 只有在输入组件有效时才执行阻断
-	if (InputComponent)
-	{
-		if (UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(InputComponent))
-		{
-			EIC->ClearActionBindings();
-		}
-	}
-	*/
-
 	// 执行“完美软禁”，保留组件结构但封死一切接收路径
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
+		// 清理物理键盘/手柄在这一帧残留的按压状态，防止软禁期间持续触发旧的输入指令
 		PC->FlushPressedKeys();
+		// 彻底剥夺控制器接受任何新输入事件的权限，切断玩家与肉体的逻辑交互
 		PC->DisableInput(PC);
+		// 强制忽略所有移动轴（WASD/左摇杆）的输入指令，锁死位移
 		PC->SetIgnoreMoveInput(true);
+		// 强制忽略所有视角轴（鼠标/右摇杆）的输入指令，锁死镜头转动
 		PC->SetIgnoreLookInput(true);
 	}
+
+	// 【架构优化实装】：物理层面的彻底“软禁”，防止卡位
+	// 渲染层剥离：将角色从画面中完全隐藏，防止在地形消失后玩家看到一个悬空穿模的模型
+	SetActorHiddenInGame(true);
+	// 物理层剥离：彻底关闭胶囊体和网格体的物理碰撞，杜绝其变成一堵“隐形的墙”卡住其他存活玩家
+	SetActorEnableCollision(false);
+	// 算力层剥离：强行掐断该 Actor 的每帧更新 (Tick)，在即将被销毁的最后阶段释放宝贵的 CPU 算力
+	SetActorTickEnabled(false);
+
+	// 提取角色的核心移动组件，准备进行物理休眠
+	if (UCharacterMovementComponent* CMC = GetCharacterMovement())
+	{
+		// 动量清除：瞬间清空角色当前在空中的坠落速度或地面的奔跑惯性，使其绝对动能归零
+		CMC->StopMovementImmediately();
+		// 物理休眠：彻底挂起移动组件的内置状态机与重力计算，将其变成一个完全静止的死物
+		CMC->DisableMovement();
+	}
+}
+
+void ATopCharacter::Destroyed()
+{
+	// 【架构优化实装】：统一清理
+	PerformCleanup();
+
+	Super::Destroyed();
 }
 
 #pragma endregion
@@ -223,7 +302,6 @@ void ATopCharacter::ExecuteSelfSanitization()
 // ==============================================================================
 #pragma region
 
-// Called to bind functionality to input
 void ATopCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
@@ -232,15 +310,20 @@ void ATopCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	// 这里 100% 能拿到有效的 LocalPlayer，彻底告别开局失灵！
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
+		// 从本地玩家对象中提取增强输入子系统
 		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
 		{
+			// 校验设计师是否在蓝图中配置了默认的输入映射上下文
 			if (DefaultMappingContext)
 			{
+				// 【重入优化实装】：先移除旧的（如果存在），防止因多次 Possess 导致的按键权重混乱
+				Subsystem->RemoveMappingContext(DefaultMappingContext);
 				Subsystem->AddMappingContext(DefaultMappingContext, 1);
 			}
 		}
 	}
 
+	// 强制将基础输入组件转换为虚幻5的增强输入组件，若失败则直接断言崩溃 (防呆)
 	UEnhancedInputComponent* EnhancedInputComponent = CastChecked<UEnhancedInputComponent>(PlayerInputComponent);
 
 	// 绑定回调
@@ -260,6 +343,10 @@ void ATopCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 
 void ATopCharacter::Move(const FInputActionValue& InputActionValue)
 {
+	// 【绝对防线】：如果底层传来的不是 Axis2D，立刻驳回！
+	// 防止由于传送或控制权剥夺导致的 Enhanced Input 强行发送空事件引发 TVariant.h 崩溃
+	if (InputActionValue.GetValueType() != EInputActionValueType::Axis2D) return;
+
 	// 移动输入动作是一个 Axis2D 类型，要获取 X 和 Y 轴数据
 	// InputActionValue.Get,将键盘传入的数据转换为二维向量
 	// 键盘 X 表示 A/D，键盘 Y 表示 W/S，其中 D、W 为正值
@@ -302,7 +389,7 @@ void ATopCharacter::AttackEnd()
 		// 【新增】：检测按键抬起事件
 		UE_LOG(LogTemp, Warning, TEXT("[输入诊断] <<< 鼠标左键 (Attack) 已抬起，发送停火指令 <<<"));
 		//---------
-		
+
 		// 告诉战斗组件：停止射击
 		MCComponent->StopWeaponFire();
 	}
@@ -317,8 +404,10 @@ void ATopCharacter::AttackEnd()
 
 void ATopCharacter::OnInteractSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
+	// 三重拦截网：确认指针有效、绝对不能是玩家自身、且必须在代码或蓝图层面实现了交互接口契约
 	if (OtherActor && OtherActor != this && OtherActor->Implements<UMyInteractableInterface>())
 	{
+		// 将合法的交互对象安全压入雷达缓存队列（防重加入），等待玩家按下按键时进行距离与权重比拼
 		InteractableActorsInRange.AddUnique(OtherActor);
 
 		// 【测谎仪节点 1 - 绿色】：验证物理边界撞击以及接口识别
@@ -389,8 +478,8 @@ AActor* ATopCharacter::GetClosestInteractableActor()
 		// 2. IsActorBeingDestroyed：防止物体正在播放销毁动画、即将死亡，但还没被彻底清出内存。
 		if (!IsValid(CurrentActor) || CurrentActor->IsActorBeingDestroyed())
 		{
-			// 如果碰到死人，直接把它从雷达名单里踢出去，防止下次按键时再查一遍
-			InteractableActorsInRange.RemoveAt(i);
+			// 【性能优化实装】：使用 RemoveAtSwap 替代 RemoveAt，O(1) 极速删除，且无缝配合倒序遍历！
+			InteractableActorsInRange.RemoveAtSwap(i);
 			// 跳过本次循环，换下一个选手上台
 			continue;
 		}
@@ -400,9 +489,13 @@ AActor* ATopCharacter::GetClosestInteractableActor()
 		const int32 CurrentPriority = IMyInteractableInterface::Execute_GetInteractionPriority(CurrentActor);
 
 		// 2. 测算距离：计算主角和选手之间的【距离平方】。
-		// 【性能压榨】：为什么用 DistSquared 而不是 Distance？
+		// 【性能压榨】：为什么用 SizeSquared/DistSquared 而不是 Distance？
 		// 算真实距离需要对坐标求算数平方根，CPU 开销极大。而比较远近大小，直接比平方值效果完全一样，这是 3A 级优化的基本素养。
-		const double DistanceSq = FVector::DistSquared(PlayerLocation, CurrentActor->GetActorLocation());
+
+		// 【终极手感优化：深度轴惩罚实装 (针对 3D 地图伪 2.5D 视角)】
+		FVector Diff = CurrentActor->GetActorLocation() - PlayerLocation;
+		Diff.Y *= 2.0f; // 赋予深度轴 (Y轴) 2倍的感知惩罚，让系统更倾向于选择“同一排”的物体
+		const double DistanceSq = Diff.SizeSquared();
 
 		// 【第一层筛选：绝对阶级压制】
 		// 如果当前选手的优先级，严格大于现在的擂主（比如任务 NPC 优先级高于地上的普通树枝）
@@ -443,15 +536,19 @@ void ATopCharacter::OnInteractKeyPressed()
 	// 调用筛选函数，获取当前范围内优先级最高且距离最近的交互目标
 	if (AActor* TargetActor = GetClosestInteractableActor())
 	{
-		if (GEngine)
+		// 【原子性保护实装】：再次确认目标依然健康，防止在算法运行的一瞬间目标被服务器 Eliminate 
+		if (IsValid(TargetActor) && !TargetActor->IsActorBeingDestroyed())
 		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Cyan, FString::Printf(TEXT("[锁定成功] 最终决出的最优目标是: %s！正在向其投掷 Execute_Interact 接口调用命令！"), *TargetActor->GetName()));
-		}
+			if (GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Cyan, FString::Printf(TEXT("[锁定成功] 最终决出的最优目标是: %s！正在向其投掷 Execute_Interact 接口调用命令！"), *TargetActor->GetName()));
+			}
 
-		// 确认目标有效后，通过蓝图接口系统 (Interface) 通知目标执行具体的交互逻辑
-		// 将玩家自身 (this) 作为交互的发起者 (Instigator) 传递给目标
-		// 接收者 AMySavePointActor::Interact_Implementation
-		IMyInteractableInterface::Execute_Interact(TargetActor, this);
+			// 确认目标有效后，通过蓝图接口系统 (Interface) 通知目标执行具体的交互逻辑
+			// 将玩家自身 (this) 作为交互的发起者 (Instigator) 传递给目标
+			// 接收者 AMySavePointActor::Interact_Implementation
+			IMyInteractableInterface::Execute_Interact(TargetActor, this);
+		}
 	}
 }
 
@@ -467,16 +564,61 @@ void ATopCharacter::PossessedBy(AController* NewController)
 {
 	Super::PossessedBy(NewController);
 
+	// 甄别身份：仅当附身者是真实的真人玩家控制器（而非 AI 控制器）时，才执行网络重置逻辑
+	if (NewController && NewController->IsPlayerController())
+	{
+		// 尝试转换为基类玩家控制器，准备执行强制对齐
+		if (APlayerController* PC = Cast<APlayerController>(NewController))
+		{
+			// 【终极网络稳定实装】：强迫客机控制器重新对齐旋转与输入状态，消除换人瞬移与视角闪烁
+			PC->ClientRestart(this);
+		}
+
+		// 获取角色的移动组件，准备清理残留的网络平滑缓存
+		if (UCharacterMovementComponent* CMC = GetCharacterMovement())
+		{
+			// 【2.5D 空中牵引力收尾】：拿回控制器后，坠落阻力恢复默认
+			CMC->BrakingDecelerationFalling = 0.f;
+
+			// 【修复】：使用正确的底层 API。
+			// 彻底清除旧控制器（无人/AI）在底层留下的网络平滑数据，
+			// 完美保留当前的物理速度 (Velocity)，消除切换身份 (Proxy) 时的鬼畜抖动。
+			CMC->ResetPredictionData_Client();
+			CMC->ResetPredictionData_Server();
+
+			// 【极致加固】：逼迫服务器立刻执行一次强同步，确保客机夺舍瞬间的绝对坐标毫无抖动回弹！
+			ForceNetUpdate();
+		}
+	}
+
+	// 三元表达式安全提取新控制器的名称，防止空指针导致日志崩溃
 	FString ControllerName = NewController ? NewController->GetName() : TEXT("空(Null)");
 	UE_LOG(LogTemp, Warning, TEXT("⚔️ [Character探针-服务器端] 玩家专属肉体被注入灵魂! Character: %s <- Controller: %s"), *GetName(), *ControllerName);
+}
+
+void ATopCharacter::UnPossessed()
+{
+	Super::UnPossessed();
+
+	// 【2.5D 移动修正实装】：空中转向的“牵引力”补偿
+	if (UCharacterMovementComponent* CMC = GetCharacterMovement())
+	{
+		// 稍微增加一点空气阻力，防止无主躯壳失去控制器后，被惯性甩出平台
+		CMC->BrakingDecelerationFalling = 1500.f;
+	}
 }
 
 void ATopCharacter::OnRep_Controller()
 {
 	Super::OnRep_Controller();
 
+	// 提取客户端本地刚刚同步到的最新控制器指针
 	AController* CurrentController = GetController();
+
+	// 三元表达式安全提取名称准备打印，防止同步中途指针丢失引发崩溃
 	FString ControllerName = CurrentController ? CurrentController->GetName() : TEXT("空(Null)");
+
+	// 客户端专属行为：向控制台打印客机本地成功接收到服务器控制器下发数据的探针日志
 	UE_LOG(LogTemp, Warning, TEXT("📡 [Character探针-客户端端] 玩家专属肉体收到灵魂同步广播! Character: %s <- Controller: %s"), *GetName(), *ControllerName);
 }
 

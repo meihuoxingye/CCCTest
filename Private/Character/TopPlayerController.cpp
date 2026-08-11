@@ -24,6 +24,9 @@
 
 #include "Engine/GameViewportClient.h"
 
+#include "MapTravel/NetComponent/MyMapTravelNetComponent.h"
+
+
 ATopPlayerController::ATopPlayerController()
 {
 	/**/
@@ -44,6 +47,9 @@ ATopPlayerController::ATopPlayerController()
 
 	// 出生时，给自己挂上 UI 统筹组件背包，实现 UI 逻辑的彻底模块化解耦
 	UIHandlerComp = CreateDefaultSubobject<UMyUIHandlerComponent>(TEXT("UIHandlerComponent"));
+
+	// 👇 【新增】：出生时，挂载网络传送同步组件，彻底接管同地图瞬间移动的联机防抖与UI状态机
+	MapTravelNetComp = CreateDefaultSubobject<UMyMapTravelNetComponent>(TEXT("MapTravelNetComponent"));
 }
 
 // ==============================================================================

@@ -313,7 +313,7 @@ void UMyLobbySubsystem::StartEOSGame(UTeleportRoute* TargetRoute)
 	}
 }
 
-void UMyLobbySubsystem::FindEOSLobbies()
+void UMyLobbySubsystem::FindEOSLobbies(ULobbyConfigAsset* LobbyConfig)
 {
 	// 引入 OSSv2 命名空间
 	using namespace UE::Online;
@@ -345,26 +345,43 @@ void UMyLobbySubsystem::FindEOSLobbies()
 	// 限定单次最大返回的房间数量为 10，防止内存或 UI 溢出
 	Params.MaxResults = 10;
 
-	// 【修复 1】：FFindLobbiesSearchFilter -> FFindLobbySearchFilter
 	// 构建单一的搜索过滤条件
 	FFindLobbySearchFilter Filter;
-	// 指定要匹配的键名
-	Filter.AttributeName = TEXT("GameMode");
 	// 指定比较操作符为严格相等 (Equals)
 	Filter.ComparisonOp = ESchemaAttributeComparisonOp::Equals;
-	// 指定要匹配的值（需与建房时的兜底或资产配置一致）
-	Filter.ComparisonValue = FSchemaVariant(FString(TEXT("Coop")));
-	// 将该条件加入到搜索参数的过滤器数组中
+
+	// ==============================================================================
+	// 【核心解耦：数据驱动搜房 (Data-Driven Search)】
+	// 
+	// 为什么加这几行：
+	// 坚决抛弃硬编码！既然建房时使用了数据资产 (LobbyConfig) 来动态决定房间的标签 (MyRoomType)，
+	// 搜房时也必须将对应的配置资产传进来进行解析。
+	// 这样，如果关卡策划想增加一个 "PVP_Arena" (竞技场) 模式，他们只需要在编辑器里新建一个数据资产并改个字，
+	// 就能瞬间实现不同玩法房间的物理级隔离与精准匹配，全程不需要程序员动一行 C++ 代码。
+	// ==============================================================================
+	if (LobbyConfig)
+	{
+		// 提取与建房时一模一样的属性键名 (此键名已在 DefaultEngine.ini 中合法注册)
+		Filter.AttributeName = TEXT("MyRoomType");
+
+		// 动态提取数据资产中策划填写的真实房间模式值 (如 "PVE_Story" 或 "PVP_Arena")
+		Filter.ComparisonValue = FSchemaVariant(LobbyConfig->DefaultRoomType);
+
+		// 打印带有具体模式名称的动态日志
+		INJECTOR_LOG(Warning, TEXT("🔍 正在广域网搜索 [%s] 模式的集结号..."), *LobbyConfig->DefaultRoomType);
+	}
+	else
+	{
+		// 为什么加兜底：
+		// 防止 UI 蓝图节点漏传资产时直接崩溃。如果没传资产，就退回搜索默认的 Coop 房间。
+		Filter.AttributeName = TEXT("GameMode");
+		Filter.ComparisonValue = FSchemaVariant(FString(TEXT("Coop")));
+
+		INJECTOR_LOG(Warning, TEXT("🔍 未检测到配置资产，正在广域网搜索默认 [Coop] 集结号..."));
+	}
+
+	// 将动态生成的条件加入到搜索参数的过滤器数组中
 	Params.Filters.Add(Filter);
-
-	// ==============================================================================
-	// 【进阶加固 D 预留】：空房间过滤与精细化分页
-	// TODO: 后续如果用户量增大，可在此利用 LobbyConfigAsset 传入的 BucketId 进行强过滤。
-	// 也可增加自定义属性如 "AvailableSlots > 0" 的二次 Filter，从源头掐断满员或空废房间。
-	// ==============================================================================
-
-	// 打印搜房日志
-	INJECTOR_LOG(Warning, TEXT("正在广域网搜索主机的集结号..."));
 
 	// 捕获弱指针，防止回调时类已死亡
 	TWeakObjectPtr<UMyLobbySubsystem> WeakSelf(this);

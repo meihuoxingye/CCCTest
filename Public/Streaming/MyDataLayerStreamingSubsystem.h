@@ -52,16 +52,12 @@ public:
 	// 动态滑动窗口与流送管线 (Dynamic Sliding Window & Streaming Pipeline)
 	// ==============================================================================
 public:
-	// ==============================================================================
 	// 【蓝图调用规范】：必须在每个具体关卡蓝图 (Level Blueprint) 的 BeginPlay 中首发调用此节点！
 	// 架构意义：C++ 仅提供底层的数学推演与内存流送引擎，关卡蓝图则作为“数据配置文件”。
 	// 必须由关卡设计师将当前地图专属的区域序列（ZoneSequence）喂给本系统，实现纯数据驱动 (Data-Driven)。
-	// ==============================================================================
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void RegisterZoneSequence(const TArray<FZoneDataLayerPair>& InSequence);
 
-
-	// ==============================================================================
 	// 根据当前触发的数据层，自动推演并刷新周围距离为 0、1、>=2 的数据层内存状态。
 	// 【蓝图调用规范】：在关卡蓝图 BeginPlay 调用完 RegisterZoneSequence 后，必须紧接着调用一次此节点，
 	// 将玩家出生点所在的数据层传入，完成第一波初始地块的物理加载（防止开局掉入虚空）。
@@ -69,7 +65,6 @@ public:
 	// bIsTeleporting: 是否处于黑幕传送掩护下。如果是，则强制刷新纹理 MIP；如果否（常规步行），则自然流送防卡顿。
 	// - 不勾选 (False)：【常规跑图触发】或【关卡刚加载初始落地时】使用。绝对禁止调用纹理强刷指令，依靠引擎流送器自然演进，保障帧率绝对平滑，无卡顿感。
 	// - 勾选 (True)：【仅限系统级传送】！只有在大管家执行同图/跨图的绝对黑屏掩护下（C++内部调用）才允许为 True。利用黑幕盲区强制压榨显卡刷新 MIP 层级，消除落地后远景模糊的穿帮问题。
-	// ==============================================================================
 	UFUNCTION(BlueprintCallable, Category = "MapTravel")
 	void RefreshSlidingWindow(UDataLayerAsset* TriggeredLayer, bool bIsTeleporting = false);
 
@@ -89,6 +84,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MapTravel|Debug")
 	void DebugPrintDataLayerStates();
 
+
+	// 统筹判断并解析初始开荒数据层（决定是加载预设假人还是在底层彻底物理卸载）
+	void ResolveStarterDataLayer(const UDataLayerAsset* StarterLayer);
+
+
 	// ==============================================================================
 	// 内部状态锁与缓存 (Internal State Locks & Cache)
 	// ==============================================================================
@@ -100,4 +100,6 @@ private:
 	// 滑动窗口流送序列缓存，由关卡蓝图在初始化时推入
 	UPROPERTY()
 	TArray<FZoneDataLayerPair> ZoneSequence;
+
+
 };

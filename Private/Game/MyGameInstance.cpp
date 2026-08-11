@@ -15,6 +15,15 @@
 #include "UI/Transition/MyScreenOffWidget.h"
 #include "UI/Transition/MyLoadingScreenWidget.h"
 
+#include "Game/MyGameModeBase.h"
+#include "Character/TopCharacter.h"
+#include "Components/CapsuleComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
+
+#include "EngineUtils.h"
+
+#include "MapTravel/NetComponent/MyMapTravelNetComponent.h"
+
 
 // ==============================================================================
 // 核心生命周期与组件 (Core Lifecycle & Components)
@@ -25,6 +34,9 @@ void UMyGameInstance::Init()
 {
 	// 调用父类的原生初始化逻辑
 	Super::Init();
+
+	// 【极致加固】：无论何种方式启动/重启游戏，彻底清空上一局可能残留的哈希表记忆，防止脏数据污染新战局！
+	PlayerClassMemory.Empty();
 
 #if WITH_EDITOR
 	// 强行解锁编辑器 PIE 无缝漫游：直接在控制台管理器中查找控制台变量指针
@@ -295,27 +307,47 @@ void UMyGameInstance::HandleStartTravel(UWorld* CurrentWorld)
 
 void UMyGameInstance::HandleEndTravel(UWorld* NewWorld)
 {
+	if (!NewWorld) return;
+
+	// 1. 【开荒判定】：如果大管家手里没有挂起的车票，说明这是玩家初次启动游戏（开机落地）
+	bool bIsFirstBoot = PendingTargetMapName.IsNone();
+
+	// 提取当前真实落地的地图名（剔除 PIE 前缀）
+	FString CleanCurrentMap = UGameplayStatics::GetCurrentLevelName(NewWorld, true);
+	// 如果是开荒，目标地图名就是当前地图；如果不是，就提取车票上的目标地图名
+	FString CleanTargetMap = bIsFirstBoot ? CleanCurrentMap : FPackageName::GetShortName(PendingTargetMapName.ToString());
+
+	// 2. 【核心防线】：精准跳过无缝漫游的过渡层 (TransitionMap)
+	// 如果不是开荒，且当前落地的地图根本不是我们要去的地图，说明我们掉进了过渡虚空！
+	if (!bIsFirstBoot && !CleanCurrentMap.Contains(CleanTargetMap))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("⏭️ [表现层] 侦测到无缝过渡地图，跳过 UI 唤醒与黑幕解除: %s"), *CleanCurrentMap);
+		return;
+	}
+
+	// ==============================================================================
+	// 无论是开机开荒，还是真正抵达了新世界，都必须立刻解除底层的渲染断路器！
+	// 否则玩家会被永久关在小黑屋里（听声辩位）！
+	// ==============================================================================
 	if (BlackoutExt.IsValid())
 	{
-		// 新世界已在内存中就绪，解除底层渲染断路器，将画面主导权交还给即将上屏的加载 UI
+		// 新世界已就绪，交还画面主导权
 		BlackoutExt->bIsActive = false;
 	}
 
 	// 记录 Persistent Level 落地的确切物理时间戳，作为整个加载计时的绝对零点
 	PersistentLevelLoadTime = FPlatformTime::Seconds();
 
-#if !UE_BUILD_SHIPPING
-	if (GEngine)
+	// 3. 落地 UI 表现
+	if (bIsFirstBoot)
 	{
-		// 在屏幕上打印 Persistent 关卡进内存的时间戳（打包发行版将自动抹除本段开销）
-		GEngine->AddOnScreenDebugMessage(-1, 15.0f, FColor::Yellow, FString::Printf(TEXT("[1] Persistent 进内存时间: %f"), PersistentLevelLoadTime));
+		UE_LOG(LogTemp, Warning, TEXT("🚀 [大管家] 侦测到开荒启动，正在加载初代世界: %s"), *CleanCurrentMap);
+		// 狸猫换太子：给开荒也塞入当前地图名，以便底层查字典拉起兜底的加载 UI
+		PendingTargetMapName = FName(*CleanCurrentMap);
 	}
-	// 在后台日志中输出 Persistent 关卡进内存的时间戳
-	UE_LOG(LogTemp, Warning, TEXT("[TimeTracker] Persistent Level 进内存！绝对时间: %f"), PersistentLevelLoadTime);
-#endif
 
 	// Persistent Level 进内存后立刻拉起 UI 遮罩
-	// 此时引擎流送还没完 (bEngineIsReady 默认为 false)，UI 老老实实走 15% 盲开步进
+	// 此时引擎流送还没完，UI 老老实实走盲开步进
 	PlayLoadingPhaseUI(nullptr);
 
 	if (UWorld* World = GetWorld())
@@ -327,8 +359,9 @@ void UMyGameInstance::HandleEndTravel(UWorld* NewWorld)
 
 void UMyGameInstance::ExecuteSameMapTransition(AActor* TeleportingActor, const FTransform& TargetTransform)
 {
-	// 基础防线：拦截空实体，没有合法的传送发起者则直接中断管线
-	if (!TeleportingActor) return;
+	// 【核心排毒】：彻底删除了 if (!TeleportingActor) return; 这道旧防线！
+	// 因为现在大管家已经被重构成纯粹的表现层（UI）管线，物理逻辑交由网络组件，
+	// 所以即使传入 nullptr，也必须坚决拉起黑屏遮罩，绝不中止管线！
 
 	// 1. 初始化转场锁
 	// 彻底重置大管家内部的转场状态机，确保上一次的遗留状态不会污染本次同图漫游
@@ -452,17 +485,22 @@ void UMyGameInstance::CheckAndHideLoadingScreen()
 
 void UMyGameInstance::OnSameMapScreenOffFinished(TWeakObjectPtr<AActor> TeleportingActor, FTransform TargetTransform)
 {
-	// 1. 绝对黑暗中执行物理瞬移
-	// 内存防线：安全解包弱指针，确保在黑屏等待期间，传送目标实体没有被意外销毁或回收
-	if (AActor* Actor = TeleportingActor.Get())
-	{
-		// 强行折叠空间坐标！
-		// 参数 false：关闭 Sweep 碰撞检测，无视沿途障碍物强行瞬移。
-		// 参数 true：TeleportPhysics，瞬移后保留物理属性（由于我们在前置函数已将其完全冻结，此处绝对安全）。
-		Actor->TeleportTo(TargetTransform.GetLocation(), TargetTransform.GetRotation().Rotator(), false, true);
-	}
+	// 【表现层铁律】：客机本地坚决不执行任何 TeleportTo 物理操作！
+	// 此时本地客户端只负责拉好了纯黑的遮罩。
+	// 立即向服务器发送 Client Ready 信号，耐心等待服务器在绝对黑幕下像搬运棋子一样调度我们的肉体。
 
-	// 【核心对接】：在物理坐标折叠、镜头视口刚切换的同一绝对物理帧，通知子系统进行数据层的真实切换！
+	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+	{
+		if (UMyMapTravelNetComponent* NetComp = PC->FindComponentByClass<UMyMapTravelNetComponent>())
+		{
+			NetComp->Server_NotifyClientReady();
+		}
+	}
+}
+
+void UMyGameInstance::FinalizeSameMapTransition()
+{
+	// 1. 【核心对接】：在物理坐标折叠、镜头视口刚切换的同一绝对物理帧，通知子系统进行数据层的真实切换！
 	// 此时屏幕处于百分之百纯黑状态，玩家绝对看不到脚下地板被卸载和瞬间刷新的过程。
 	// 安全获取世界上下文，准备进行全局子系统的调用
 	if (UWorld* World = GetWorld())
