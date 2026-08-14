@@ -86,7 +86,8 @@ public:
 
 
 	// 统筹判断并解析初始开荒数据层（决定是加载预设假人还是在底层彻底物理卸载）
-	void ResolveStarterDataLayer(const UDataLayerAsset* StarterLayer);
+	// 返回 true 代表是开荒，false 代表是回访
+	bool ResolveStarterDataLayer(const UDataLayerAsset* StarterLayer);
 
 
 	// ==============================================================================

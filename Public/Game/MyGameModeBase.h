@@ -80,17 +80,17 @@ public:
 	// 现在的逻辑为 100% 绝对受控：无缝原肉体放行 -> 中途入场夺舍 -> 查表读取图纸 -> 截取接机点2.5D朝向 -> 手动捏人！
 	virtual void RestartPlayer(AController* NewPlayer) override;
 
+	// 【架构解耦接口】：暴露给外部子系统调用，用于执行受保护的底层 FinishRestartPlayer
+	void ExecuteFinishRestartPlayer(AController* NewPlayer, const FRotator& StartRotation);
+
 	// 离线收尾流程：处理玩家断线退出，让 AI 重新接管躯壳继续战斗
 	// 现状说明：目前没有友军 AI，玩家断线退出后，躯壳会变成无人控制的空壳留在原地。
 	// 预留说明：未来有了友军 AI，可以在这里解开注释，重新生成一个 AI 大脑塞进去，让它继续打。
 	virtual void Logout(AController* Exiting) override;
 
-protected:
-	// 内部辅助：寻找地图原生件 (主机开荒专用)
-	class ATopCharacter* FindInitialStartupShell();
-
-	// 外部内部调用：寻找已经由房主跨图同步过来的专属队友躯壳，传入 TargetClass 进行 DNA 校验防夺舍
-	class ATopCharacter* FindSquadTeammateShell(AController* NewPlayer);
+private:
+	// 记录本局游戏是否为开荒状态 (由 InitGame 源头判定)
+	bool bIsInitialBoot = false;
 
 
 	// ==============================================================================

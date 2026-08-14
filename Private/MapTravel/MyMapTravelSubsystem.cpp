@@ -35,6 +35,10 @@
 
 #include "GameFramework/PlayerStart.h" // 【新增】：解决 APlayerStart 编译器不认识的报错
 
+// 【新增】：引入大世界核心属性图鉴
+#include "World/MyMapAttributeDataAsset.h"
+
+
 // ==============================================================================
 // 内部安全获取真实玩家控制器的工具函数 (防无缝传送假身)
 // ==============================================================================
@@ -104,6 +108,9 @@ void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	// 调用父类逻辑
 	Super::OnWorldBeginPlay(InWorld);
+
+	// 💥【已处决】：彻底废除此处的 CachedStartupShells 全局缓存扫盘！
+	// 房主连入的时序比 OnWorldBeginPlay 还要早，在这里做缓存会导致 RestartPlayer 永远拿到空数组！
 
 	// 获取当前刚落地的世界地图的原始长名称
 	FString CurrentMapName = InWorld.GetMapName();
@@ -1027,6 +1034,16 @@ void UMyMapTravelSubsystem::SnapPlayerToDestination()
 	UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>();
 	if (!GI) return;
 
+	// ==============================================================================
+	// 💥 【终极防线】：因为 InitGame 已经执行了开荒配置，这里一眼就能认出来！
+	// 不查车票，不查字典，只要是开荒，直接退场，绝不碰 AI 队友！
+	// ==============================================================================
+	if (bIsCurrentMapInitialBoot)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🏠 开荒状态保护生效：免除一切队伍强行排队，维持场景初始排放原状！"));
+		return;
+	}
+
 	// 声明目标接机点指针，准备进行全图搜索
 	AMyUniversalDestination* TargetDest = nullptr;
 
@@ -1273,6 +1290,294 @@ void UMyMapTravelSubsystem::DeploySquadTeammates(UWorld* World, AMyUniversalDest
 			UE_LOG(LogTemp, Warning, TEXT("🚀 [跨图上帝视角] 肉体已成功分配阵型并完成物理搬运: %s"), *Teammate->GetName());
 		}
 	}
+}
+
+#pragma endregion
+
+
+// ==============================================================================
+// 玩家实体接管与落地部署导演系统 (Deployment Director System)
+// ==============================================================================
+#pragma region
+
+void UMyMapTravelSubsystem::ExecuteInitialBootSetup()
+{
+	// 【专属开荒代码】：系统在地图刚加载完的瞬间，锁定开荒状态！
+	UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🏠 执行专属开荒配置：锁定本局开荒状态，保护场景原生肉体不被排队拉扯！"));
+	bIsCurrentMapInitialBoot = true;
+}
+
+bool UMyMapTravelSubsystem::ExecuteDeploymentDirector(AController* NewPlayer, AMyGameModeBase* GameMode, float CurrentWaitTime)
+{
+	if (!NewPlayer || !GetWorld() || !GameMode) return false;
+
+	// ==============================================================================
+	// 💥 增加“同步超时”强制放行 (Deadlock Protection)
+	// ==============================================================================
+	if (!NewPlayer->PlayerState)
+	{
+		if (CurrentWaitTime >= 5.0f)
+		{
+			UE_LOG(LogTemp, Error, TEXT("🚨 [DeploymentDirector] 同步超时 (5秒)！强制放行，执行动态捏人兜底！"));
+			return ExecuteDynamicSquadArrival(NewPlayer, GameMode);
+		}
+
+		// 挂起 0.1 秒后递归轮询，等待客机网络状态就绪
+		FTimerHandle RetryTimer;
+		TWeakObjectPtr<UMyMapTravelSubsystem> WeakThis(this);
+		TWeakObjectPtr<AController> WeakPlayer(NewPlayer);
+		TWeakObjectPtr<AMyGameModeBase> WeakGM(GameMode);
+
+		GetWorld()->GetTimerManager().SetTimer(RetryTimer, [WeakThis, WeakPlayer, WeakGM, CurrentWaitTime]()
+			{
+				if (UMyMapTravelSubsystem* StrongThis = WeakThis.Get())
+				{
+					if (AController* PC = WeakPlayer.Get())
+					{
+						if (AMyGameModeBase* GM = WeakGM.Get())
+						{
+							StrongThis->ExecuteDeploymentDirector(PC, GM, CurrentWaitTime + 0.1f);
+						}
+					}
+				}
+			}, 0.1f, false);
+
+		return false;
+	}
+
+	// ==============================================================================
+	// 💥 【终极联机修复：主副机管线物理级劈开】
+	// 副机（Client）毫无决策权！它只需要躺好，乖乖接管服务器大名单里留好的待命躯壳！
+	// ==============================================================================
+	if (!NewPlayer->IsLocalController())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[DeploymentDirector] 判定为：【副机/客机连入】。下发管线 -> 剥夺决策权，强制接管大名单待命躯壳！"));
+		return ExecuteGuestDeployment(NewPlayer, GameMode);
+	}
+
+	// ==============================================================================
+	// 💥 以下为主机（Server/Host）绝对决策领域！
+	// 主机负责查表、判相性、找预设件或亲自下达 SpawnActor 指令！
+	// ==============================================================================
+	UMyGameInstance* GI = GetWorld()->GetGameInstance<UMyGameInstance>();
+	if (!GI) return false;
+
+	// 强行剥离 PIE 前缀，获取绝对纯净的 MapName 供查表
+	FString MapName = GetWorld()->GetMapName();
+	FString CleanMapName = UGameplayStatics::GetCurrentLevelName(GetWorld(), true);
+	EMapPhaseType MapType = GI->GetMapPhase(CleanMapName);
+
+	// 逻辑分水岭 1：这张图是否有开荒设定？
+	if (MapType == EMapPhaseType::HasPioneeringPhase)
+	{
+		// 逻辑分水岭 2：这张图的开荒期是否已经结束？
+		if (bIsCurrentMapInitialBoot)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[DeploymentDirector] 判定为：【首次开荒图】。下发管线 -> 主机夺舍原生肉体！"));
+			// 【这是开荒！】执行夺舍原生假人，此时不排队。
+			return ExecutePioneeringPossession(NewPlayer, GameMode);
+		}
+	}
+
+	// 【走到这里说明：或者是 AlwaysDynamic 地图，或者是已过开荒期的回访图】
+	UE_LOG(LogTemp, Warning, TEXT("[DeploymentDirector] 判定为：【动态生成图/回访图】。下发管线 -> 传送门动态捏人排队！"));
+	return ExecuteDynamicSquadArrival(NewPlayer, GameMode);
+}
+
+bool UMyMapTravelSubsystem::ExecuteGuestDeployment(AController* NewPlayer, AMyGameModeBase* GameMode)
+{
+	// 【副机专属管线】：剥夺一切 SpawnActor 的权力，只准寻找大名单中的待命队友！
+	ATopCharacter* TargetShell = FindSquadTeammateShell(GetWorld(), GameMode);
+
+	if (TargetShell)
+	{
+		NewPlayer->Possess(TargetShell);
+		// 跨系统回调：通过 GameMode 的公开接口完成网络收尾与 2.5D 镜头对齐
+		GameMode->ExecuteFinishRestartPlayer(NewPlayer, TargetShell->GetActorRotation());
+		UE_LOG(LogTemp, Warning, TEXT("🎯 [副机部署管线] 客机成功接管服务器分配的待命队友！"));
+		return true;
+	}
+
+	// 💥 防御性基建：副机绝不越权捏人！如果没肉体，直接报错阻断！
+	UE_LOG(LogTemp, Error, TEXT("🚨 [DeploymentDirector] 副机部署失败：未在 FriendlyRoster 中找到可用的无主躯壳！请检查房主是否成功生成了队友！"));
+	return false;
+}
+
+bool UMyMapTravelSubsystem::ExecutePioneeringPossession(AController* NewPlayer, AMyGameModeBase* GameMode)
+{
+	// 【主机专属管线 A】：只准寻找场景中原生摆放的假人
+	ATopCharacter* TargetShell = FindInitialStartupShell(GetWorld());
+
+	if (TargetShell)
+	{
+		NewPlayer->Possess(TargetShell);
+		GameMode->ExecuteFinishRestartPlayer(NewPlayer, TargetShell->GetActorRotation());
+		UE_LOG(LogTemp, Warning, TEXT("🎯 [主机开荒管线] 房主成功夺舍场景原生初始躯壳！"));
+		return true;
+	}
+
+	return false;
+}
+
+bool UMyMapTravelSubsystem::ExecuteDynamicSquadArrival(AController* NewPlayer, AMyGameModeBase* GameMode)
+{
+	// 兜底：使用 GameMode 蓝图里配置的默认角色
+	UClass* ClassToSpawn = GameMode->DefaultPawnClass;
+	UMyGameInstance* GI = GetWorld()->GetGameInstance<UMyGameInstance>();
+
+	if (GI && NewPlayer->PlayerState)
+	{
+		// 防御性唯一标识符 (防局域网碰撞)，提取网络底层唯一 ID 或本地 ID
+		FString NetId = NewPlayer->PlayerState->GetUniqueId().IsValid() ? NewPlayer->PlayerState->GetUniqueId().ToString() : FString::Printf(TEXT("LOCAL_PLAYER_%d"), NewPlayer->PlayerState->GetPlayerId());
+
+		// 从大管家记忆库里提取该玩家跨图前的专属蓝图类
+		if (TSubclassOf<ATopCharacter>* SavedClass = GI->PlayerClassMemory.Find(NetId))
+		{
+			if (*SavedClass) ClassToSpawn = *SavedClass;
+		}
+	}
+
+	// 图纸都没有，放弃生成
+	if (!ClassToSpawn)
+	{
+		// 💥 【防御性基建】：报错预警！
+		UE_LOG(LogTemp, Error, TEXT("🚨 [DeploymentDirector] 动态捏人失败：ClassToSpawn 为空！请检查 GameMode 中的 DefaultPawnClass 是否被置空，或者服务器跨图时未同步该角色的图纸！"));
+		return false;
+	}
+
+	// 寻找大一统接机点（跨图使用）或出生点（未配置接机点时的兜底）
+	FTransform SpawnTransform = FTransform::Identity;
+
+	if (GI && GI->PendingTravelRoute)
+	{
+		// 【跨图传送】 -> 去找大一统传送门出口 (AMyUniversalDestination)
+		for (TActorIterator<AMyUniversalDestination> It(GetWorld()); It; ++It)
+		{
+			if (AMyUniversalDestination* Dest = *It)
+			{
+				// 必须查票：只有对应了车票的接机点，才是真正的目的地
+				if (Dest->ListeningRoutes.Contains(GI->PendingTravelRoute))
+				{
+					// 绝对不能强锁 Y 轴！直接取传送门在 3D 空间里的真实坐标。
+					// 仅强制锁定角色的 Scale 为 1:1:1，防止受到传送门缩放的污染。
+					SpawnTransform = FTransform(Dest->GetActorRotation(), Dest->GetActorLocation(), FVector::OneVector);
+					break;
+				}
+			}
+		}
+	}
+
+	// 如果找了一圈发现还是 Identity (比如跨图时没找到对应的传送门，或者没有车票)
+	if (SpawnTransform.Equals(FTransform::Identity))
+	{
+		// 【无空壳且非跨图，或跨图失败兜底】 -> 兜底找初始出生点 (PlayerStart)
+		if (AActor* StartSpot = GameMode->FindPlayerStart(NewPlayer))
+		{
+			// 同样，绝对不能锁 Y 轴！直接取 PlayerStart 在 3D 空间里的真实坐标。
+			SpawnTransform = FTransform(StartSpot->GetActorRotation(), StartSpot->GetActorLocation(), FVector::OneVector);
+		}
+	}
+
+	// 强制物理降临！
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+	SpawnParams.Owner = NewPlayer;
+
+	// 亲自调用 SpawnActor，生成时自带 SpawnTransform 的正确位置和 2.5D 朝向
+	if (APawn* NewBody = GetWorld()->SpawnActor<APawn>(ClassToSpawn, SpawnTransform, SpawnParams))
+	{
+		NewPlayer->Possess(NewBody);
+
+		// 闭环底层网络管线，同步正确的初始朝向给服务器
+		GameMode->ExecuteFinishRestartPlayer(NewPlayer, SpawnTransform.GetRotation().Rotator());
+
+		// ==============================================================================
+		// 💥 彻底消除悬空的“软着陆”协议 (Secure Landing)
+		// ==============================================================================
+		if (ACharacter* NewChar = Cast<ACharacter>(NewBody))
+		{
+			if (UCharacterMovementComponent* CMC = NewChar->GetCharacterMovement())
+			{
+				CMC->SetMovementMode(MOVE_Walking);
+				CMC->bForceNextFloorCheck = true; // 强制地板检测，消除微悬空，防第一帧抖动
+			}
+		}
+
+		UE_LOG(LogTemp, Warning, TEXT("🚀 [动态捏人管线] 成功为主机动态生成专属新肉体！"));
+		return true;
+	}
+
+	return false;
+}
+
+ATopCharacter* UMyMapTravelSubsystem::FindInitialStartupShell(UWorld* World)
+{
+	// 声明并初始化开荒空壳指针，用于接收场景原生角色
+	ATopCharacter* FoundShell = nullptr;
+
+	for (TActorIterator<ATopCharacter> It(World); It; ++It)
+	{
+		ATopCharacter* Character = *It;
+
+		// 跳过空指针或正在播放销毁动画的残骸
+		if (!Character || Character->IsActorBeingDestroyed()) continue;
+
+		// 筛选出当前没有控制器附身的无主躯壳
+		if (Character->GetController() == nullptr)
+		{
+			// 1. RF_WasLoaded: 只要是从地图文件里读出来的，必定有此标记。
+			// 2. !RF_Transient: 绝对排除运行时的残影垃圾。
+			if (Character->HasAnyFlags(RF_WasLoaded) && !Character->HasAnyFlags(RF_Transient))
+			{
+				if (FoundShell == nullptr)
+				{
+					// 第一顺位原生躯壳：锁定为夺舍目标
+					FoundShell = Character;
+				}
+				else
+				{
+					UE_LOG(LogTemp, Display, TEXT("🛡️ [GameMode] 保留额外的合法预设件: %s"), *Character->GetName());
+				}
+			}
+		}
+	}
+
+	return FoundShell;
+}
+
+ATopCharacter* UMyMapTravelSubsystem::FindSquadTeammateShell(UWorld* World, AMyGameModeBase* GameMode)
+{
+	// 声明并初始化空壳指针，用于接收小队队友
+	ATopCharacter* FoundShell = nullptr;
+	if (!GameMode) return nullptr;
+
+	for (TActorIterator<ATopCharacter> It(World); It; ++It)
+	{
+		ATopCharacter* Character = *It;
+
+		if (!Character || Character->IsActorBeingDestroyed()) continue;
+
+		// 筛选出当前没有控制器附身的无主躯壳
+		if (Character->GetController() == nullptr)
+		{
+			// 1. 副机连入时：房主动态生成的待命队友没有 RF_WasLoaded，但已注册进 FriendlyRoster 大名单！
+			// 2. !RF_Transient: 确保它不是运行时产生的临时垃圾或预览对象
+			if (!Character->HasAnyFlags(RF_Transient) && GameMode->FriendlyRoster.Contains(Character))
+			{
+				if (FoundShell == nullptr)
+				{
+					// 找到合法的动态队友，选定为夺舍目标
+					FoundShell = Character;
+				}
+				else
+				{
+					// 【核心逻辑保护】：保留房主同步过来的其余待命队友，绝不盲目清场！
+					UE_LOG(LogTemp, Display, TEXT("🛡️ [GameMode] 保留额外的待命队友: %s"), *Character->GetName());
+				}
+			}
+		}
+	}
+	return FoundShell;
 }
 
 #pragma endregion

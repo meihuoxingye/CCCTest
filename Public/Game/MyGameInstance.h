@@ -6,7 +6,11 @@
 #include "Engine/GameInstance.h"
 #include "Engine/TimerHandle.h"
 #include "Engine/Engine.h" 
+
+#include "World/MyMapAttributeDataAsset.h"
+
 #include "MyGameInstance.generated.h"
+
 
 // ==============================================================================
 // 地图专属转场配置 (Map Transition Config)
@@ -39,6 +43,7 @@ public:
 	float HoldTimeAtFull = 0.5f;
 };
 
+
 // ==============================================================================
 // 大管家：全局游戏实例 (Global Game Instance)
 // ==============================================================================
@@ -63,6 +68,15 @@ public:
 	// 跨地图核心记忆库 (Cross-Map Memory)
 	// ==============================================================================
 public:
+
+	// 【大世界核心图鉴库】：统筹所有独立地图全局属性数据资产的数组
+	// 策划只需新建一张地图的专属 DataAsset，然后加进这个大名单即可，彻底消灭协作冲突！
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Map Config")
+	TArray<TObjectPtr<class UMyMapAttributeDataAsset>> MapAttributeAssets;
+
+	// O(1) 提取地图相性的工具接口，供全宇宙各个子系统安全查表
+	UFUNCTION(BlueprintPure, Category = "Map Config")
+	EMapPhaseType GetMapPhase(const FString& MapShortName) const;
 
 	// 记录已访问地图的集合，跨地图跳转不销毁。用于大世界流送中心判定是否压制开荒数据层
 	UPROPERTY()

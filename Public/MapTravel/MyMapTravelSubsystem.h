@@ -170,4 +170,33 @@ private:
 	// 同步握手轮询定时器句柄，用于在服务器端死等所有客机的 UI 状态机 Ready
 	UPROPERTY()
 	FTimerHandle SyncWaitTimerHandle;
+
+	// ==============================================================================
+	// 玩家实体接管与落地部署导演系统 (Deployment Director System)
+	// ==============================================================================
+public:
+	// 由 GameMode 在 InitGame 中单向触发的专属开荒配置代码
+	void ExecuteInitialBootSetup();
+
+	// 由 GameMode 在 RestartPlayer 中调用的最终决策树 (包含超时死锁保护)
+	bool ExecuteDeploymentDirector(class AController* NewPlayer, class AMyGameModeBase* GameMode, float CurrentWaitTime = 0.0f);
+
+private:
+	// 内部状态锁，记录 GameMode 传达的开荒旨意
+	bool bIsCurrentMapInitialBoot = false;
+
+	// 【副机专属管线】：无决策权，被动接受服务器强行分配的大名单躯壳。
+	bool ExecuteGuestDeployment(class AController* NewPlayer, class AMyGameModeBase* GameMode);
+
+	// 【主机专属管线 A】：这是开荒！执行夺舍原生假人，不排队。
+	bool ExecutePioneeringPossession(class AController* NewPlayer, class AMyGameModeBase* GameMode);
+
+	// 【主机专属管线 B】：动态图或已过开荒期。执行图纸读取，传送门动态捏人+排队。
+	bool ExecuteDynamicSquadArrival(class AController* NewPlayer, class AMyGameModeBase* GameMode);
+
+	// 内部辅助：寻找地图原生件 (主机开荒专用)
+	class ATopCharacter* FindInitialStartupShell(UWorld* World);
+
+	// 内部辅助：寻找已经由房主跨图同步过来的专属队友躯壳 (副机接管专用)
+	class ATopCharacter* FindSquadTeammateShell(UWorld* World, class AMyGameModeBase* GameMode);
 };

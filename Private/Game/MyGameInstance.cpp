@@ -24,6 +24,8 @@
 
 #include "MapTravel/NetComponent/MyMapTravelNetComponent.h"
 
+#include "World/MyMapAttributeDataAsset.h"
+
 
 // ==============================================================================
 // 核心生命周期与组件 (Core Lifecycle & Components)
@@ -133,6 +135,30 @@ void UMyGameInstance::Shutdown()
 
 	// 归还控制权，执行父类的原生销毁
 	Super::Shutdown();
+}
+
+#pragma endregion
+
+
+// ==============================================================================
+// 跨地图核心记忆库 (Cross-Map Memory)
+// ==============================================================================
+#pragma region
+
+EMapPhaseType UMyGameInstance::GetMapPhase(const FString& MapShortName) const
+{
+	// 遍历大管家手中捏着的所有独立地图数据资产
+	for (const TObjectPtr<UMyMapAttributeDataAsset>& Asset : MapAttributeAssets)
+	{
+		// 强校验：确保资产指针有效，且内部的软引用也有效，然后比对短名
+		if (Asset && !Asset->MapAsset.IsNull() && Asset->MapAsset.GetAssetName() == MapShortName)
+		{
+			return Asset->PhaseType;
+		}
+	}
+
+	// 兜底防线：如果策划忘了给某张图配专属资产，或者忘了加进大名单，一律视为纯动态图！
+	return EMapPhaseType::AlwaysDynamic;
 }
 
 #pragma endregion

@@ -11,6 +11,14 @@
 #include "Game/MyGameInstance.h"
 
 // ==============================================================================
+// 【新增】：引入大世界核心图鉴与包名提取工具
+// ==============================================================================
+#include "World/MyMapAttributeDataAsset.h" 
+#include "Misc/PackageName.h"
+#include "Kismet/GameplayStatics.h"
+
+
+// ==============================================================================
 // 核心生命周期与初始化 (Lifecycle & Initialization)
 // ==============================================================================
 #pragma region
@@ -242,13 +250,13 @@ void UMyDataLayerStreamingSubsystem::DebugPrintDataLayerStates()
 	}
 }
 
-void UMyDataLayerStreamingSubsystem::ResolveStarterDataLayer(const UDataLayerAsset* StarterLayer)
+bool UMyDataLayerStreamingSubsystem::ResolveStarterDataLayer(const UDataLayerAsset* StarterLayer)
 {
 	// 安全拦截：空资产直接驳回
-	if (!StarterLayer) return;
+	if (!StarterLayer) return false;
 
 	UWorld* World = GetWorld();
-	if (!World) return;
+	if (!World) return false;
 
 	UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>();
 	// 【架构统一】：严格使用 UE5.8 标准的 DataLayerManager
@@ -256,15 +264,23 @@ void UMyDataLayerStreamingSubsystem::ResolveStarterDataLayer(const UDataLayerAss
 
 	if (GI && DLManager)
 	{
+		// ==============================================================================
+		// 💥 【核心修复】：强行剥离 PIE 前缀！
+		// 使用 GetCurrentLevelName 并传入 true，彻底剥离 UEDPIE_0_ 前缀，还原纯净短名！
+		// ==============================================================================
 		FString CurrentMapName = World->GetMapName();
+		FString CleanMapName = UGameplayStatics::GetCurrentLevelName(World, true);
 
-		// 【核心架构：O(0) 性能损耗的数据层阻断】
-		// 查大管家字典，如果这个图之前来过，说明是“回访”
-		if (GI->VisitedMaps.Contains(CurrentMapName))
+		// 直接向大管家索要地图相性！大管家会自动遍历其资产大名单进行查表。
+		EMapPhaseType MapType = GI->GetMapPhase(CleanMapName);
+
+		// 终极仲裁：如果这张图根本没有开荒期（纯动态），或者开荒期已过（回访）！
+		if (MapType == EMapPhaseType::AlwaysDynamic || GI->VisitedMaps.Contains(CurrentMapName))
 		{
-			// 回访地图：直接从底层将状态锁死为 Unloaded，彻底阻断初始角色（假人）的硬盘流送与实例化
+			// 回访地图/动态图：直接从底层将状态锁死为 Unloaded，彻底阻断初始角色（假人）的硬盘流送与实例化
 			DLManager->SetDataLayerRuntimeState(StarterLayer, EDataLayerRuntimeState::Unloaded);
-			UE_LOG(LogTemp, Warning, TEXT("🚫 [DataLayer管线] 回访地图 %s，已阻断初始预设角色的加载！"), *CurrentMapName);
+			UE_LOG(LogTemp, Warning, TEXT("🚫 [DataLayer管线] 地图 %s (动态/回访)，已物理阻断开荒预设层！"), *CurrentMapName);
+			return false; // 明确汇报：这不是开荒，是回访/动态捏人
 		}
 		else
 		{
@@ -273,8 +289,10 @@ void UMyDataLayerStreamingSubsystem::ResolveStarterDataLayer(const UDataLayerAss
 			// 将当前地图名称正式登记录入大管家的历史访问名单，打上“已开荒”烙印，防止下次进入产生双重肉体
 			GI->VisitedMaps.Add(CurrentMapName);
 			UE_LOG(LogTemp, Warning, TEXT("✅ [DataLayer管线] 首次进入 %s，初始预设角色已激活！"), *CurrentMapName);
+			return true; // 明确汇报：这是纯正开荒
 		}
 	}
+	return false;
 }
 
 #pragma endregion
