@@ -20,6 +20,9 @@
 
 #include "MapTravel/MyMapTravelSubsystem.h"
 
+// 【新增】：引入纯净的全局玩家状态基类
+#include "PlayerState/MyPlayerState.h"
+
 
 // ==============================================================================
 // 生命周期 (Lifecycle)
@@ -31,6 +34,13 @@ AMyGameModeBase::AMyGameModeBase()
 	// 【核心配置】：在构造函数中开启无缝旅行支持，允许跨地图动态无缝加载，消除黑屏与连接中断
 	// 这样引擎在加载此类时 (CDO阶段)，就会将其刻入默认配置
 	bUseSeamlessTravel = true;
+
+	// ==============================================================================
+	// 【架构级焊死】：强行指定本游戏的 PlayerState 必须是我们写好组件的 C++ 类！
+	// 无论策划在蓝图里怎么配，或者忘配，只要继承了这个 GameMode，引擎必定生成 AMyPlayerState！
+	// 彻底消灭因蓝图配置遗漏导致的 5秒 死锁！
+	// ==============================================================================
+	PlayerStateClass = AMyPlayerState::StaticClass();
 }
 
 void AMyGameModeBase::InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage)
@@ -97,10 +107,7 @@ void AMyGameModeBase::StartPlay()
 			// 🚀 优化实装：使用 TWeakObjectPtr 防范 Lambda 异步执行时的空指针击穿崩溃
 			TWeakObjectPtr<UMySaveSubsystem> WeakSaveSub(SaveSub);
 
-			// 【联机时序加固】：额外捕获大管家指针，准备在全员就绪后安全撕票
-			TWeakObjectPtr<UMyGameInstance> WeakGI(Cast<UMyGameInstance>(GI));
-
-			GetWorld()->GetTimerManager().SetTimerForNextTick([WeakSaveSub, WeakGI]()
+			GetWorld()->GetTimerManager().SetTimerForNextTick([WeakSaveSub]()
 				{
 					if (WeakSaveSub.IsValid())
 					{
@@ -108,17 +115,8 @@ void AMyGameModeBase::StartPlay()
 						WeakSaveSub->HandlePendingLoad();
 					}
 
-					// ==============================================================================
-					// 【终极联机时序修复：全员到齐后的统一撕票】
-					// 坚决剥夺房主在 SnapPlayerToDestination 里的私自撕票权！
-					// 确保客机无论网络多慢，在执行 RestartPlayer 时大管家手里都还有车票！
-					// 直到 NextTick (所有首批主客机实体都已 Spawn 完毕)，再统一销毁，防止中途飞线的玩家误读车票。
-					// ==============================================================================
-					if (WeakGI.IsValid() && WeakGI->PendingTravelRoute != nullptr)
-					{
-						WeakGI->PendingTravelRoute = nullptr;
-						UE_LOG(LogTemp, Warning, TEXT("🎫 [跨图管线] 首批玩家部署与读档完毕，大管家正式销毁跨界车票！"));
-					}
+					// 💥 修复：删除了原来在此处的 WeakGI->PendingTravelRoute = nullptr 早泄撕票逻辑！
+					// 必须把车票留到物理阵型彻底落位、引擎 Ready 之后再撕！
 				});
 		}
 	}

@@ -1,6 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
-
-#include "MapTravel/MyMapTravelSubsystem.h"
+﻿#include "MapTravel/MyMapTravelSubsystem.h"
 #include "Engine/World.h"
 // 【修改】：跨系统呼叫专职的流送子系统
 #include "Streaming/MyDataLayerStreamingSubsystem.h" 
@@ -14,7 +12,7 @@
 #include "EnhancedInputSubsystems.h"
 #include "Framework/Application/SlateApplication.h" 
 #include "Engine/GameViewportClient.h"
-#include "GameFramework/Character.h" // 【新增】：替换原来的 TopCharacter.h
+#include "GameFramework/Character.h" 
 #include "EnhancedInputComponent.h"
 #include "GameFramework/PlayerState.h"
 #include "Game/MyGameInstance.h"
@@ -24,19 +22,18 @@
 #include "EngineUtils.h"
 #include "MapTravel/Actors/MyUniversalDestination.h"
 #include "GameFramework/CharacterMovementComponent.h"
-
 #include "GameFramework/GameModeBase.h"
 #include "Game/MyGameModeBase.h"
 #include "Character/TopCharacter.h"
-
 #include "Components/CapsuleComponent.h"
-
-#include "MapTravel/NetComponent/MyMapTravelNetComponent.h"
-
-#include "GameFramework/PlayerStart.h" // 【新增】：解决 APlayerStart 编译器不认识的报错
-
-// 【新增】：引入大世界核心属性图鉴
+#include "GameFramework/PlayerStart.h"
 #include "World/MyMapAttributeDataAsset.h"
+
+// 【核心新增】：引入跨图与流送专属玩家状态令牌契约
+#include "PlayerState/MyPlayerState.h"
+#include "PlayerState/Component/TravelAndStreaming/MyMapTravelStateComponent.h"
+
+#include "UI/Transition/MyScreenOffWidget.h"
 
 
 // ==============================================================================
@@ -109,8 +106,8 @@ void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	// 调用父类逻辑
 	Super::OnWorldBeginPlay(InWorld);
 
-	// 💥【已处决】：彻底废除此处的 CachedStartupShells 全局缓存扫盘！
-	// 房主连入的时序比 OnWorldBeginPlay 还要早，在这里做缓存会导致 RestartPlayer 永远拿到空数组！
+	// 💥【架构新增】：世界刚建立时，物理阵型绝对没有就绪！必须锁死！
+	bIsPhysicalLayoutReady = false;
 
 	// 获取当前刚落地的世界地图的原始长名称
 	FString CurrentMapName = InWorld.GetMapName();
@@ -128,6 +125,180 @@ void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 			// 直接返回，不执行后续新世界的任何初始化逻辑
 			return;
 		}
+	}
+}
+
+#pragma endregion
+
+
+// ==============================================================================
+// 令牌响应管线 (Token Response Pipeline) - 彻底消灭客户端越权
+// ==============================================================================
+#pragma region
+
+void UMyMapTravelSubsystem::HandleDeploymentTokenUpdate(UMyMapTravelStateComponent* PS, ETravelDeploymentStatus OldStatus, int32 RetryCount)
+{
+	// 安全校验：防空指针
+	if (!PS) return;
+
+	// 安全校验：从组件向上找宿主 (PlayerState)
+	AMyPlayerState* OwningPS = Cast<AMyPlayerState>(PS->GetOwner());
+	if (!OwningPS) return;
+
+	UMyGameInstance* GI = GetWorld()->GetGameInstance<UMyGameInstance>();
+	if (!GI) return;
+
+	// ==============================================================================
+	// 👑【服务器权威管线】：绝对不能被下方查找 LocalPC 的表现层逻辑阻塞！
+	// 服务器必须第一时间无条件处理所有副机的 Ack，否则大一统总闸必定死锁！
+	// ==============================================================================
+	if (OwningPS->HasAuthority())
+	{
+		if (PS->DeploymentStatus == ETravelDeploymentStatus::WaitingForShell)
+		{
+			if (!bIsPhysicalLayoutReady)
+			{
+				// 情况 A：全局物理地基未就绪 (大部队集体跨图/同图中)。
+				// 交给大一统总闸统筹，所有人必须死等，凑齐了一起走！
+				CheckAndExecutePhysicalDeployment();
+			}
+			else
+			{
+				// ==============================================================================
+				// 💥【核心修复：副机中途加入专属管线】
+				// 情况 B：全局地基早已就绪 (房主在正常游玩)，此时收到 Ack，说明是客机中途连入加载完毕！
+				// 它不需要等总闸！直接单独为其验明正身，发牌解封！
+				// ==============================================================================
+				UE_LOG(LogTemp, Warning, TEXT("🚪 [中途加入管线] 侦测到副机连入！全局地基已就绪，执行专属客机发牌！"));
+
+				APlayerController* TargetPC = nullptr;
+				for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+				{
+					if (It->Get()->PlayerState == OwningPS)
+					{
+						TargetPC = It->Get();
+						break;
+					}
+				}
+
+				if (TargetPC)
+				{
+					if (!TargetPC->GetPawn())
+					{
+						// 兜底：如果 GameMode 还没来得及给它发肉体，强行走一次大名单躯壳分配
+						if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(GetWorld()->GetAuthGameMode()))
+						{
+							GM->RestartPlayer(TargetPC);
+						}
+					}
+					else
+					{
+						// 完美闭环：肉体已分配，直接单独下发解封令牌，该副机的 UI 瞬间解穴！
+						PS->SetDeploymentStatus(ETravelDeploymentStatus::ReadyToPossess);
+					}
+				}
+			}
+		}
+	}
+
+	// ==============================================================================
+	// 📺【本地表现层管线】：只有本地真实玩家才允许处理表现层和物理输入解封
+	// 💥 核心修复：彻底抛弃玄学的 GetOwner()，直接遍历本地控制器查表匹配！绝不漏掉 UI 指令！
+	// ==============================================================================
+	APlayerController* LocalPC = nullptr;
+	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	{
+		if (APlayerController* PC = It->Get())
+		{
+			// 如果是远端玩家的代理，IsLocalController 会返回 False，直接过滤
+			if (PC->PlayerState == OwningPS && PC->IsLocalController())
+			{
+				LocalPC = PC;
+				break;
+			}
+		}
+	}
+
+	// ==============================================================================
+	// 💥 终极联机修复：解决客机中途加入时的网络数据竞争 (Race Condition)！
+	// 客机初次加载时，PlayerState 的属性 (Token) 往往先于 PlayerController 的指针绑定完成复制！
+	// 此时如果找不到 LocalPC，挂起 0.05 秒后递归轮询，死等指针绑定完成！
+	// ==============================================================================
+	if (!LocalPC)
+	{
+		// 【防幽灵锁】：只有纯客户端才需要死等绑定，主机端找不到直接当做客机代理扔掉！
+		if (GetWorld()->GetNetMode() == NM_Client)
+		{
+			// 增加熔断机制：最多重试 50 次 (约 2.5 秒)
+			const int32 MAX_RETRY = 50;
+			if (RetryCount >= MAX_RETRY)
+			{
+				// 💥 【双轨并行挂起】：2.5秒高频轮询结束，安全挂起。
+				UE_LOG(LogTemp, Verbose, TEXT("🛡️ [令牌拦截/挂起] 轮询结束：若为队友则静默丢弃；若为本地极度卡顿，等待 OnRep_PlayerState 被动唤醒。"));
+				return;
+			}
+
+			FTimerHandle RetryTimer;
+			TWeakObjectPtr<UMyMapTravelSubsystem> WeakThis(this);
+			TWeakObjectPtr<UMyMapTravelStateComponent> WeakPS(PS);
+
+			GetWorld()->GetTimerManager().SetTimer(RetryTimer, [WeakThis, WeakPS, OldStatus, RetryCount]()
+				{
+					if (UMyMapTravelSubsystem* StrongThis = WeakThis.Get())
+					{
+						if (UMyMapTravelStateComponent* ValidPS = WeakPS.Get())
+						{
+							StrongThis->HandleDeploymentTokenUpdate(ValidPS, OldStatus, RetryCount + 1);
+						}
+					}
+				}, 0.05f, false);
+		}
+
+		// 不是 LocalPC 绝对不能往下执行，直接拦截
+		return;
+	}
+
+	// 【自动化契约响应】：根据令牌执行绝对无条件的表现层操作
+	switch (PS->DeploymentStatus)
+	{
+	case ETravelDeploymentStatus::Traveling:
+	{
+		// 收到 Traveling 令牌，客户端丧失一切权力，强行拉起黑幕
+		UE_LOG(LogTemp, Warning, TEXT("🎫 [令牌契约] 收到 Traveling 指令，客户端立刻移交控制权，拉起黑幕！"));
+
+		// 【新增】：无论同图跨图，起航时重置三把锁
+		GI->ResetTransitionLocks();
+
+		FName CurrentMapName = FName(*UGameplayStatics::GetCurrentLevelName(GetWorld(), true));
+		FMapTransitionConfig Config = GI->GetMapTransitionConfig(CurrentMapName);
+
+		// 直接触发大管家的闭眼操作，代替以前被删掉的 Client_HandleTransitionRequest
+		GI->PlayScreenOffPhaseUI(Config.ScreenOffUIClass, Config.ScreenOffDuration);
+		break;
+	}
+
+	case ETravelDeploymentStatus::WaitingForShell:
+	{
+		// ==============================================================================
+		// 💥【架构解耦】：UI 的拉起和发信号已经交由本地大管家抢跑处理！
+		// 此处客户端唯一要做的就是挂起，安心等待服务器物理搬运完成发牌。
+		// ==============================================================================
+		UE_LOG(LogTemp, Warning, TEXT("🛑 [令牌契约] 收到 WaitingForShell！(物理流送进行中，UI掩护已由大管家本地接管)"));
+		break;
+	}
+
+	case ETravelDeploymentStatus::ReadyToPossess:
+	{
+		// 肉体阵型已就绪，立刻交还表现权
+		UE_LOG(LogTemp, Warning, TEXT("🟢 [令牌契约] 收到 ReadyToPossess！肉体地块就绪，三锁判定退场！"));
+
+		// 跨图/同图共用：向大管家通报第三把锁 (服务器物理阵型) 已就绪！
+		GI->NotifyPhysicalReady();
+		break;
+	}
+
+	default:
+		break;
 	}
 }
 
@@ -218,6 +389,25 @@ void UMyMapTravelSubsystem::UnregisterSameMapDestination(UTeleportRoute* Route)
 	}
 }
 
+
+
+void UMyMapTravelSubsystem::NotifyLocalScreenOffFinished()
+{
+	// 提取绝对真实的本地玩家控制器
+	if (APlayerController* PC = GetRealPlayerController(GetWorld()))
+	{
+		// O(1) 极速提取成员变量
+		if (AMyPlayerState* MyPS = PC->GetPlayerState<AMyPlayerState>())
+		{
+			if (UMyMapTravelStateComponent* NetComp = MyPS->MapTravelComponent)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("📺 [表现层] 熄屏 UI 彻底闭合黑透！向服务器正式发射就绪 Ack！"));
+				NetComp->Server_AckScreenOffReady();
+			}
+		}
+	}
+}
+
 void UMyMapTravelSubsystem::ExecuteUniversalTravel(AActor* TeleportingActor, UTeleportRoute* TargetRoute)
 {
 	// 基础防线：拦截无效的传送物理实体或未配置的空路由资产
@@ -227,51 +417,52 @@ void UMyMapTravelSubsystem::ExecuteUniversalTravel(AActor* TeleportingActor, UTe
 	UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] ==============================================="));
 	UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🚀 玩家踩上传送门！开始大一统路由寻址。收到的目标路线: [%s]"), *TargetRoute->GetName());
 
-	// 第一路由优先级：如果目标路由的接机点在当前内存字典中，直接劫持为同地图极速穿梭
-	if (SameMapDestinationRegistry.Contains(TargetRoute))
-	{
-		// 命中本地字典，输出同地图传送判定日志
-		UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] -> 🔍 字典查表成功：本地有监听点，判定为【同地图传送】！"));
+	UWorld* World = GetWorld();
+	if (!World) return;
 
-		// 派发给同图专属传送管线处理
+	// ==============================================================================
+	// 💥 【核心修正：大一统寻址基准】
+	// 绝不能用本地字典 (SameMapDestinationRegistry) 来判断是否同图！
+	// 因为如果策划把接机点放在了还没流送的数据层(DataLayer)里，字典里根本没有它！
+	// 必须直接提取当前世界的纯净地图名，与车票上的目标地图名进行绝对字符串比对！
+	// ==============================================================================
+	FName CurrentMapName = FName(*UGameplayStatics::GetCurrentLevelName(World, true));
+	FString TargetMapString = TargetRoute->TargetMap.GetAssetName();
+	FName TargetMapName = FName(*TargetMapString);
+
+	if (TargetMapName == CurrentMapName)
+	{
+		// 只要名字一样，哪怕字典里现在查不到接机点，也必须按【同图漫游】处理！
+		// 找不到接机点的异常，将全权交由 ExecuteSameMapTravel 内部的【两级物理兜底】去抢救！
+		UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] -> 🔍 路由比对成功：目标属于当前世界，判定为【同地图传送】！"));
 		ExecuteSameMapTravel(TeleportingActor, TargetRoute);
 
-		// 寻址完成，直接阻断后续逻辑
+		// 寻址完成，直接阻断后续跨图逻辑
 		return;
 	}
 
-	// 未命中本地字典，输出跨地图传送判定日志
-	UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] -> 🔍 字典查表失败：本地无此目标点，判定为【跨地图漫游】！"));
-
-	// 第二路由优先级：本地查无此人，断定为跨界航行，准备查阅资产内部的目标地图
-	UWorld* World = GetWorld();
-
-	// 安全拦截：如果世界上下文失效，直接中止寻址
-	if (!World) return;
+	// 名字不一样，说明要去新世界，断定为跨界航行
+	UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] -> 🔍 路由比对失败：目标属于其他世界，判定为【跨地图漫游】！"));
 
 	// 提取全局大管家，准备移交跨地图流送指令
 	if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
 	{
-		// 校验路由资产内部是否确实配置了跨图的目的地（软引用是否为空）
+		// 校验路由资产内部是否确实配置了跨图的目的地
 		if (!TargetRoute->TargetMap.IsNull())
 		{
 			// 铸造跨界车票并交由全局大管家保管，留待落地后验证接机点
 			GI->PendingTravelRoute = TargetRoute;
 
-			// 从软引用萃取真实地图包名，移交跨地图无缝流送管线
-			FString TargetMapName = TargetRoute->TargetMap.GetAssetName();
-
 			// 输出跨界车票发放成功的日志
-			UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] -> 🎫 成功购买跨图车票: [%s]，准备前往新世界: [%s]"), *TargetRoute->GetName(), *TargetMapName);
+			UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] -> 🎫 成功购买跨图车票: [%s]，准备前往新世界: [%s]"), *TargetRoute->GetName(), *TargetMapName.ToString());
 
 			// 正式启动底层跨地图传送流送管线
-			ExecuteMapTravel(*TargetMapName);
+			ExecuteMapTravel(*TargetMapName.ToString());
 		}
 		else
 		{
-			// 策划配置失误：既不在本地字典，也没填跨图关卡名，抛出致命错误日志
-			UE_LOG(LogTemp, Error, TEXT("[大一统传送系统] 寻路瘫痪！路由资产 [%s] 既不在本图监听字典中，也未配置目标跨界地图！"), *TargetRoute->GetName());
-			UE_LOG(LogTemp, Error, TEXT("[MapTravelLog] ❌ 致命错误：路由资产 [%s] 中没有配置任何目标地图！"), *TargetRoute->GetName());
+			// 策划配置失误：既不是同图，也没填跨图关卡名，抛出致命错误日志
+			UE_LOG(LogTemp, Error, TEXT("[大一统传送系统] 寻路瘫痪！路由资产 [%s] 未配置目标跨界地图！"), *TargetRoute->GetName());
 		}
 	}
 }
@@ -281,11 +472,9 @@ void UMyMapTravelSubsystem::ExecuteSameMapTravel(AActor* TeleportingActor, UTele
 	// 时序锁与合法性首重校验：防玩家连踩触发器导致状态机重入，并确保传入参数绝不为空
 	if (bIsTraveling || !TeleportingActor || !TargetRoute) return;
 
-	// 字典二重查验：确保目标接机点在此刻确切存活于本地内存字典中
-	if (!SameMapDestinationRegistry.Contains(TargetRoute)) return;
-
 	// 锁定全局转场状态，宣布进入不可逆的传送管线
 	bIsTraveling = true;
+	bIsPhysicalLayoutReady = false; // 重置地基锁
 
 	// 安全提取世界上下文
 	UWorld* World = GetWorld();
@@ -296,44 +485,28 @@ void UMyMapTravelSubsystem::ExecuteSameMapTravel(AActor* TeleportingActor, UTele
 		return;
 	}
 
-	// 从字典中提取出接机点在世界中的绝对物理坐标与旋转信息
-	FTransform TargetTransform = SameMapDestinationRegistry[TargetRoute].TargetTransform;
-
-	FVector GroundCorrectedLocation = TargetTransform.GetLocation();
-	FHitResult GroundHit;
-	// 向上偏移探测，防止接机点本身就嵌在地板里导致探测失败
-	FVector TraceStart = GroundCorrectedLocation + FVector(0.f, 0.f, 50.f);
-	FVector TraceEnd = GroundCorrectedLocation - FVector(0.f, 0.f, 100.f);
-
-	FCollisionQueryParams TraceParams;
-	TraceParams.AddIgnoredActor(TeleportingActor); // 忽略玩家自身
-
-	// 向下打射线，寻找真实的 3D 物理表面
-	if (World->LineTraceSingleByChannel(GroundHit, TraceStart, TraceEnd, ECC_Visibility, TraceParams))
+	// 💥 大一统核心：把同图的车票也挂载到大管家上，让后方的物理总闸能查到字典！
+	if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
 	{
-		// 将高度对齐到真实的 3D 物理表面，稍微抬高 2cm 防止碰撞体重叠
-		GroundCorrectedLocation.Z = GroundHit.ImpactPoint.Z + 2.0f;
-		TargetTransform.SetLocation(GroundCorrectedLocation);
+		GI->PendingTravelRoute = TargetRoute;
 	}
 
-	// 提取该接机点所绑定的目标大世界数据层
-	UDataLayerAsset* TargetDataLayer = SameMapDestinationRegistry[TargetRoute].BoundDataLayer;
-
-	// 【核心新增】：在触发同地图传送黑幕及逻辑前，立刻刷新滑动窗口，趁着黑屏转场的间隙把数据层流送加载出来！
-	if (TargetDataLayer)
+	// ==============================================================================
+	// 💥 恢复：同图专属预热机制！趁现在还没黑透，让引擎后台静默把美术资源读进内存！
+	// ==============================================================================
+	if (SameMapDestinationRegistry.Contains(TargetRoute))
 	{
-		// 输出预热日志
-		UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🔄 同图传送：触发数据层滑动窗口，开始加载目标区域并卸载远端"));
-
-		// 【修改】：呼叫流送子系统执行底层预热加载
-		if (UMyDataLayerStreamingSubsystem* StreamingSub = World->GetSubsystem<UMyDataLayerStreamingSubsystem>())
+		UDataLayerAsset* TargetDataLayer = SameMapDestinationRegistry[TargetRoute].BoundDataLayer;
+		if (TargetDataLayer)
 		{
-			// 调用预热函数：把目标艺术层丢进后台静默加载，但不唤醒碰撞和逻辑
-			StreamingSub->PreheatZoneBackground(TargetDataLayer);
+			UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🔄 同图传送：提前触发数据层后台预热"));
+			if (UMyDataLayerStreamingSubsystem* StreamingSub = World->GetSubsystem<UMyDataLayerStreamingSubsystem>())
+			{
+				StreamingSub->PreheatZoneBackground(TargetDataLayer);
+			}
+			// 存入挂起池，等待 WaitingForShell 令牌到来时执行真实斩杀！
+			PendingSameMapDataLayer = TargetDataLayer;
 		}
-
-		// 将目标数据层塞入挂起池，等待黑幕完全闭合时再由大管家触发交接
-		PendingSameMapDataLayer = TargetDataLayer;
 	}
 
 	// 物理层静默：强制抹平全局时空流速，为接下来的点穴做准备
@@ -358,236 +531,93 @@ void UMyMapTravelSubsystem::ExecuteSameMapTravel(AActor* TeleportingActor, UTele
 		}
 	}
 
-	// 提取真实的本地玩家控制器
-	if (APlayerController* PC = GetRealPlayerController(World))
-	{
-		// 强制抹平玩家控制器的个体时间流速，防止时空残留导致逻辑异常
-		PC->CustomTimeDilation = 1.0f;
-
-		// 逻辑层彻底点穴：剥夺玩家控制器的所有输入响应能力
-		PC->DisableInput(PC);
-
-		// 创建纯 UI 输入模式上下文，切断游戏视口的交互
-		FInputModeUIOnly InputMode;
-
-		// 解除鼠标对视口的锁定，防止黑屏期间鼠标被死锁在屏幕中心或边界
-		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-
-		// 将组装好的 UI 输入模式硬塞给玩家控制器
-		PC->SetInputMode(InputMode);
-
-		// 【完美契合】：获取角色肉体基类，进行极致优雅的物理冻结
-		if (APawn* Pawn = PC->GetPawn())
-		{
-			// 同步抹平肉体的时间流速
-			Pawn->CustomTimeDilation = 1.0f;
-
-			// 再次双重保险：剥夺肉体基类的输入接收
-			Pawn->DisableInput(PC);
-
-			// 【核心新增】：极致点穴！彻底清空速度并掐断重力计算，角色被物理死锁在虚空中，杜绝掉落
-			if (ACharacter* PlayerCharacter = Cast<ACharacter>(Pawn))
-			{
-				// 提取 CMC 组件
-				if (UCharacterMovementComponent* CMC = PlayerCharacter->GetCharacterMovement())
-				{
-					// 关闭物理驱动：挂起所有重力和摩擦力计算
-					CMC->DisableMovement();
-				}
-			}
-		}
-	}
-
 	// ==============================================================================
-	// 【网络握手第一阶段：触发所有客户端拉起黑幕】
+	// 【服务器独裁第一阶段：强塞 Traveling 令牌，拉起黑幕！】
+	// (完美替代了之前的 MyMapTravelNetComponent 网络组件广播)
 	// ==============================================================================
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
 		if (APlayerController* IterPC = It->Get())
 		{
-			if (UMyMapTravelNetComponent* NetComp = IterPC->FindComponentByClass<UMyMapTravelNetComponent>())
+			// 剥夺本地手动控制，直接通过令牌强杀
+			// O(1) 极速提取成员变量
+			if (AMyPlayerState* MyPS = IterPC->GetPlayerState<AMyPlayerState>())
 			{
-				NetComp->Server_InitiateTransition(TargetTransform);
+				if (UMyMapTravelStateComponent* NetPS = MyPS->MapTravelComponent)
+				{
+					NetPS->SetDeploymentStatus(ETravelDeploymentStatus::Traveling);
+				}
 			}
 		}
 	}
 
-	// ==============================================================================
-	// 【网络握手第二阶段：高频轮询与超时防死锁】
-	// ==============================================================================
-	TWeakObjectPtr<UMyMapTravelSubsystem> WeakThis(this);
-	TWeakObjectPtr<AActor> WeakTeleporter(TeleportingActor);
+	// 💥 所有的 Timer 死等与寻址计算已物理清除，全部移交至 CheckAndExecutePhysicalDeployment 统一处理！
+}
 
-	// 记录开始轮询的绝对物理时间戳
-	double StartTime = World->GetTimeSeconds();
-	// 设定最长等待容忍度：5秒。超过此时间，视为客机网络断连，强制执行物理折叠防死锁！
-	const double MaxTravelWait = 5.0;
+void UMyMapTravelSubsystem::CheckAndExecutePhysicalDeployment()
+{
+	UWorld* World = GetWorld();
+	if (!World || World->GetNetMode() == NM_Client) return; // 绝对的服务器物理霸权
+	if (bIsPhysicalLayoutReady) return; // 拦截锁：防重复触发
 
-	World->GetTimerManager().SetTimer(SyncWaitTimerHandle, [WeakThis, WeakTeleporter, TargetTransform, StartTime, MaxTravelWait]()
+	UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>();
+	if (!GI) return;
+
+	// 核验 1：所有已连接的客机是否都已经交回了 Ack (状态 >= WaitingForShell)
+	bool bAllClientsReady = true;
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		if (APlayerController* PC = It->Get())
 		{
-			UMyMapTravelSubsystem* StrongThis = WeakThis.Get();
-			UWorld* SafeWorld = StrongThis ? StrongThis->GetWorld() : nullptr;
-			if (!StrongThis || !SafeWorld) return;
-
-			bool bAllReady = true;
-
-			// 检查当前局内所有有效玩家的同步组件状态
-			for (FConstPlayerControllerIterator It = SafeWorld->GetPlayerControllerIterator(); It; ++It)
+			if (AMyPlayerState* MyPS = PC->GetPlayerState<AMyPlayerState>())
 			{
-				if (APlayerController* IterPC = It->Get())
+				// 只要还有人在 Traveling (黑屏没播完，或者 Ack 还在天上飞)，立刻否决退回死等！
+				if (MyPS->MapTravelComponent && MyPS->MapTravelComponent->DeploymentStatus == ETravelDeploymentStatus::Traveling)
 				{
-					if (UMyMapTravelNetComponent* NetComp = IterPC->FindComponentByClass<UMyMapTravelNetComponent>())
+					bAllClientsReady = false;
+					break;
+				}
+			}
+		}
+	}
+
+	// 核验 2：引擎底层是否 Ready（跨图需等 Persistent 进内存，同图不切图必定为 Ready）
+	bool bEngineReady = GI->PendingTargetMapName.IsNone() || GI->IsEngineReady();
+
+	// 💥 并发锁核查：全员 UI 遮挡信号确认 + 引擎 Ready
+	if (bAllClientsReady && bEngineReady)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("👑 [大一统物理总闸] 收到全员 WaitingForShell 信号，令牌正式接管并执行物理流送与阵型排布！"));
+
+		// 统一执行物理流送与排兵布阵！(内部兼容了同图切 DataLayer 和跨图找肉体)
+		SnapPlayerToDestination();
+
+		// 物理世界 100% 安全就绪，全员翻转令牌为 ReadyToPossess！
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			if (APlayerController* PC = It->Get())
+			{
+				if (AMyPlayerState* MyPS = PC->GetPlayerState<AMyPlayerState>())
+				{
+					if (UMyMapTravelStateComponent* NetPS = MyPS->MapTravelComponent)
 					{
-						if (NetComp->GetSyncState() != ETravelSyncState::Ready)
-						{
-							bAllReady = false;
-							break;
-						}
+						// 下发解封令牌，触发三锁合一！
+						NetPS->SetDeploymentStatus(ETravelDeploymentStatus::ReadyToPossess);
 					}
 				}
 			}
-
-			// 🛡️ 超时兜底逻辑：计算已经死等了多久
-			double ElapsedTime = SafeWorld->GetTimeSeconds() - StartTime;
-			if (ElapsedTime >= MaxTravelWait)
-			{
-				UE_LOG(LogTemp, Error, TEXT("⚠️ [MapTravel] 同步握手超时 (已等待 %.1f 秒)！强制执行物理折叠以防止全队死锁。"), ElapsedTime);
-				bAllReady = true; // 强制放行
-			}
-
-			// ==============================================================================
-			// 【网络握手第三阶段：全员黑屏就绪，执行物理折叠！】
-			// ==============================================================================
-			if (bAllReady)
-			{
-				SafeWorld->GetTimerManager().ClearTimer(StrongThis->SyncWaitTimerHandle);
-
-				// ==============================================================================
-				// 【核心补全：同地图小队跟随瞬移！ (Same-Map Squad Teleport)】
-				// 遵循“灵魂与躯壳分离”原则：客户端只负责黑屏，所有肉体的物理移动全由服务器统筹。
-				// ==============================================================================
-				if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(SafeWorld->GetAuthGameMode()))
-				{
-					// 【核心修复】：提取目标地的绝对地板 Z 坐标，杜绝 90cm 悬空
-					float BaseFloorZ = TargetTransform.GetLocation().Z;
-
-					// 结合 O(1) 优化，提取黑名单
-					TArray<AActor*> IgnoredActorsForTrace;
-					for (const auto& WeakChar : StrongThis->GlobalCharacterCache)
-					{
-						if (ATopCharacter* Char = WeakChar.Get()) IgnoredActorsForTrace.Add(Char);
-					}
-
-					// 2.5D 专属排兵布阵！使用固定的左右交替站位，杜绝肉体重叠
-					// 不再区分谁是主机、谁是副机、谁是AI。所有人都只是 FriendlyRoster 里的躯壳。
-					float CurrentXOffset = 0.0f;
-					bool bFlipOffset = true;
-
-					// 直接遍历已经存在于当前地图上的队友肉体
-					for (ATopCharacter* Teammate : GM->FriendlyRoster)
-					{
-						// 1. 基础安全校验
-						if (!Teammate || Teammate->IsActorBeingDestroyed()) continue;
-
-						// 左右交替偏移：基于目标点 TargetTransform
-						FVector OffsetLoc = TargetTransform.GetLocation();
-						OffsetLoc.X += (bFlipOffset ? CurrentXOffset : -CurrentXOffset);
-
-						// 每排完一左一右，间距拉大
-						if (!bFlipOffset || CurrentXOffset == 0.0f)
-						{
-							CurrentXOffset += 120.0f;
-						}
-						if (CurrentXOffset > 0.0f)
-						{
-							bFlipOffset = !bFlipOffset;
-						}
-
-						// ==============================================================================
-						// 【同图探针升级：贴地短射线 + ECC_WorldStatic】
-						// ==============================================================================
-						FHitResult GroundHit;
-						// 从预估地板的上方 50cm 往下探 100cm，避免从高空打中隐形门框
-						FVector TraceStart = OffsetLoc;
-						TraceStart.Z = BaseFloorZ + 50.0f;
-						FVector TraceEnd = OffsetLoc;
-						TraceEnd.Z = BaseFloorZ - 100.0f;
-
-						FCollisionQueryParams Params;
-						Params.AddIgnoredActors(IgnoredActorsForTrace);
-
-						// 必须用 ECC_WorldStatic，彻底无视各种特效和物理穿透件
-						if (SafeWorld->LineTraceSingleByChannel(GroundHit, TraceStart, TraceEnd, ECC_WorldStatic, Params))
-						{
-							// ==================== 【胶囊体中心高度补齐】 ====================
-							// 兜底半高
-							float CapsuleHalfHeight = 90.0f;
-
-							// 直接从活着的队友身上提取真实的胶囊体高度
-							if (UCapsuleComponent* Cap = Teammate->GetCapsuleComponent())
-							{
-								CapsuleHalfHeight = Cap->GetUnscaledCapsuleHalfHeight();
-							}
-
-							// 真实地板 Z 坐标 + 胶囊体真实半高 + 1.0f 容差 = 完美的落地中心点
-							OffsetLoc.Z = GroundHit.ImpactPoint.Z + CapsuleHalfHeight + 1.0f;
-						}
-						else
-						{
-							// 兜底防错
-							float CapsuleHalfHeight = 90.0f;
-							if (UCapsuleComponent* Cap = Teammate->GetCapsuleComponent())
-							{
-								CapsuleHalfHeight = Cap->GetUnscaledCapsuleHalfHeight();
-							}
-							OffsetLoc.Z = BaseFloorZ + CapsuleHalfHeight + 1.0f;
-						}
-
-						// ==================== 【同图核心：直接瞬移现有肉体】 ====================
-						// 参数 false：关闭 Sweep 碰撞检测，无视沿途障碍物强行瞬移。
-						// 参数 true：TeleportPhysics，瞬移后保留物理属性（由于我们在前置函数已将其完全冻结，此处绝对安全）。
-						// 核心纠正：服务器对所有肉体强行执行物理折叠，虚幻的 Replicated Movement 会瞬间下发客机，杜绝拉扯！
-						Teammate->TeleportTo(OffsetLoc, TargetTransform.GetRotation().Rotator(), false, true);
-
-						// 瞬移后立刻点穴，防止在黑幕期间掉落
-						if (UCharacterMovementComponent* CMC = Teammate->GetCharacterMovement())
-						{
-							CMC->DisableMovement();
-						}
-
-						// 将刚落地成功的队友立刻加入黑名单，绝不干扰下一个人的探测
-						IgnoredActorsForTrace.Add(Teammate);
-						UE_LOG(LogTemp, Warning, TEXT("🚀 [服务器上帝视角] 肉体已成功分配阵型并完成物理搬运: %s"), *Teammate->GetName());
-					}
-				}
-
-				// ==============================================================================
-				// 【解封】：物理搬运全量完成！向所有被蒙着眼睛的客机广播下达解封令！
-				// ==============================================================================
-				for (FConstPlayerControllerIterator It = SafeWorld->GetPlayerControllerIterator(); It; ++It)
-				{
-					if (APlayerController* IterPC = It->Get())
-					{
-						if (UMyMapTravelNetComponent* NetComp = IterPC->FindComponentByClass<UMyMapTravelNetComponent>())
-						{
-							NetComp->Client_NotifyPhysicalTeleportDone();
-							NetComp->ResetSyncState();
-						}
-					}
-				}
-			}
-		}, 0.05f, true);
+		}
+	}
 }
 
 void UMyMapTravelSubsystem::CommitSameMapDataLayer()
 {
-	// 当大管家的 Timer 到期，并在 OnSameMapScreenOffFinished（屏幕 100% 纯黑）中回调本接口时，执行数据层斩杀
+	// 💥 调用时机已改变：当 WaitingForShell 令牌大一统总闸触发时，在此执行数据层斩杀
 	if (PendingSameMapDataLayer)
 	{
 		// 输出斩杀与替换确认日志
-		UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🔲 黑幕已就位！执行同图数据层真实切换与远端卸载"));
+		UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🔲 UI 掩护已就位！执行同图数据层真实切换与远端卸载"));
 
-		// 【修改】：呼叫流送子系统刷新滑动窗口
 		if (UMyDataLayerStreamingSubsystem* StreamingSub = GetWorld()->GetSubsystem<UMyDataLayerStreamingSubsystem>())
 		{
 			// 瞬间刷新窗口算法：利用当前身处的目标地块重新计算远近维度，激活新区域，强行物理级卸载老区域
@@ -623,6 +653,15 @@ void UMyMapTravelSubsystem::ExecuteHostTravel(FName TargetLevelName)
 
 void UMyMapTravelSubsystem::ExecuteClientJoin(const FString& ConnectString)
 {
+	// 💥【核心修复】：采纳完美方案！在加入大厅发车时，赋予客机初次添加标识！
+	if (UWorld* World = GetWorld())
+	{
+		if (UMyGameInstance* GI = World->GetGameInstance<UMyGameInstance>())
+		{
+			GI->bIsClientInitialJoin = true;
+		}
+	}
+
 	// 客户端专属飞线加入：强制绝对跳转 (bAbsolute = true)
 	InternalExecuteTravel(NAME_None, ConnectString, true, true);
 }
@@ -822,40 +861,46 @@ void UMyMapTravelSubsystem::InternalExecuteTravel(FName TargetLevelName, const F
 	// 核心数据驱动：直接记下目标地图名，落地后大管家自己会根据名字去查字典
 	GI->PendingTargetMapName = TargetLevelName;
 
-	// 通过大管家配置拉起熄屏 UI，传入软引用与设计师配置的淡出时间
-	GI->PlayScreenOffPhaseUI(OutConfig.ScreenOffUIClass, OutConfig.ScreenOffDuration);
-
 	// ==============================================================================
-	// 【网络握手第一阶段：触发所有客户端拉起跨图专属黑幕】
+	// 【服务器独裁第一阶段：强塞 Traveling 令牌，触发跨图黑幕】
+	// 彻底废除旧版 RPC！全服统一下达强制旅行令，客户端本地自行拉起遮罩。
 	// ==============================================================================
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
 		if (APlayerController* IterPC = It->Get())
 		{
-			if (UMyMapTravelNetComponent* NetComp = IterPC->FindComponentByClass<UMyMapTravelNetComponent>())
+			// 【核心修改】：O(1) 极速提取成员变量
+			if (AMyPlayerState* MyPS = IterPC->GetPlayerState<AMyPlayerState>())
 			{
-				// 下发跨图 RPC 握手，客机将自动拉起熄屏 UI 并返回 Ready
-				NetComp->Server_InitiateCrossMapTransition(TargetLevelName);
+				if (UMyMapTravelStateComponent* NetPS = MyPS->MapTravelComponent)
+				{
+					NetPS->SetDeploymentStatus(ETravelDeploymentStatus::Traveling);
+				}
 			}
 		}
 	}
 
 	// ==============================================================================
-	// 【网络握手第二阶段：高频轮询死等全员闭眼 + 物理时序死锁】
+	// 【服务器独裁第二阶段：物理时序死等，绝不轮询客机网络】
+	// 
+	// 【逻辑升级补充】：为防客机网卡导致 ServerTravel 时黑幕尚未盖下而发生画面硬切，
+	// 此处升级为 0.05s 状态栅栏：在物理时间走完的基础上，必须加入全员 UI 就绪状态的核验。
 	// ==============================================================================
 	double StartTime = World->GetTimeSeconds();
 
 	// 强制物理等待时间：死等设计师配置的黑屏时间走完
 	double RequiredPhysicalWait = OutConfig.ScreenOffDuration;
-	// 物理防死锁计算：取 UI 动画时长再加 2 秒作为极限断连超时
-	double MaxTravelWait = FMath::Max(5.0, RequiredPhysicalWait + 2.0);
 
-	// 使用 TWeakObjectPtr 包装世界指针，防止 2 秒等待期内世界被意外销毁导致野指针崩溃
+	// 💥【续命护航】：将极易被 GC 踩碎的局部 TravelURL 强行存进受 UPROPERTY 保护的锚点！
+	PendingTravelURL = TravelURL;
+
+	// 使用 TWeakObjectPtr 包装世界指针，防止等待期内世界被意外销毁导致野指针崩溃
 	TWeakObjectPtr<UMyMapTravelSubsystem> WeakThis(this);
 	TWeakObjectPtr<UWorld> WeakWorld(World);
 
-	// 开启高频定时器，死等网络确认与物理时间流逝完毕
-	World->GetTimerManager().SetTimer(SyncWaitTimerHandle, [WeakThis, WeakWorld, TravelURL, bIsAbsolute, bIsClientJoin, StartTime, RequiredPhysicalWait, MaxTravelWait]()
+	// 开启高频定时器，死等物理时间流逝完毕
+	// 💥 闭包按值捕获列表不再捕获 TravelURL！彻底杀掉乱码隐患！
+	World->GetTimerManager().SetTimer(SyncWaitTimerHandle, [WeakThis, WeakWorld, bIsAbsolute, bIsClientJoin, StartTime, RequiredPhysicalWait]()
 		{
 			// 唤醒时重新安全提取强引用，如果内存已经被销毁，这里会安全返回 nullptr
 			UMyMapTravelSubsystem* StrongThis = WeakThis.Get();
@@ -864,74 +909,68 @@ void UMyMapTravelSubsystem::InternalExecuteTravel(FName TargetLevelName, const F
 
 			double ElapsedTime = SafeWorld->GetTimeSeconds() - StartTime;
 
-			// 💥 【核心时序防线】：物理时间必须流逝完毕！绝不让肉体在闭眼前提前消失！
-			bool bTimeElapsed = ElapsedTime >= RequiredPhysicalWait;
-			bool bAllReady = true;
-
-			// 严密监控当前局内所有客机是否已经拉好黑幕
-			for (FConstPlayerControllerIterator It = SafeWorld->GetPlayerControllerIterator(); It; ++It)
+			// 💥 【跨图管线】：只保留纯净的物理倒计时！不在这里校验 Ack！
+			// 等到新世界落地时，大管家自然会发 Ack 触发 WaitingForShell！
+			if (ElapsedTime >= RequiredPhysicalWait)
 			{
-				if (APlayerController* PC = It->Get())
-				{
-					if (UMyMapTravelNetComponent* NetComp = PC->FindComponentByClass<UMyMapTravelNetComponent>())
-					{
-						if (NetComp->GetSyncState() != ETravelSyncState::Ready)
-						{
-							bAllReady = false;
-							break;
-						}
-					}
-				}
-			}
-
-			// 超时强制放行防线：防止有客机彻底掉线导致全服死锁
-			if (ElapsedTime >= MaxTravelWait)
-			{
-				bAllReady = true;
-				bTimeElapsed = true;
-			}
-
-			// ==============================================================================
-			// 【网络握手第三阶段：网络与物理双重就绪，启动底层无缝跨界！】
-			// ==============================================================================
-			// 必须满足：所有客机收到黑幕指令 (Ready) AND 物理黑幕时间已走完 (TimeElapsed)
-			if (bAllReady && bTimeElapsed)
-			{
-				// ==============================================================================
-				// 💥 【终极排雷】：打破 C++ Lambda 的悬空指针魔咒！
-				// 由于紧接着要调用 ClearTimer 抹杀本定时器，会导致本 Lambda 内捕获的所有堆内存变量全部被物理销毁！
-				// 必须在“自杀”前，把接下来需要用到的参数全部深拷贝到栈内存中！
-				// ==============================================================================
-				FString SafeTravelURL = TravelURL;
-				bool bSafeIsAbsolute = bIsAbsolute;
-				bool bSafeIsClientJoin = bIsClientJoin;
-
 				// 满足条件，立刻销毁轮询器
 				SafeWorld->GetTimerManager().ClearTimer(StrongThis->SyncWaitTimerHandle);
 
-				// 时序归位：真正起航！
-				if (bSafeIsClientJoin)
+				// ==============================================================================
+				// 🚀 【分流起航】：使用强引用的 PendingTravelURL，跨界敲门绝不乱码！
+				// ==============================================================================
+				if (bIsClientJoin)
 				{
-					if (APlayerController* PC = SafeWorld->GetFirstPlayerController())
-					{
-						PC->ClientTravel(SafeTravelURL, TRAVEL_Absolute);
-					}
+					StrongThis->TriggerClientTravelCommand(StrongThis->PendingTravelURL);
 				}
 				else
 				{
-					if (bSafeIsAbsolute)
-					{
-						// 房主建房必须剥夺旧世界的无缝漫游防截断
-						if (AGameModeBase* CurrentGM = SafeWorld->GetAuthGameMode())
-						{
-							CurrentGM->bUseSeamlessTravel = false;
-						}
-					}
-					// 命令引擎底层开启旅行管线，跨越位面！告别乱码 ⹂Ɍ！
-					SafeWorld->ServerTravel(SafeTravelURL, bSafeIsAbsolute);
+					StrongThis->TriggerServerTravelCommand(StrongThis->PendingTravelURL, bIsAbsolute);
 				}
 			}
 		}, 0.05f, true);
+}
+
+
+void UMyMapTravelSubsystem::TriggerClientTravelCommand(const FString& TravelURL)
+{
+	// ==============================================================================
+	// 🚪 【副机管线】：局外客机拿着 IP / Session 地址强行敲开主机大门！
+	// ==============================================================================
+	if (UWorld* World = GetWorld())
+	{
+		if (APlayerController* PC = World->GetFirstPlayerController())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🚪 副机发起飞线连接。目标地址: %s"), *TravelURL);
+
+			// 底层指令：强制客机本地断开当前世界，向指定服务器发起连接请求
+			PC->ClientTravel(TravelURL, TRAVEL_Absolute);
+		}
+	}
+}
+
+
+void UMyMapTravelSubsystem::TriggerServerTravelCommand(const FString& TravelURL, bool bIsAbsolute)
+{
+	// ==============================================================================
+	// 👑 【主机管线】：房主带队跨图/初次建房，全权主导物理位面的折叠！
+	// ==============================================================================
+	if (UWorld* World = GetWorld())
+	{
+		if (bIsAbsolute)
+		{
+			// 房主建房时，必须剥夺旧世界的无缝漫游防截断
+			if (AGameModeBase* CurrentGM = World->GetAuthGameMode())
+			{
+				CurrentGM->bUseSeamlessTravel = false;
+			}
+		}
+
+		UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 👑 主机发起跨界/建房，引擎底层自动硬拽全服局内副机跟随！目标: %s"), *TravelURL);
+
+		// 底层指令：主机强行切换当前世界，NetDriver 会自动将所有连接的局内副机硬拽过去！
+		World->ServerTravel(TravelURL, bIsAbsolute);
+	}
 }
 
 void UMyMapTravelSubsystem::RestorePlayerInput()
@@ -1041,11 +1080,49 @@ void UMyMapTravelSubsystem::SnapPlayerToDestination()
 	if (bIsCurrentMapInitialBoot)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🏠 开荒状态保护生效：免除一切队伍强行排队，维持场景初始排放原状！"));
+
+		// 【核心修复 1】：开荒时维持原状，但必须向系统宣告“物理地基已就绪”！
+		// 否则玩家会被导演系统永远挂起在 WaitingForShell 状态！
+		bIsPhysicalLayoutReady = true;
+
+		// 【还原你的原版安全逻辑】：把由于地基未就绪而罚站的玩家安全拉起来！
+		// 只有拿到 PlayerState 才执行，彻底消灭刚才日志里的“同步超时 (5秒)”！
+		if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(World->GetAuthGameMode()))
+		{
+			for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+			{
+				if (APlayerController* IterPC = It->Get())
+				{
+					// 【核心修改】：改为 O(1) 直接访问组件成员变量
+					if (AMyPlayerState* MyPS = IterPC->GetPlayerState<AMyPlayerState>())
+					{
+						if (UMyMapTravelStateComponent* PS = MyPS->MapTravelComponent)
+						{
+							if (PS->DeploymentStatus == ETravelDeploymentStatus::WaitingForShell && !IterPC->GetPawn())
+							{
+								GM->RestartPlayer(IterPC);
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// ==============================================================================
+		// 💥【架构级修正】：开荒使命完成，优雅退场！
+		// 随着上方的 RestartPlayer 执行完毕，场景内原生的假人已被夺舍，初次落地彻底大功告成！
+		// 必须在此刻立刻关闭开荒锁！确保玩家后续的任何传送都能顺利进入正常的大一统排队管线！
+		// ==============================================================================
+		bIsCurrentMapInitialBoot = false;
+
 		return;
 	}
 
 	// 声明目标接机点指针，准备进行全图搜索
 	AMyUniversalDestination* TargetDest = nullptr;
+	const FTransform* PrimaryPtr = nullptr;
+	UDataLayerAsset* TargetDataLayer = nullptr;
+	FTransform DestTransform = FTransform::Identity;
 
 	// ==============================================================================
 	// 【大一统闭环】：绝对的数据驱动寻址
@@ -1053,18 +1130,30 @@ void UMyMapTravelSubsystem::SnapPlayerToDestination()
 	// 只有当大管家手中确实持有跨界车票 (PendingTravelRoute) 时，才去寻找传送门出口！
 	if (GI->PendingTravelRoute)
 	{
-		// 此时新世界的 Persistent Level 已 Ready，目标必然在内存中，执行全局 Actor 扫盘
-		for (TActorIterator<AMyUniversalDestination> It(World); It; ++It)
+		// 💥 大一统：如果是同图，直接 O(1) 查高速字典拿 DataLayer 和坐标
+		if (SameMapDestinationRegistry.Contains(GI->PendingTravelRoute))
 		{
-			if (AMyUniversalDestination* Dest = *It)
+			PrimaryPtr = &SameMapDestinationRegistry[GI->PendingTravelRoute].TargetTransform;
+			TargetDataLayer = SameMapDestinationRegistry[GI->PendingTravelRoute].BoundDataLayer;
+		}
+		else
+		{
+			// 跨图：此时新世界的 Persistent Level 已 Ready，目标必然在内存中，执行全局 Actor 扫盘 O(N)
+			for (TActorIterator<AMyUniversalDestination> It(World); It; ++It)
 			{
-				// 校验匹配：如果该接机点的监听列表中，包含大管家手里的这张车票
-				if (Dest->ListeningRoutes.Contains(GI->PendingTravelRoute))
+				if (AMyUniversalDestination* Dest = *It)
 				{
-					// 锁定目标接机点
-					TargetDest = Dest;
-					// 寻址成功，立刻跳出高耗时的遍历循环
-					break;
+					// 校验匹配：如果该接机点的监听列表中，包含大管家手里的这张车票
+					if (Dest->ListeningRoutes.Contains(GI->PendingTravelRoute))
+					{
+						// 锁定目标接机点
+						TargetDest = Dest;
+						DestTransform = FTransform(Dest->GetActorRotation(), Dest->GetActorLocation() + FVector(0.0f, 0.0f, 15.0f), FVector::OneVector);
+						PrimaryPtr = &DestTransform;
+						TargetDataLayer = Dest->BoundDataLayer;
+						// 寻址成功，立刻跳出高耗时的遍历循环
+						break;
+					}
 				}
 			}
 		}
@@ -1074,17 +1163,29 @@ void UMyMapTravelSubsystem::SnapPlayerToDestination()
 	APlayerController* PC = GetRealPlayerController(World);
 	APawn* Pawn = PC ? PC->GetPawn() : nullptr;
 
-	// 记录小队落地的基准坐标
-	FVector BaseLocation = FVector::ZeroVector;
-	FRotator BaseRotation = FRotator::ZeroRotator;
-
-	// 全局锁定落地基准点
-	if (TargetDest && Pawn)
+	// ==============================================================================
+	// 🚀 大一统：执行统一的数据层流送！
+	// ==============================================================================
+	if (PendingSameMapDataLayer)
 	{
-		// 提取目标点的绝对坐标，Z轴强制增加 15cm 的高度冗余，作为完美防穿模的下落空间
-		BaseLocation = TargetDest->GetActorLocation() + FVector(0.0f, 0.0f, 15.0f);
-		BaseRotation = TargetDest->GetActorRotation();
+		// 【同图专属管线】：预热早在 ExecuteSameMapTravel 就做过了，这里直接调用原有的斩杀接口！
+		CommitSameMapDataLayer();
+	}
+	else if (TargetDataLayer)
+	{
+		// 【跨图专属管线】：跨图必须等新世界落地后才能提取 DataLayer，所以预热和刷新在此刻同时执行！
+		UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🔄 执行跨图大一统数据层滑动窗口流送"));
+		if (UMyDataLayerStreamingSubsystem* StreamingSub = World->GetSubsystem<UMyDataLayerStreamingSubsystem>())
+		{
+			StreamingSub->PreheatZoneBackground(TargetDataLayer);
+			StreamingSub->RefreshSlidingWindow(TargetDataLayer, true);
+		}
+	}
 
+	// 全局锁定落地状态（仅日志打印，实际物理计算已移交底层统一接口）
+	// 💥 【核心修复】：修正假警报！同图有 PrimaryPtr，跨图有 TargetDest，只要有一个就算成功！
+	if ((TargetDest || PrimaryPtr) && Pawn)
+	{
 		if (GI->PendingTravelRoute)
 		{
 			UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 💥 瞬移成功！玩家真身强行穿插至目标路由: %s"), *GI->PendingTravelRoute->GetName());
@@ -1092,25 +1193,68 @@ void UMyMapTravelSubsystem::SnapPlayerToDestination()
 	}
 	else if (Pawn)
 	{
-		// 🎯 兜底：如果没有找到接机点（场景里没放，或者策划漏配了）
-		// 绝对不能跳过小队的生成逻辑！就以玩家当前现有的兜底位置为基准
-		BaseLocation = Pawn->GetActorLocation();
-		BaseRotation = Pawn->GetActorRotation();
-
 		UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] ⚠️ 警告：未找到路由对应的接机点，采用默认出生点兜底。"));
 	}
 
 	// 🚀 逻辑拆分点 1：处理本地表现 (仅在 LocalPlayer 所在的机器执行)
+	// (取代了已废弃的 HandleLocalPlayerSnapping)
 	if (PC && PC->IsLocalController())
 	{
-		HandleLocalPlayerSnapping(World, TargetDest);
+		// 镜头视口对齐：强行把玩家控制器的相机视角拧过去，防止镜头滞后导致的平移拖影！
+		if (TargetDest) PC->SetControlRotation(TargetDest->GetActorRotation());
+		else if (PrimaryPtr) PC->SetControlRotation(PrimaryPtr->GetRotation().Rotator());
 	}
 
 	// 🚀 逻辑拆分点 2：处理权威部署 (单机开荒、Listen Server 主机执行)
-	// 这个条件已经天然剔除了客机，因此 DeploySquadTeammates 内部只需要走最纯粹的生成逻辑
+	// 第一步：先释放小队记忆库中的 AI 队友躯壳进内存并注册名册
 	if (World->GetNetMode() < NM_Client)
 	{
 		DeploySquadTeammates(World, TargetDest, GI);
+	}
+
+	// ==============================================================================
+	// 【契约建立】：宣告物理地基就绪！捞起被 WaitingForShell 挂起的玩家控制器！
+	// 第二步：执行 RestartPlayer，正式捏出主机/副机的真实肉体并注册进 FriendlyRoster 名册！
+	// ==============================================================================
+	bIsPhysicalLayoutReady = true;
+
+	if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(World->GetAuthGameMode()))
+	{
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			if (APlayerController* IterPC = It->Get())
+			{
+				// 【核心修改】：改为 O(1) 直接访问组件成员变量
+				if (AMyPlayerState* MyPS = IterPC->GetPlayerState<AMyPlayerState>())
+				{
+					if (UMyMapTravelStateComponent* PS = MyPS->MapTravelComponent)
+					{
+						// 捞起之前因为没物理地基而在 WaitingForShell 罚站的控制器，重新走夺舍/捏人管线！
+						if (PS->DeploymentStatus == ETravelDeploymentStatus::WaitingForShell && !IterPC->GetPawn())
+						{
+							GM->RestartPlayer(IterPC);
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// ==============================================================================
+	// 💥【终极时序闭环：全员到齐，统一排队！】
+	// 第三步：此时 AI 和 主机/副机的肉体全部生成完毕并注册进 FriendlyRoster 大名单！
+	// 统一由服务器上帝视角统筹排队，主机必然稳稳抢占 C 位 (Offset=0)，全队瞬间对齐阵型！
+	// ==============================================================================
+	if (World->GetNetMode() < NM_Client)
+	{
+		// 重新拉取一次真实的本地 Pawn（因为刚在上面通过 RestartPlayer 捏出）
+		APawn* NewlySpawnedPawn = PC ? PC->GetPawn() : nullptr;
+
+		// 提取纯净的落地基准矩阵
+		FTransform FinalBaseTransform = ResolveSafeDeploymentTransform(World, PrimaryPtr, NewlySpawnedPawn);
+
+		// 全体肉体到位，正式执行上帝视角统一排兵布阵！
+		ExecuteSquadFormationDeployment(World, FinalBaseTransform);
 	}
 
 	// ==============================================================================
@@ -1121,86 +1265,33 @@ void UMyMapTravelSubsystem::SnapPlayerToDestination()
 	// ==============================================================================
 }
 
-void UMyMapTravelSubsystem::HandleLocalPlayerSnapping(UWorld* World, AMyUniversalDestination* Dest)
-{
-	// 核心安全获取：提取绝对真实的本地玩家控制器，防死无缝漫游产生的幽灵假身
-	APlayerController* PC = GetRealPlayerController(World);
-	if (!PC || !PC->IsLocalController()) return;
-
-	// ==============================================================================
-	// 【新框架大一统：本地物理剥夺】
-	// 既然已经全面拥抱“服务器上帝视角排队”的绝对权威，本地（无论主机还是客机）
-	// 都绝不再执行任何 TeleportTo 物理操作！将物理权 100% 移交给 DeploySquadTeammates！
-	// 此函数退化为纯粹的表现层：只负责加载美术资源与修正镜头。
-	// ==============================================================================
-
-	if (Dest)
-	{
-		// 1. 本地表现层预热：跨图落地时，立即刷新数据层滑动窗口
-		if (Dest->BoundDataLayer)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 🔄 跨图落地表现层：立刻刷新目标点的数据层滑动窗口"));
-			if (UMyDataLayerStreamingSubsystem* StreamingSub = World->GetSubsystem<UMyDataLayerStreamingSubsystem>())
-			{
-				StreamingSub->RefreshSlidingWindow(Dest->BoundDataLayer, true);
-			}
-		}
-
-		// 2. 镜头视口对齐：强行把玩家控制器的相机视角拧过去，防止镜头滞后导致的平移拖影！
-		// 摄像机旋转不涉及物理引擎碰撞，本地执行绝对安全
-		PC->SetControlRotation(Dest->GetActorRotation());
-	}
-
-	UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] 👁️ 本地表现层就绪！跳过所有物理探针，静默等待服务器排队分配肉体坐标！"));
-}
-
 void UMyMapTravelSubsystem::DeploySquadTeammates(UWorld* World, AMyUniversalDestination* Dest, UMyGameInstance* GI)
 {
+	// 💥 【核心拦截】：如果是同图漫游，大管家根本没装车，记忆库必定为空！
+	// 直接退出！绝不执行下方无意义的空转与基准点探针警报！
+	if (!GI || GI->SquadClassMemory.IsEmpty())
+	{
+		return;
+	}
+
 	APlayerController* PC = GetRealPlayerController(World);
 	APawn* Pawn = PC ? PC->GetPawn() : nullptr;
-
-	// 记录小队落地的基准坐标
-	FVector BaseLocation = FVector::ZeroVector;
-	FRotator BaseRotation = FRotator::ZeroRotator;
-
-	if (Dest)
-	{
-		// 提取目标点的绝对坐标，Z轴强制增加 15cm 的高度冗余，作为完美防穿模的下落空间
-		BaseLocation = Dest->GetActorLocation() + FVector(0.0f, 0.0f, 15.0f);
-		BaseRotation = Dest->GetActorRotation();
-	}
-	else if (Pawn)
-	{
-		// 🎯 修复：如果没有找到接机点（场景里没放，或者策划漏配了）
-		// 绝对不能跳过小队的生成逻辑！就以玩家当前现有的兜底位置为基准
-		BaseLocation = Pawn->GetActorLocation();
-		BaseRotation = Pawn->GetActorRotation();
-	}
-	else
-	{
-		// 终极兜底：主机都没生出来时，找地图原配起点
-		if (AActor* PS = UGameplayStatics::GetActorOfClass(World, APlayerStart::StaticClass()))
-		{
-			BaseLocation = PS->GetActorLocation();
-			BaseRotation = PS->GetActorRotation();
-		}
-	}
-
-	// ==============================================================================
-	// 【全量角色屏蔽 (Global Blacklist)】
-	// ==============================================================================
-	TArray<AActor*> IgnoredActorsForTrace;
-	for (TActorIterator<ATopCharacter> It(World); It; ++It)
-	{
-		if (ATopCharacter* Char = *It)
-		{
-			IgnoredActorsForTrace.Add(Char);
-		}
-	}
 
 	// ==============================================================================
 	// 【新框架大一统：跨图废弃 PlayerStart 挪位，全面拥抱上帝视角统筹】
 	// ==============================================================================
+
+	// 构建目标接机点的安全矩阵 (提取目标点的绝对坐标，Z轴强制增加 15cm 的高度冗余，作为完美防穿模的下落空间)
+	FTransform DestTransform = FTransform::Identity;
+	const FTransform* PrimaryPtr = nullptr;
+	if (Dest)
+	{
+		DestTransform = FTransform(Dest->GetActorRotation(), Dest->GetActorLocation() + FVector(0.0f, 0.0f, 15.0f), FVector::OneVector);
+		PrimaryPtr = &DestTransform;
+	}
+
+	// 💥 完美闭环：一行调用大一统接口，提取绝对纯净的坐标矩阵，取代原来 20 多行的冗余兜底！
+	FTransform BaseTransform = ResolveSafeDeploymentTransform(World, PrimaryPtr, Pawn);
 
 	// 第一步：只管把跨图记忆库里的 AI 躯壳释放出来
 	for (TSubclassOf<ATopCharacter> TeammateClass : GI->SquadClassMemory)
@@ -1209,87 +1300,15 @@ void UMyMapTravelSubsystem::DeploySquadTeammates(UWorld* World, AMyUniversalDest
 		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
 		// 随便在基准点上方生出来即可，它的 BeginPlay 会自动将其注册进 GM->FriendlyRoster
-		World->SpawnActor<ATopCharacter>(TeammateClass, BaseLocation + FVector(0, 0, 500.0f), BaseRotation, SpawnParams);
+		World->SpawnActor<ATopCharacter>(TeammateClass, BaseTransform.GetLocation() + FVector(0.0f, 0.0f, 500.0f), BaseTransform.GetRotation().Rotator(), SpawnParams);
 	}
 
 	// 🚀 内存优化：落地结束，立刻清空小队数组，释放类引用防止 TArray 内存泄漏！
 	GI->SquadClassMemory.Empty();
 	UE_LOG(LogTemp, Warning, TEXT("🧹 [内存优化] 小队记忆库已释放，等待下一轮装车。"));
 
-	// ==============================================================================
-	// 第二步：复用同地图的“上帝视角统一排队”逻辑！
-	// 不管是刚连入生在十万八千里的副机，还是刚才生在半空中的 AI，统统强行抓过来排队！
-	// ==============================================================================
-	if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(World->GetAuthGameMode()))
-	{
-		float BaseFloorZ = BaseLocation.Z;
-		float CurrentXOffset = 0.0f; // 0 点保留给第一顺位（通常是房主）
-		bool bFlipOffset = true;
-
-		for (ATopCharacter* Teammate : GM->FriendlyRoster)
-		{
-			// 基础安全校验
-			if (!Teammate || Teammate->IsActorBeingDestroyed()) continue;
-
-			// 左右交替偏移：基于基准点
-			FVector OffsetLoc = BaseLocation;
-			OffsetLoc.X += (bFlipOffset ? CurrentXOffset : -CurrentXOffset);
-
-			// 每排完一左一右，间距拉大
-			if (!bFlipOffset || CurrentXOffset == 0.0f)
-			{
-				CurrentXOffset += 120.0f;
-			}
-			if (CurrentXOffset > 0.0f)
-			{
-				bFlipOffset = !bFlipOffset;
-			}
-
-			// 贴地短探针，寻找真实地板
-			FHitResult GroundHit;
-			FVector TraceStart = OffsetLoc + FVector(0, 0, 150.0f);
-			FVector TraceEnd = OffsetLoc - FVector(0, 0, 300.0f);
-
-			FCollisionQueryParams Params;
-			Params.AddIgnoredActors(IgnoredActorsForTrace);
-
-			// 统一物理标准：使用 ECC_WorldStatic 绝对地形探针
-			if (World->LineTraceSingleByChannel(GroundHit, TraceStart, TraceEnd, ECC_WorldStatic, Params))
-			{
-				float CapsuleHalfHeight = 90.0f;
-				if (UCapsuleComponent* Cap = Teammate->GetCapsuleComponent())
-				{
-					CapsuleHalfHeight = Cap->GetUnscaledCapsuleHalfHeight();
-				}
-				// 真实地板 Z 坐标 + 胶囊体真实半高 + 1.0f 容差 = 完美的落地中心点
-				OffsetLoc.Z = GroundHit.ImpactPoint.Z + CapsuleHalfHeight + 1.0f;
-			}
-			else
-			{
-				// 兜底防错
-				float CapsuleHalfHeight = 90.0f;
-				if (UCapsuleComponent* Cap = Teammate->GetCapsuleComponent())
-				{
-					CapsuleHalfHeight = Cap->GetUnscaledCapsuleHalfHeight();
-				}
-				OffsetLoc.Z = BaseFloorZ + CapsuleHalfHeight + 1.0f;
-			}
-
-			// 核心暗箱：强行将所有名册里的躯壳折叠至计算好的完美阵型！
-			// 底层 Network Replicated Movement 会瞬间剥夺客机的物理反抗权，杜绝拉扯弹射！
-			Teammate->TeleportTo(OffsetLoc, BaseRotation, false, true);
-
-			// 物理点穴：在黑屏彻底解开前，锁死全队重力坠落，保证完美滞空等UI开幕
-			if (UCharacterMovementComponent* CMC = Teammate->GetCharacterMovement())
-			{
-				CMC->DisableMovement();
-			}
-
-			// 将刚落地成功的队友立刻加入黑名单，绝不干扰下一个人的探测
-			IgnoredActorsForTrace.Add(Teammate);
-			UE_LOG(LogTemp, Warning, TEXT("🚀 [跨图上帝视角] 肉体已成功分配阵型并完成物理搬运: %s"), *Teammate->GetName());
-		}
-	}
+	// 💥【核心时序修复】：此处坚决不发车！坚决不调用排队函数！
+	// 必须等待 SnapPlayerToDestination 将挂起的主机/客机全部 RestartPlayer 捏出肉体后，再统一执行排兵布阵！
 }
 
 #pragma endregion
@@ -1314,15 +1333,28 @@ bool UMyMapTravelSubsystem::ExecuteDeploymentDirector(AController* NewPlayer, AM
 	// ==============================================================================
 	// 💥 增加“同步超时”强制放行 (Deadlock Protection)
 	// ==============================================================================
-	if (!NewPlayer->PlayerState)
+	UMyMapTravelStateComponent* PS = nullptr;
+
+	// O(1) 提取：强转出原生宿主，直接拿到焊死的成员变量
+	if (AMyPlayerState* MyPS = NewPlayer->GetPlayerState<AMyPlayerState>())
+	{
+		PS = MyPS->MapTravelComponent;
+	}
+
+	if (!PS)
 	{
 		if (CurrentWaitTime >= 5.0f)
 		{
-			UE_LOG(LogTemp, Error, TEXT("🚨 [DeploymentDirector] 同步超时 (5秒)！强制放行，执行动态捏人兜底！"));
+			UE_LOG(LogTemp, Error, TEXT("🚨 [DeploymentDirector] 同步超时 (5秒)！"));
+
+			// 生化6双主角铁律：如果是客机，没同步上直接判死刑，绝不生成第三个人！
+			if (!NewPlayer->IsLocalController()) return true;
+
+			// 主机兜底：强制放行，执行动态捏人
 			return ExecuteDynamicSquadArrival(NewPlayer, GameMode);
 		}
 
-		// 挂起 0.1 秒后递归轮询，等待客机网络状态就绪
+		// 挂起 0.1 秒后递归轮询，等待客机 PlayerState 网络状态就绪
 		FTimerHandle RetryTimer;
 		TWeakObjectPtr<UMyMapTravelSubsystem> WeakThis(this);
 		TWeakObjectPtr<AController> WeakPlayer(NewPlayer);
@@ -1342,8 +1374,21 @@ bool UMyMapTravelSubsystem::ExecuteDeploymentDirector(AController* NewPlayer, AM
 				}
 			}, 0.1f, false);
 
-		return false;
+		return true; // 拦截原生生成，等待同步
 	}
+
+	// ==============================================================================
+	// 💥 【令牌契约 1：强制挂起】
+	// 如果服务器底层的物理阵型（2.5D 排队或射线落地）还没搞定，任何连入的副机必须强制挂起！
+	// ==============================================================================
+	if (!bIsPhysicalLayoutReady)
+	{
+		PS->SetDeploymentStatus(ETravelDeploymentStatus::WaitingForShell);
+		UE_LOG(LogTemp, Warning, TEXT("🛑 [DeploymentDirector] 物理阵型未就绪，拦截生成，强制玩家进入 WaitingForShell 挂起状态！"));
+		return true;
+	}
+
+	bool bDeploymentSuccess = false;
 
 	// ==============================================================================
 	// 💥 【终极联机修复：主副机管线物理级劈开】
@@ -1351,37 +1396,74 @@ bool UMyMapTravelSubsystem::ExecuteDeploymentDirector(AController* NewPlayer, AM
 	// ==============================================================================
 	if (!NewPlayer->IsLocalController())
 	{
+		// ------------------------------------------------------------------------------
+		// 【管线 A：客机中途加入 / 跨图落地跟随】
+		// 架构核心 (基于 Epic Developer Assistant 方案二深度解析)：
+		// 1. 不可逃避的自动复制：服务器 Spawn 肉体后，NetDriver 会自动将其打包发给客机。
+		//    若客机本地手动生成肉体，会导致“幽灵 Actor”与“镜像副本”互相冲突卡死。
+		// 2. 物理主权悖论：客机本地生成的 Actor 没有网络主权 (NetGUID)，无法被夺舍。
+		// 3. 消灭 105 帧延迟：服务器先行对齐阵型，镜像副本在客机本地生成时就已物理静止。
+		//    客机不需要发信号，自动夺舍后 UI 亮屏，睁眼即是完美阵型，彻底消灭坐标跳变！
+		// ------------------------------------------------------------------------------
 		UE_LOG(LogTemp, Warning, TEXT("[DeploymentDirector] 判定为：【副机/客机连入】。下发管线 -> 剥夺决策权，强制接管大名单待命躯壳！"));
-		return ExecuteGuestDeployment(NewPlayer, GameMode);
-	}
+		bDeploymentSuccess = ExecuteGuestDeployment(NewPlayer, GameMode);
 
-	// ==============================================================================
-	// 💥 以下为主机（Server/Host）绝对决策领域！
-	// 主机负责查表、判相性、找预设件或亲自下达 SpawnActor 指令！
-	// ==============================================================================
-	UMyGameInstance* GI = GetWorld()->GetGameInstance<UMyGameInstance>();
-	if (!GI) return false;
-
-	// 强行剥离 PIE 前缀，获取绝对纯净的 MapName 供查表
-	FString MapName = GetWorld()->GetMapName();
-	FString CleanMapName = UGameplayStatics::GetCurrentLevelName(GetWorld(), true);
-	EMapPhaseType MapType = GI->GetMapPhase(CleanMapName);
-
-	// 逻辑分水岭 1：这张图是否有开荒设定？
-	if (MapType == EMapPhaseType::HasPioneeringPhase)
-	{
-		// 逻辑分水岭 2：这张图的开荒期是否已经结束？
-		if (bIsCurrentMapInitialBoot)
+		if (!bDeploymentSuccess)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[DeploymentDirector] 判定为：【首次开荒图】。下发管线 -> 主机夺舍原生肉体！"));
-			// 【这是开荒！】执行夺舍原生假人，此时不排队。
-			return ExecutePioneeringPossession(NewPlayer, GameMode);
+			// 连躯壳都找不到，直接宣判死刑，打入 Failed 状态
+			PS->SetDeploymentStatus(ETravelDeploymentStatus::Failed);
+			UE_LOG(LogTemp, Error, TEXT("🚨 [DeploymentDirector] 致命拦截：场景内无多余主角躯壳！拒绝客机生成新肉体，加入已被拒绝。"));
+			return true; // 成功拦截 GameMode 原生生成，防止副机被凭空捏出来
+		}
+	}
+	else
+	{
+		// ==============================================================================
+		// 💥 以下为主机（Server/Host）绝对决策领域！
+		// 主机负责查表、判相性、找预设件或亲自下达 SpawnActor 指令！
+		// ------------------------------------------------------------------------------
+		// 【管线 B：主机开荒 /带着副机跨图】
+		// 主机充当造物主，执行 Epic Developer Assistant 所说的“先行预制”机制，
+		// 统筹 Spawn 所有人的肉体并进行中心化排队，为管线 A 提供稳定副本。
+		// ==============================================================================
+		UMyGameInstance* GI = GetWorld()->GetGameInstance<UMyGameInstance>();
+		if (GI)
+		{
+			// 强行剥离 PIE 前缀，获取绝对纯净的 MapName 供查表
+			FString CleanMapName = UGameplayStatics::GetCurrentLevelName(GetWorld(), true);
+			EMapPhaseType MapType = GI->GetMapPhase(CleanMapName);
+
+			// 逻辑分水岭 1：这张图是否有开荒设定？
+			if (MapType == EMapPhaseType::HasPioneeringPhase)
+			{
+				// 逻辑分水岭 2：这张图的开荒期是否已经结束？
+				if (bIsCurrentMapInitialBoot)
+				{
+					UE_LOG(LogTemp, Warning, TEXT("[DeploymentDirector] 判定为：【首次开荒图】。下发管线 -> 主机夺舍原生肉体！"));
+					// 【这是开荒！】执行夺舍原生假人，此时不排队。
+					bDeploymentSuccess = ExecutePioneeringPossession(NewPlayer, GameMode);
+				}
+			}
+
+			if (!bDeploymentSuccess)
+			{
+				// 【走到这里说明：或者是 AlwaysDynamic 地图，或者是已过开荒期的回访图】
+				UE_LOG(LogTemp, Warning, TEXT("[DeploymentDirector] 判定为：【动态生成图/回访图】。下发管线 -> 传送门动态捏人排队！"));
+				bDeploymentSuccess = ExecuteDynamicSquadArrival(NewPlayer, GameMode);
+			}
 		}
 	}
 
-	// 【走到这里说明：或者是 AlwaysDynamic 地图，或者是已过开荒期的回访图】
-	UE_LOG(LogTemp, Warning, TEXT("[DeploymentDirector] 判定为：【动态生成图/回访图】。下发管线 -> 传送门动态捏人排队！"));
-	return ExecuteDynamicSquadArrival(NewPlayer, GameMode);
+	// ==============================================================================
+	// 💥 【令牌契约 2：发牌解封】
+	// 只要肉体分配（无论是夺舍还是生成）成功，服务器立刻翻转令牌，通知客机解封！
+	// ==============================================================================
+	if (bDeploymentSuccess)
+	{
+		PS->SetDeploymentStatus(ETravelDeploymentStatus::ReadyToPossess);
+	}
+
+	return bDeploymentSuccess;
 }
 
 bool UMyMapTravelSubsystem::ExecuteGuestDeployment(AController* NewPlayer, AMyGameModeBase* GameMode)
@@ -1398,8 +1480,6 @@ bool UMyMapTravelSubsystem::ExecuteGuestDeployment(AController* NewPlayer, AMyGa
 		return true;
 	}
 
-	// 💥 防御性基建：副机绝不越权捏人！如果没肉体，直接报错阻断！
-	UE_LOG(LogTemp, Error, TEXT("🚨 [DeploymentDirector] 副机部署失败：未在 FriendlyRoster 中找到可用的无主躯壳！请检查房主是否成功生成了队友！"));
 	return false;
 }
 
@@ -1445,45 +1525,21 @@ bool UMyMapTravelSubsystem::ExecuteDynamicSquadArrival(AController* NewPlayer, A
 		return false;
 	}
 
-	// 寻找大一统接机点（跨图使用）或出生点（未配置接机点时的兜底）
-	FTransform SpawnTransform = FTransform::Identity;
+	// ==============================================================================
+	// 💥 重构剥离：纯粹的躯壳生成 (Pure Shell Spawning)
+	// 彻底放弃在此处寻找传送门与计算落地！全权移交给后期的上帝排队管线统一搬运！
+	// ==============================================================================
 
-	if (GI && GI->PendingTravelRoute)
-	{
-		// 【跨图传送】 -> 去找大一统传送门出口 (AMyUniversalDestination)
-		for (TActorIterator<AMyUniversalDestination> It(GetWorld()); It; ++It)
-		{
-			if (AMyUniversalDestination* Dest = *It)
-			{
-				// 必须查票：只有对应了车票的接机点，才是真正的目的地
-				if (Dest->ListeningRoutes.Contains(GI->PendingTravelRoute))
-				{
-					// 绝对不能强锁 Y 轴！直接取传送门在 3D 空间里的真实坐标。
-					// 仅强制锁定角色的 Scale 为 1:1:1，防止受到传送门缩放的污染。
-					SpawnTransform = FTransform(Dest->GetActorRotation(), Dest->GetActorLocation(), FVector::OneVector);
-					break;
-				}
-			}
-		}
-	}
-
-	// 如果找了一圈发现还是 Identity (比如跨图时没找到对应的传送门，或者没有车票)
-	if (SpawnTransform.Equals(FTransform::Identity))
-	{
-		// 【无空壳且非跨图，或跨图失败兜底】 -> 兜底找初始出生点 (PlayerStart)
-		if (AActor* StartSpot = GameMode->FindPlayerStart(NewPlayer))
-		{
-			// 同样，绝对不能锁 Y 轴！直接取 PlayerStart 在 3D 空间里的真实坐标。
-			SpawnTransform = FTransform(StartSpot->GetActorRotation(), StartSpot->GetActorLocation(), FVector::OneVector);
-		}
-	}
+	// 直接寻找地图原配的 PlayerStart 作为临时产房
+	AActor* StartSpot = GameMode->FindPlayerStart(NewPlayer);
+	FTransform SpawnTransform = StartSpot ? FTransform(StartSpot->GetActorRotation(), StartSpot->GetActorLocation(), FVector::OneVector) : FTransform::Identity;
 
 	// 强制物理降临！
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 	SpawnParams.Owner = NewPlayer;
 
-	// 亲自调用 SpawnActor，生成时自带 SpawnTransform 的正确位置和 2.5D 朝向
+	// 亲自调用 SpawnActor，在临时产房捏出肉体
 	if (APawn* NewBody = GetWorld()->SpawnActor<APawn>(ClassToSpawn, SpawnTransform, SpawnParams))
 	{
 		NewPlayer->Possess(NewBody);
@@ -1492,18 +1548,19 @@ bool UMyMapTravelSubsystem::ExecuteDynamicSquadArrival(AController* NewPlayer, A
 		GameMode->ExecuteFinishRestartPlayer(NewPlayer, SpawnTransform.GetRotation().Rotator());
 
 		// ==============================================================================
-		// 💥 彻底消除悬空的“软着陆”协议 (Secure Landing)
+		// 💥 核心修正：绝对静止！
+		// 剥夺原本的 MOVE_Walking 软着陆！在黑幕期间，新肉体必须处于绝对冻结状态！
+		// 它的最终精确坐标、2.5D朝向和射线贴地，将由 SnapPlayerToDestination 统一接管和传送！
 		// ==============================================================================
 		if (ACharacter* NewChar = Cast<ACharacter>(NewBody))
 		{
 			if (UCharacterMovementComponent* CMC = NewChar->GetCharacterMovement())
 			{
-				CMC->SetMovementMode(MOVE_Walking);
-				CMC->bForceNextFloorCheck = true; // 强制地板检测，消除微悬空，防第一帧抖动
+				CMC->DisableMovement();
 			}
 		}
 
-		UE_LOG(LogTemp, Warning, TEXT("🚀 [动态捏人管线] 成功为主机动态生成专属新肉体！"));
+		UE_LOG(LogTemp, Warning, TEXT("🚀 [动态捏人管线] 成功生成临时静止肉体，等待上帝视角统一搬运！"));
 		return true;
 	}
 
@@ -1578,6 +1635,164 @@ ATopCharacter* UMyMapTravelSubsystem::FindSquadTeammateShell(UWorld* World, AMyG
 		}
 	}
 	return FoundShell;
+}
+
+FTransform UMyMapTravelSubsystem::ResolveSafeDeploymentTransform(UWorld* World, const FTransform* PrimaryTransform, AActor* FallbackEntity)
+{
+	FVector SafeLocation = FVector::ZeroVector;
+	FRotator SafeRotation = FRotator::ZeroRotator;
+	bool bFound = false;
+
+	// ==============================================================================
+	// 💥 【大一统兜底管线：物理极限抢救】
+	// ==============================================================================
+
+	if (PrimaryTransform)
+	{
+		// 正常管线：接机点健在，完美提取物理坐标
+		SafeLocation = PrimaryTransform->GetLocation();
+		SafeRotation = PrimaryTransform->GetRotation().Rotator();
+		bFound = true;
+	}
+	else if (FallbackEntity)
+	{
+		// 🎯 兜底：如果没有找到接机点（场景里没放，或者策划漏配了）
+		// 强行提取玩家踩传送门时的原位坐标，或现有的兜底位置
+		// 宁可让玩家原地黑屏闪一下，重新落回原地，也绝不让管线崩溃或掉入虚空！
+		SafeLocation = FallbackEntity->GetActorLocation();
+		SafeRotation = FallbackEntity->GetActorRotation();
+		bFound = true;
+		UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] ⚠️ 警告：未找到路由对应的接机点，采用实体当前位置兜底。"));
+	}
+	else if (World)
+	{
+		// 【无空壳且非跨图，或跨图失败兜底】 -> 兜底找初始出生点 (PlayerStart)
+		// 终极兜底：主机都没生出来，或连触发实体都没有时，找地图原配起点
+		UE_LOG(LogTemp, Warning, TEXT("[MapTravelLog] ⚠️ 警告：无实体可用！启动终极兜底：寻找 PlayerStart"));
+		if (AActor* PS = UGameplayStatics::GetActorOfClass(World, APlayerStart::StaticClass()))
+		{
+			SafeLocation = PS->GetActorLocation();
+			SafeRotation = PS->GetActorRotation();
+			bFound = true;
+		}
+	}
+
+	if (bFound)
+	{
+		// 同样，绝对不能锁 Y 轴！直接取 3D 空间里的真实坐标。
+		// 仅强制锁定角色的 Scale 为 1:1:1，防止受到传送门缩放的污染。
+		return FTransform(SafeRotation, SafeLocation, FVector::OneVector);
+	}
+
+	return FTransform::Identity;
+}
+
+void UMyMapTravelSubsystem::ExecuteSquadFormationDeployment(UWorld* World, const FTransform& BaseTransform)
+{
+	if (!World) return;
+
+	AMyGameModeBase* GM = Cast<AMyGameModeBase>(World->GetAuthGameMode());
+	if (!GM) return;
+
+	// 提取安全兜底坐标的绝对地板 Z 坐标，杜绝 90cm 悬空
+	float BaseFloorZ = BaseTransform.GetLocation().Z;
+
+	// 💥 修复【坐标偏离Bug】：不再强加给绝对X轴，而是提取基准朝向的绝对“右方向向量”！
+	FVector RightVector = BaseTransform.GetRotation().GetAxisY();
+
+	// ==============================================================================
+	// 【全量角色屏蔽 (Global Blacklist)】
+	// ==============================================================================
+	TArray<AActor*> IgnoredActorsForTrace;
+	for (TActorIterator<ATopCharacter> It(World); It; ++It)
+	{
+		if (ATopCharacter* Char = *It)
+		{
+			IgnoredActorsForTrace.Add(Char);
+		}
+	}
+
+	// 💥 修复【抢C位碰撞Bug】：不再从0开始排！AI和副机强制从 120 偏移开始！绝不占用 0 的位置！
+	float CurrentXOffset = 120.0f;
+	bool bFlipOffset = true;
+
+	// 直接遍历已经存在于当前地图上的队友肉体
+	for (ATopCharacter* Teammate : GM->FriendlyRoster)
+	{
+		// 1. 基础安全校验
+		if (!Teammate || Teammate->IsActorBeingDestroyed()) continue;
+
+		float TargetOffset = 0.0f;
+
+		// 💥 核心甄别：只有受本地玩家控制的真身，才有资格霸占正中心(0点)！其他人全部靠边！
+		if (Teammate->GetController() && Teammate->GetController()->IsLocalController())
+		{
+			TargetOffset = 0.0f;
+		}
+		else
+		{
+			// 其他人乖乖按 120, -120, 240, -240 排队
+			TargetOffset = bFlipOffset ? CurrentXOffset : -CurrentXOffset;
+
+			// 每排完一左一右，间距拉大
+			if (!bFlipOffset)
+			{
+				CurrentXOffset += 120.0f;
+			}
+			bFlipOffset = !bFlipOffset;
+		}
+
+		// 完美沿目标横向展开 (沿着传送门的左右两边排队，再也不会重叠成一排)
+		FVector OffsetLoc = BaseTransform.GetLocation() + RightVector * TargetOffset;
+
+		// 贴地短探针，寻找真实地板
+		FHitResult GroundHit;
+		// 从预估地板的上方 50cm 往下探 100cm，避免从高空打中隐形门框
+		FVector TraceStart = OffsetLoc + FVector(0.0f, 0.0f, 150.0f);
+		FVector TraceEnd = OffsetLoc - FVector(0.0f, 0.0f, 300.0f);
+
+		FCollisionQueryParams Params;
+		Params.AddIgnoredActors(IgnoredActorsForTrace);
+
+		// 统一物理标准：使用 ECC_WorldStatic 绝对地形探针
+		if (World->LineTraceSingleByChannel(GroundHit, TraceStart, TraceEnd, ECC_WorldStatic, Params))
+		{
+			// ==================== 【胶囊体中心高度补齐】 ====================
+			// 兜底半高
+			float CapsuleHalfHeight = 90.0f;
+			// 直接从活着的队友身上提取真实的胶囊体高度
+			if (UCapsuleComponent* Cap = Teammate->GetCapsuleComponent())
+			{
+				CapsuleHalfHeight = Cap->GetUnscaledCapsuleHalfHeight();
+			}
+			// 真实地板 Z 坐标 + 胶囊体真实半高 + 1.0f 容差 = 完美的落地中心点
+			OffsetLoc.Z = GroundHit.ImpactPoint.Z + CapsuleHalfHeight + 1.0f;
+		}
+		else
+		{
+			// 兜底防错
+			float CapsuleHalfHeight = 90.0f;
+			if (UCapsuleComponent* Cap = Teammate->GetCapsuleComponent())
+			{
+				CapsuleHalfHeight = Cap->GetUnscaledCapsuleHalfHeight();
+			}
+			OffsetLoc.Z = BaseFloorZ + CapsuleHalfHeight + 1.0f;
+		}
+
+		// 核心暗箱：强行将所有名册里的躯壳折叠至计算好的完美阵型！
+		// 底层 Network Replicated Movement 会瞬间剥夺客机的物理反抗权，杜绝拉扯弹射！
+		Teammate->TeleportTo(OffsetLoc, BaseTransform.GetRotation().Rotator(), false, true);
+
+		// 物理点穴：在黑屏彻底解开前，锁死全队重力坠落，保证完美滞空等UI开幕
+		if (UCharacterMovementComponent* CMC = Teammate->GetCharacterMovement())
+		{
+			CMC->DisableMovement();
+		}
+
+		// 将刚落地成功的队友立刻加入黑名单，绝不干扰下一个人的探测
+		IgnoredActorsForTrace.Add(Teammate);
+		UE_LOG(LogTemp, Warning, TEXT("🚀 [上帝视角排阵] 肉体已成功分配阵型并完成物理搬运: %s"), *Teammate->GetName());
+	}
 }
 
 #pragma endregion

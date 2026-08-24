@@ -56,6 +56,16 @@ void UMyLoadingScreenWidget::NativeDestruct()
 	Super::NativeDestruct();
 }
 
+void UMyLoadingScreenWidget::OnClosingAnimationFinished()
+{
+	// 调用父类，遵循规范
+	Super::OnClosingAnimationFinished();
+
+	// 【加载屏专属业务补充】：退场动画彻底结束（屏幕彻底亮起，睁眼完毕）
+	// 对外无脑广播！大管家在听到该信号后，将从内存层面彻底核销自己，并执行玩家物理解穴
+	OnLoadingScreenHidden.Broadcast();
+}
+
 #pragma endregion
 
 

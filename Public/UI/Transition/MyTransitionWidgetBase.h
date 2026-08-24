@@ -76,4 +76,14 @@ protected:
 
 	// 覆写原生帧更新：在此高频驱动电池步进，并在到达临界值时安全触发状态变轨或呼叫大管家
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
+
+
+	// 【架构解耦：动画终点纯虚函数钩子】
+	// 供不同的业务子类（熄屏、加载屏）注入专属的生命周期事件
+	// 入场终点：负责入场动画播完后的业务（如：MyScreenOffWidget 在此发射 Ack）
+	virtual void OnOpeningAnimationFinished();
+
+	// 供不同的业务子类（熄屏、加载屏）注入专属的生命周期事件
+	// 退场终点：负责退场动画播完后的业务
+	virtual void OnClosingAnimationFinished();
 };

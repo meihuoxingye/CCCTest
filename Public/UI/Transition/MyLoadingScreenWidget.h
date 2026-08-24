@@ -6,6 +6,11 @@
 #include "UI/Transition/MyTransitionWidgetBase.h"
 #include "MyLoadingScreenWidget.generated.h"
 
+
+// 【架构解耦补充】：加载屏专属多播委托声明
+// 声明加载屏退场动画彻底播完（屏幕完全睁开）时的专属多播委托
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnLoadingScreenHiddenSignature);
+
 // 专门负责带材质进度条的转场加载 UI 子类。
 // 本类已退化为“纯视觉渲染工具”，生死完全由大管家（GameInstance）的绝对倒计时掌控。
 // 内部只负责根据大管家下发的时间参数，通过数学公式计算极其平滑的进度条动态追赶表现。
@@ -13,6 +18,17 @@ UCLASS()
 class CCC_API UMyLoadingScreenWidget : public UMyTransitionWidgetBase
 {
 	GENERATED_BODY()
+
+
+	// ==============================================================================
+	// 表现层专属事件广播 (Presentation Layer Events)
+	// ==============================================================================
+public:
+	// 【架构解耦补充】：退场动画彻底结束（完全睁眼）时广播！
+	// 它不认识大管家，只负责宣告自己生命周期的终结，供大管家监听并触发物理核销与解穴
+	UPROPERTY(BlueprintAssignable, Category = "Transition|Event")
+	FOnLoadingScreenHiddenSignature OnLoadingScreenHidden;
+
 
 	// ==============================================================================
 	// 核心生命周期与组件 (Core Lifecycle & Components)
@@ -24,6 +40,8 @@ protected:
 	// UI 被大管家物理粉碎时触发，负责安全清理内部的视觉刷新计时器
 	virtual void NativeDestruct() override;
 
+	// 【架构解耦补充】：重写基类的退场动画结束钩子，用于精准发射擦除完毕广播
+	virtual void OnClosingAnimationFinished() override;
 
 	// ==============================================================================
 	// 材质动态进度条管线 (Material Progress Pipeline)

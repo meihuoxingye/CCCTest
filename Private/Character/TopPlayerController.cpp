@@ -1,4 +1,5 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
+
 #include "Character/TopPlayerController.h"
 // 增强输入
 #include "EnhancedInputComponent.h"
@@ -24,7 +25,12 @@
 
 #include "Engine/GameViewportClient.h"
 
-#include "MapTravel/NetComponent/MyMapTravelNetComponent.h"
+// ==============================================================================
+// 【新增】：大一统传送管线被动唤醒钩子所需的头文件
+// ==============================================================================
+#include "PlayerState/MyPlayerState.h"
+#include "PlayerState/Component/TravelAndStreaming/MyMapTravelStateComponent.h"
+#include "MapTravel/MyMapTravelSubsystem.h"
 
 
 ATopPlayerController::ATopPlayerController()
@@ -47,9 +53,6 @@ ATopPlayerController::ATopPlayerController()
 
 	// 出生时，给自己挂上 UI 统筹组件背包，实现 UI 逻辑的彻底模块化解耦
 	UIHandlerComp = CreateDefaultSubobject<UMyUIHandlerComponent>(TEXT("UIHandlerComponent"));
-
-	// 👇 【新增】：出生时，挂载网络传送同步组件，彻底接管同地图瞬间移动的联机防抖与UI状态机
-	MapTravelNetComp = CreateDefaultSubobject<UMyMapTravelNetComponent>(TEXT("MapTravelNetComponent"));
 }
 
 // ==============================================================================
@@ -119,6 +122,32 @@ void ATopPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 // 灵魂附身与输入绑定 (Possession & Input Setup)
 // ==============================================================================
 #pragma region
+
+void ATopPlayerController::OnRep_PlayerState()
+{
+	// 必须先调用父类，保证引擎底层的默认状态机正常流转
+	Super::OnRep_PlayerState();
+
+	// 🛡️ 终极安全防线：被动唤醒钩子 (Event-Driven Safety Catch)
+	// 无论遭遇多严重的网络 Hitch，只要 NetDriver 将 PlayerState 指针绑定到此控制器的瞬间，必定触发。
+	// 这将打破 MyMapTravelSubsystem 中 2.5 秒轮询熔断造成的死锁，强行唤醒 UI 退场逻辑。
+	if (IsLocalController() && PlayerState)
+	{
+		if (AMyPlayerState* MyPS = Cast<AMyPlayerState>(PlayerState))
+		{
+			if (UMyMapTravelStateComponent* TravelComp = MyPS->MapTravelComponent)
+			{
+				if (UMyMapTravelSubsystem* TravelSub = GetWorld()->GetSubsystem<UMyMapTravelSubsystem>())
+				{
+					UE_LOG(LogTemp, Warning, TEXT("🛡️ [安全钩子] 侦测到底层 PlayerState 指针已物理绑定！执行被动唤醒，触发令牌校验。"));
+
+					// 此时 LocalPC 指针已 100% 就绪，直接击穿子系统内部的 if(!LocalPC) 拦截，完成解封！
+					TravelSub->HandleDeploymentTokenUpdate(TravelComp, TravelComp->DeploymentStatus);
+				}
+			}
+		}
+	}
+}
 
 void ATopPlayerController::SetupInputComponent()
 {

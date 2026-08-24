@@ -39,10 +39,6 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMyUIHandlerComponent> UIHandlerComp;
 
-	// 👇 【新增挂件】：同图传送网络握手组件，全权负责跨网络状态机的表现层同步
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	TObjectPtr<class UMyMapTravelNetComponent> MapTravelNetComp;
-
 public:
 	// 开放给外界索要 UI 处理组件的快捷接口
 	FORCEINLINE UMyUIHandlerComponent* GetUIHandler() const { return UIHandlerComp; }
@@ -92,6 +88,9 @@ public:
 	// 灵魂附身与输入绑定 (Possession & Input Setup)
 	// ==============================================================================
 protected:
+	// 🛡️ 引擎底层网络同步钩子：当 PlayerState 指针被安全绑定到本控制器时必定触发
+	virtual void OnRep_PlayerState() override;
+
 	// 键位绑定回调函数
 	virtual void SetupInputComponent() override;
 

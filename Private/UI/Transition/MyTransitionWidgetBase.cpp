@@ -114,8 +114,8 @@ void UMyTransitionWidgetBase::NativeTick(const FGeometry& MyGeometry, float InDe
 		// 当电池报告“刚刚跑完入场”时
 		if (bJustFinished)
 		{
-			// 状态机切换：进入最高戒备的“挂起”状态，死等大管家发送的引擎就绪信号
-			bIsWaitingForEngine = true;
+			// 【架构解耦补充】：触发入场完毕虚函数钩子
+			OnOpeningAnimationFinished();
 		}
 	}
 	// 状态机路由：如果正在退场，或者刚好在这一帧完成了退场（进度衰减至 0.0）
@@ -127,14 +127,22 @@ void UMyTransitionWidgetBase::NativeTick(const FGeometry& MyGeometry, float InDe
 		// 当电池报告“刚刚跑完退场”时，意味着屏幕已经完全亮起，旧世界记忆彻底清空
 		if (bJustFinished)
 		{
-			// 安全获取当前世界的转场大管家实例
-			if (UMyGameInstance* GI = Cast<UMyGameInstance>(UGameplayStatics::GetGameInstance(this)))
-			{
-				// 反向呼叫大管家：我已彻底退场，请从内存层面物理销毁我并释放引用链！完美闭环！
-				GI->FinalizeLoadingScreenRemoval();
-			}
+			// 【架构解耦补充】：触发退场完毕虚函数钩子，绝不在此硬编码跨类调用
+			OnClosingAnimationFinished();
 		}
 	}
+}
+
+void UMyTransitionWidgetBase::OnOpeningAnimationFinished()
+{
+	// 基类通用逻辑：入场播完，进入最高戒备的“挂起”状态，死等大管家发送的引擎就绪指令
+	bIsWaitingForEngine = true;
+}
+
+void UMyTransitionWidgetBase::OnClosingAnimationFinished()
+{
+	// 💥【彻底解耦】：基类什么都不做！
+	// 具体的退场销毁逻辑，全部移交给专属的业务子类去实现！
 }
 
 #pragma endregion

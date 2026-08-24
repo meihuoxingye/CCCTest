@@ -60,8 +60,16 @@ public:
 	// 覆写原生生命周期：引擎启动、大管家实例化时调用，用于注册底层渲染钩子 and 漫游委托
 	virtual void Init() override;
 
+	// 引擎底层 PreLoadMap (加载新地图前) 的全局委托专属回调。
+	// 专门用于在房主建房或客机飞线 (非无缝硬跳转) 毁灭旧世界前，重置转场锁防死锁。
+	// 💥【内存防线】：特意抽离为独立函数以供 AddUObject 绑定，替代原有的 Lambda 匿名捕获，杜绝野指针闪退。
+	void HandlePreLoadMap(const FString& MapName);
+
 	// 覆写原生生命周期：游戏关闭、大管家销毁时调用，用于安全解绑委托、物理处决悬空 UI
 	virtual void Shutdown() override;
+
+	// 覆写引擎原生启动逻辑，用于兼容 PIE 模式的落地流转
+	virtual void OnStart() override;
 
 
 	// ==============================================================================
@@ -81,6 +89,15 @@ public:
 	// 记录已访问地图的集合，跨地图跳转不销毁。用于大世界流送中心判定是否压制开荒数据层
 	UPROPERTY()
 	TSet<FString> VisitedMaps;
+
+	// 💥【内存管理】：在玩家返回主菜单或更换存档时调用，彻底清空已访问集合，防止长期游玩内存膨胀
+	// 目前没有任何地方调用
+	// 应该调用的地方：
+	// 场景 A：玩家点击“返回主菜单 (Return to Main Menu)”
+	// 场景 B：玩家“读取存档 (Load Save / Change Slot)”
+	// 场景 C：彻底死亡/肉鸽重开 (Roguelike / Hard Reset)
+	UFUNCTION(BlueprintCallable, Category = "Map Config")
+	void ClearVisitedMaps();
 
 	// 1. 玩家真身记忆 (网络ID -> 离开时正在控制的蓝图类)，用于 RestartPlayer 捏造玩家真身
 	// 【架构界限】：此字典仅为“真人玩家”提供跨地图重连的物理凭证。
@@ -121,19 +138,38 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Loading|Registry")
 	FMapTransitionConfig GetMapTransitionConfig(FName MapName) const;
 
-	// 挂起的目标地图名称缓存，供子类或加载进度条提取查表使用
+	// 挂起的跨图目标地图名称缓存，供子类或加载进度条提取查表使用
 	UPROPERTY(Transient)
 	FName PendingTargetMapName;
+
+	// 💥 【核心生命线】：客机初次加入标识！在加入大厅时赋予，落地时核销，完美隔离表现层误判！
+	UPROPERTY(Transient)
+	bool bIsClientInitialJoin = false;
 
 
 	// ==============================================================================
 	// 表现层总枢纽：纯净 UI 管线 (Presentation Layer: Pure UI Pipeline)
 	// ==============================================================================
 public:
+	// 【表现层起航总闸】：监听熄屏 UI 闭合彻底黑透的事件。
+	// 贯彻法则1：同图漫游时，在此处一边本地抢跑拉起加载屏，一边向系统发射信号。
+	// 1. 同图漫游：在此处一边本地抢跑拉起加载屏，一边向系统发射信号 (进入 WaitingForShell)。
+	// 2. 跨图漫游：在此处仅维持纯黑遮挡，绝不发信号！保持 Traveling 状态死等引擎底层跨界，将发信号的职责移交至新世界落地时。
+	UFUNCTION()
+	void HandleScreenOffCovered();
 
 	// 必须记录黑幕 UI 指针，用于在同地图中物理抹杀它，防黑屏死锁
 	UPROPERTY(Transient)
 	TObjectPtr<class UMyScreenOffWidget> ActiveScreenOffUI;
+
+	// 【新增】：无论同图跨图，起航时重置三把锁
+	UFUNCTION(BlueprintCallable, Category = "Loading")
+	void ResetTransitionLocks();
+
+	// 【三锁合一：物理锁】：供令牌系统 (ReadyToPossess) 调用的专属接口。
+	// 宣告服务器肉体阵型/地板流送已就绪，准许 UI 进行最终的退场核验。
+	UFUNCTION(BlueprintCallable, Category = "Loading")
+	void NotifyPhysicalReady();
 
 	// 跨地图或同地图漫游起航前，根据配置拉起指定的熄屏闭合 UI
 	UFUNCTION(BlueprintCallable, Category = "Loading")
@@ -154,7 +190,8 @@ public:
 	UFUNCTION()
 	void HandleStartTravel(UWorld* CurrentWorld);
 
-	// 无缝漫游第二阶段系统回调：新世界 Persistent 落地进内存，开始流送轮询
+	// 【无缝漫游第二阶段落地网关】：新世界 Persistent 落地进内存时触发。
+	// 贯彻法则2：到达新地图后，一边本地抢跑拉起加载屏，一边向系统发射信号。
 	UFUNCTION()
 	void HandleEndTravel(UWorld* NewWorld);
 
@@ -207,34 +244,19 @@ private:
 	// 终极状态防线：退场动画互斥锁，彻底断绝高频信号触发“双重退场”导致的 UI 状态机踩踏
 	bool bIsHiding = false;
 
+	// 第三把锁：服务器物理阵型是否已就绪（由 ReadyToPossess 令牌解锁）
+	bool bPhysicalReady = false;
+
 	// 核心时间探针：专门记录 Persistent 关卡进内存的绝对物理时间戳，用于反算引擎加载耗时
 	double PersistentLevelLoadTime = 0.0;
 
 
 	// ==============================================================================
-	// 网络表现协同与同图握手 (Network Sync & Same-Map Handshake)
+	// 跨图流转目标车票 (Cross-Map Travel Ticket)
 	// ==============================================================================
 public:
 
-	// 用于缓存跨图连入后的目标路由，落地时供服务器判定出生点
+	// 用于缓存跨图连入后的目标路由，落地时供大一统导演系统判定出生点/接机点
 	UPROPERTY(Transient)
 	TObjectPtr<class UTeleportRoute> PendingTravelRoute;
-
-	// 【核心重构】：同地图专属转场入口（表现层统筹）
-	// 拉起黑幕，剥离物理操作，将后续的物理执行全权交由网络组件跨网线握手
-	UFUNCTION(BlueprintCallable, Category = "MapTravel")
-	void ExecuteSameMapTransition(AActor* TeleportingActor, const FTransform& TargetTransform);
-
-	// 接收服务器物理搬运完毕的反馈后，执行本地数据层真替换及退场表现
-	UFUNCTION(BlueprintCallable, Category = "MapTravel")
-	void FinalizeSameMapTransition();
-
-private:
-
-	// 【网络同步重构】：黑幕 100% 闭合后的表现层回调
-	// 铁律：客机本地坚决不碰 TeleportTo！仅向服务器发送 Client_Ready 信号，等待服务器上帝视角排队搬运
-	void OnSameMapScreenOffFinished(TWeakObjectPtr<AActor> TeleportingActor, FTransform TargetTransform);
-
-	// 挂起同地图转场状态机的物理倒计时句柄
-	FTimerHandle SameMapScreenOffTimerHandle;
 };

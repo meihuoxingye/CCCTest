@@ -4,10 +4,13 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
+// 【核心修改】：引入降级后的传送组件，取代原来的 PlayerState 实体
+#include "PlayerState/Component/TravelAndStreaming/MyMapTravelStateComponent.h"
 #include "MyMapTravelSubsystem.generated.h"
 
 class UDataLayerAsset;
 class UTeleportRoute;
+class UMyMapTravelStateComponent; // 【核心修改】：前向声明真理载体改为组件
 
 // ==============================================================================
 // 对点传送底层数据结构 (Point-to-Point Data Structure)
@@ -61,17 +64,12 @@ public:
 public:
 
 	// 【新增性能优化】：O(1) 射线探测黑名单缓存，彻底告别极其耗时的 TActorIterator
-	// 请在 ATopCharacter 的 BeginPlay 中调用 Register，EndPlay 中调用 Unregister
 	UPROPERTY(Transient)
 	TSet<TWeakObjectPtr<class ATopCharacter>> GlobalCharacterCache;
 
-	// 将角色真身注入 O(1) 全局黑名单缓存。
-	// 在 ATopCharacter::BeginPlay() 中触发。供物理折叠管线极速构建射线忽略名单，彻底消灭全图 TActorIterator 遍历带来的帧毛刺 (CPU Hitches)。
 	UFUNCTION(BlueprintCallable, Category = "MapTravel|Cache")
 	void RegisterCharacterToCache(class ATopCharacter* Character);
 
-	// 将角色实体从全局黑名单缓存中除名。
-	// 必须在 ATopCharacter::EndPlay() 中触发。彻底防止弱指针 Set 随游戏时长发生内存膨胀，确保服务器物理筛选的绝对高效与纯净。
 	UFUNCTION(BlueprintCallable, Category = "MapTravel|Cache")
 	void UnregisterCharacterFromCache(class ATopCharacter* Character);
 
@@ -88,6 +86,12 @@ public:
 	// 传送网关入口 (Universal Travel Gateway)
 	// ==============================================================================
 public:
+
+	// 跨系统握手枢纽：由大管家在熄屏 UI 入场动画播完（屏幕彻底黑透）时回调。
+	// 负责向服务器发射 Server_AckScreenOffReady 握手信号，确认本地视觉已完全被黑幕遮断。
+	// 服务器在收到此 Ack 后，才会安全地执行玩家实体的物理坐标折叠，彻底杜绝瞬移穿帮。
+	UFUNCTION(BlueprintCallable, Category = "MapTravel|Gateway")
+	void NotifyLocalScreenOffFinished();
 
 	// 大一统传送门户：由传送门调用，系统自动判别走同地图极速瞬移还是跨地图无缝流送
 	UFUNCTION(BlueprintCallable, Category = "MapTravel|Gateway")
@@ -114,19 +118,35 @@ public:
 
 
 	// ==============================================================================
+	// 令牌响应管线 (Token Response Pipeline)
+	// ==============================================================================
+public:
+	// 【核心新增】：自动化契约响应！
+	// 客户端 UI 的拉起、退场，物理控制权的剥夺与恢复，现在全部基于这个回调自动执行，绝对封杀越权！
+	// 引入 RetryCount 熔断参数，防止网络极端延迟导致的无限递归死锁
+	void HandleDeploymentTokenUpdate(UMyMapTravelStateComponent* PS, ETravelDeploymentStatus OldStatus, int32 RetryCount = 0);
+
+
+	// ==============================================================================
 	// 服务器物理霸权 (Server-Side Physical Authority)
 	// ==============================================================================
 public:
 
 	// 同地图专属统筹（服务器端霸权）：
-	// 接管同图时空流速，执行绝对物理点穴，随后触发数据层预热、发送 RPC 握手与超时防死锁的高频轮询
+	// 接管同图时空流速，执行绝对物理点穴，随后触发数据层预热并下发令牌
 	void ExecuteSameMapTravel(AActor* TeleportingActor, UTeleportRoute* TargetRoute);
 
-	// 同图斩杀接口（服务器执行）：趁屏幕纯黑时，强行物理卸载老区域并激活新区域
+	// 💥【核心新增】：同图跨图大一统！由 WaitingForShell 令牌触发的终极物理流送总闸
+	void CheckAndExecutePhysicalDeployment();
+
+	// 💥【保留并更新调用时机】：同图斩杀接口（服务器执行）。
+	// 现已移交至 WaitingForShell 物理总闸 (SnapPlayerToDestination) 内部统一调用！
+	// 趁全服玩家闭眼/UI掩护就绪时，强行物理卸载老区域并激活新区域
 	UFUNCTION(BlueprintCallable, Category = "MapTravel|Authority")
 	void CommitSameMapDataLayer();
 
-	// 跨图单人折叠接口（服务器执行）：专职负责在绝对黑幕下执行真身物理空间折叠
+	// 跨图/同图大一统折叠接口（服务器执行）：专职负责在绝对黑幕/UI掩护下执行真身物理空间折叠
+	// 内部已融合统一的数据层流送(DataLayer)与肉体排布
 	UFUNCTION(BlueprintCallable, Category = "MapTravel|Authority")
 	void SnapPlayerToDestination();
 
@@ -138,28 +158,43 @@ private:
 
 
 	// ==============================================================================
-	// 本地表现与剥离 (Local Snapping & Client Purge)
-	// ==============================================================================
-private:
-
-	// 跨图传送落地物理对齐：
-	// 仅允许服务器/主机真身执行探针与落地；客机必须剥离物理控制权，静默等待服务器坐标同步，严防穿模弹射
-	void HandleLocalPlayerSnapping(UWorld* World, class AMyUniversalDestination* Dest);
-
-
-	// ==============================================================================
 	// 内部路由与状态锁 (Internal Routing & State Locks)
 	// ==============================================================================
 private:
 
-	// 内部大一统收束管线：抹平差异，统一下达时序锁定与底层跳转指令
+	// ==============================================================================
+	// 内部大一统收束管线：起飞前统筹准备与时序死等。
+	// 
+	// 👑 主机/单机：冻结全服物理 -> 打包真身与AI躯壳 -> 下发令牌令全服黑屏 -> 死等黑屏闭合 -> 执行 ServerTravel (引擎底层自动拽走所有副机)。
+	// 🚪 局外副机 (大厅飞线)：冻结本地物理 -> 拉起本地黑屏 -> 死等黑屏闭合 -> 执行 ClientTravel (飞线连入主机)。
+	// ⚠️ 局内副机 (跟随跨图)：绝不执行此函数！纯被动接收令牌闭眼，靠底层的 ServerTravel 硬拽跨界。
+	// ==============================================================================
+	// @param TargetLevelName 目标关卡短名（查转场配置用；飞线时可空）
+	// @param TravelURL       网络跳转绝对路径（IP/Session/关卡路径）
+	// @param bIsAbsolute     true: 房主建房(带?listen并关无缝) / false: 无缝漫游
+	// @param bIsClientJoin   true: 分流执行 ClientTravel / false: 分流执行 ServerTravel
 	void InternalExecuteTravel(FName TargetLevelName, const FString& TravelURL, bool bIsAbsolute, bool bIsClientJoin);
+
+	// 🚪 【副机专属】：客机从大厅飞线连入主机的绝对物理执行点
+	void TriggerClientTravelCommand(const FString& TravelURL);
+
+	// 👑 【主机专属】：房主带队跨图/建房的绝对物理执行点 (底层会自动硬拽副机)
+	void TriggerServerTravelCommand(const FString& TravelURL, bool bIsAbsolute);
+
 
 	// 转场状态互斥锁，防止玩家在转场期间重复触发导致时序错乱
 	UPROPERTY()
 	bool bIsTraveling = false;
 
-	// 缓存同地图传送的目标数据层，等待黑幕时机跨系统交给流送子系统进行斩杀替换
+	// 💥【核心内存锚点】：保护跨界 URL 防 GC 垃圾回收踩成乱码
+	UPROPERTY(Transient)
+	FString PendingTravelURL;
+
+	// 【核心新增】：物理地基就绪锁 (仅服务器维护)。如果没就绪，任何副机试图连入都必须强制挂起！
+	bool bIsPhysicalLayoutReady = false;
+
+	// 💥【保留并更新调用时机】：缓存同地图传送的目标数据层
+	// 等待 WaitingForShell 大一统时机，交由流送子系统进行斩杀替换
 	UPROPERTY()
 	TObjectPtr<UDataLayerAsset> PendingSameMapDataLayer = nullptr;
 
@@ -167,7 +202,8 @@ private:
 	UPROPERTY(Transient)
 	TMap<UTeleportRoute*, FDestinationRegistrationInfo> SameMapDestinationRegistry;
 
-	// 同步握手轮询定时器句柄，用于在服务器端死等所有客机的 UI 状态机 Ready
+	// 💥【更新注释】：物理轮询定时器句柄。
+	// 现仅用于跨图漫游起航前的纯物理倒计时死等，时间一到即执行跨界。
 	UPROPERTY()
 	FTimerHandle SyncWaitTimerHandle;
 
@@ -178,7 +214,7 @@ public:
 	// 由 GameMode 在 InitGame 中单向触发的专属开荒配置代码
 	void ExecuteInitialBootSetup();
 
-	// 由 GameMode 在 RestartPlayer 中调用的最终决策树 (包含超时死锁保护)
+	// 由 GameMode 在 RestartPlayer 中调用的最终决策树 (包含基于令牌的时序挂起保护)
 	bool ExecuteDeploymentDirector(class AController* NewPlayer, class AMyGameModeBase* GameMode, float CurrentWaitTime = 0.0f);
 
 private:
@@ -199,4 +235,19 @@ private:
 
 	// 内部辅助：寻找已经由房主跨图同步过来的专属队友躯壳 (副机接管专用)
 	class ATopCharacter* FindSquadTeammateShell(UWorld* World, class AMyGameModeBase* GameMode);
+
+	// ==============================================================================
+	// 核心物理与寻址大一统管线 (Unified Physics & Routing Pipeline)
+	// ==============================================================================
+private:
+
+	// 统一寻址与兜底接口：
+	// 严格遵循 1.首选目标点 -> 2.当前关联实体 -> 3.默认出生点 的绝对法则。
+	// 强制剥离所有毒瘤缩放 (Scale)，只返回绝对纯净的 1:1:1 坐标与旋转矩阵。
+	FTransform ResolveSafeDeploymentTransform(UWorld* World, const FTransform* PrimaryTransform, AActor* FallbackEntity);
+
+	// 统一排兵布阵接口：
+	// 彻底接管同图与跨图小队的 2.5D 列队、射线防穿模贴地计算，以及降临前的物理点穴。
+	// 消灭原来两处高达 70 行的复制粘贴冗余。
+	void ExecuteSquadFormationDeployment(UWorld* World, const FTransform& BaseTransform);
 };
