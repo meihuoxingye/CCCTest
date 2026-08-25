@@ -27,6 +27,7 @@ public:
 	AMyGameModeBase();
 
 	// 【新增】：重写 InitGame，用于提前截胡数据层流送
+	// 刚把地图文件读进内存，所有 Actor 都还没执行 BeginPlay，且绝对没有任何玩家能够连入的“第一毫秒”，引擎底层全自动调用此虚函数
 	virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
 
 	// 重写 StartPlay，作为后台基建预热的触发点
@@ -73,6 +74,8 @@ public:
 	// ==============================================================================
 public:
 	// 第 1 步：客机彻底连入房间，向服务器报到
+	// 当客机的网络驱动器完成了底层的 TCP/UDP 握手，通过了权限验证 (PreLogin/Login)
+	// 并且引擎已经在服务器内存里真正生成了属于这个客机的灵魂 (PlayerController) 后，引擎全自动调用此虚函数
 	virtual void PostLogin(APlayerController* NewPlayer) override;
 
 	// 第 2 步：服务器准备为玩家的灵魂分配肉体 
