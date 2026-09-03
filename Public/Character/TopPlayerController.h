@@ -62,6 +62,7 @@ public:
 
 	// 只读查询现在是否处于切人模式（子弹时间）状态
 	bool IsSwitchModeActive() const;
+
 	// 设置是否进入切人模式
 	// 角色攻击回调函数已调用，必返回退出切人模式的指令
 	void SetSwitchMode(bool bEnable);

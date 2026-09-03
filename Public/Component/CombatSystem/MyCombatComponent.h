@@ -7,6 +7,20 @@
 #include "MyCombatComponent.generated.h"
 
 
+// ------------------------------------------------------------------------------
+// 血量变化广播总线 (事件驱动)
+// 它相当于一个广播喇叭。当角色血量变化时，不用去“寻找”UI更新，而是直接对着全网喊一嗓子，实现代码完全解耦。
+//  - 发布者：UMyCombatComponent (在 TakeDamage 扣完血后，调用 Broadcast 发送广播)
+//  - 订阅者：UMyCharacterStatusWidget (在初始化时，调用 AddUObject 给自己戴上耳机监听)
+//  - Param 1 (float): 挨打扣完之后的最新当前血量。
+//  - Param 2 (float): 从数据资产里缓存的最大血量上限。
+// 为什么要用“原生”多播 (去掉了 DYNAMIC 宏)：
+//  - 带 DYNAMIC 的委托是为了能在蓝图节点里连线，会强制经过虚幻极慢的“反射系统”。
+//  - 我们现在的 UI 绑定全在 C++ 里写死了，不需要给蓝图用，所以直接用纯 C++ 函数指针直接调用（Native），性能最快。
+// ------------------------------------------------------------------------------
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnHealthChangedNative, float /*NewCurrentHealth*/, float /*MaxHealth*/);
+
+
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class CCC_API UMyCombatComponent : public UActorComponent
 {
@@ -23,6 +37,9 @@ public:
 protected:
 	// Called when the game starts
 	virtual void BeginPlay() override;
+
+	// 💥【修改说明】：重写 EndPlay，负责组件销毁时的内存级清理，斩断定时器野指针
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
 	// Called every frame
@@ -55,6 +72,28 @@ public:
 	void StartWeaponFire();
 	// 外部调用，将组件从射击子系统的开火冷却名单数组中移除
 	void StopWeaponFire();
+
+	// 供 MyBulletSubsystem 射线打中目标后回调的命中处理函数
+	void ProcessBulletHit(const struct FHitResult& Hit);
+
+	// 给外界（UI）开放一个获取当前血量的接口
+	FORCEINLINE float GetCurrentHealth() const { return CurrentHealth; }
+
+	// 开放给 UI 绑定的纯 C++ 极速广播频道
+	FOnHealthChangedNative OnHealthChangedNative;
+
+private:
+	// 真实的活体当前血量
+	// 在 C++ 层面绝对私有，但在蓝图层面允许读取，只需加上 meta = (AllowPrivateAccess = "true")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Attributes", meta = (AllowPrivateAccess = "true"))
+	float CurrentHealth;
+
+	// 缓存的最大血量，杜绝受伤时高频访问 DataAsset 指针
+	float CachedMaxHealth = 100.f;
+
+	// 挂载到原生底层受击委托 OnTakeAnyDamage 的回调函数
+	UFUNCTION()
+	void HandleTakeDamage(AActor* DamagedActor, float Damage, const class UDamageType* DamageType, class AController* InstigatedBy, AActor* DamageCauser);
 
 
 	// ==============================================================================
@@ -120,4 +159,37 @@ private:
 	// 缓存 AI 控制器（如果是 玩家，则自动为 nullptr）
 	UPROPERTY()
 	TObjectPtr<class AAIController> CachedAIController;
+
+
+	// ==============================================================================
+	// 联机底层探针 (Network Probes)
+	// ==============================================================================
+public:
+	// 轨道一（上半截：向总台上报）
+	// 客机无权直接广播。本地开火时，向服务器发射 Server RPC 请求代为广播。
+	// 极高频瞬态事件，无需可靠传输，丢失即弃绝不阻塞带宽。
+	UFUNCTION(Server, Unreliable)
+	void Server_PlayFireAction(FVector MuzzleLoc, FVector FireDirection);
+
+	// 轨道一（下半截：向全网下发）
+	// 服务器收到上报后，充当信号塔，向全网所有客机下发 Multicast RPC 视觉动作。
+	// 配合 cpp 里的 IsLocallyControlled() 拦截，实现队友看特效，自己不重复看。
+	UFUNCTION(NetMulticast, Unreliable)
+	void Multicast_PlayFireAction(FVector MuzzleLoc, FVector FireDirection);
+
+	// 轨道二：批量伤害裁决 RPC (数值层)
+	// 统一走数组通道。单发武器数组 Size 为 1，高射速或散弹枪 Size 为 N。完美适配所有枪械。
+	UFUNCTION(Server, Reliable)
+	void Server_ApplyBatchedDamage(const TArray<AActor*>& TargetEnemies);
+
+private:
+	// 伤害批量打包缓冲池。
+	// 必须使用弱指针 (TWeakObjectPtr)，防止怪物在 50ms 的缓冲期内因其他原因死亡，导致发送野指针崩溃。
+	TArray<TWeakObjectPtr<AActor>> BatchedTargets;
+
+	// 打包发送发车计时器
+	FTimerHandle BatchTimerHandle;
+
+	// 清空缓冲池并向服务器发射 RPC 的收尾函数，用于在 50ms 缓冲期结束后，将池子里的目标打包发往服务器
+	void FlushDamageBatch();
 };

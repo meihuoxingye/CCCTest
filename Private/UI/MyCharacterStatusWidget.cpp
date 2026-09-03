@@ -19,6 +19,8 @@
 // 【新增】：契约接口，UI 向上级发送请求用
 #include "Interaction/MyPlayerUIInterface.h"
 
+#include "Component/CombatSystem/MyCombatComponent.h"
+
 
 // ==============================================================================
 // 核心生命周期与初始化 (Core Lifecycle & Initialization)
@@ -56,15 +58,28 @@ void UMyCharacterStatusWidget::SyncViewModel(ATopCharacter* InCharacter, bool bS
 
 
 	// ==========================================
-	// 2. 基础属性初始化 (注入死数据)
+	// 2. 基础属性与低频血量管线对接
 	// ==========================================
 	if (const UCharacterAttributeDataAsset* Config = InCharacter->GetAttributeConfig())
 	{
 		// 记下自己的身份证，后面播放广播时，靠它确定广播的是不是自己的事
 		CachedCharacterID = Config->CharacterID;
-		// 触发 MVVM 广播，更新血量上限和头像
-		CharacterVM->SetMaxHealth(Config->MaxHealth);
+		// 触发 MVVM 广播，更新头像
 		CharacterVM->SetCharacterAvatar(Config->CharacterAvatar);
+	}
+
+	// 监听绑定：把 UI 接入战斗组件的血量广播总线
+	if (UMyCombatComponent* CombatComp = InCharacter->GetCombatComponent())
+	{
+		// 初始快照：UI 刚生成时，立刻找战斗组件要一次当前的血量数据，塞给 ViewModel 进行初始显示
+		CharacterVM->SetMaxHealth(CombatComp->GetCurrentHealth());
+		CharacterVM->SetHealth(CombatComp->GetCurrentHealth());
+
+		// 挂载监听网线：
+		// 目标频道：UMyCombatComponent 里的 OnHealthChangedNative
+		// 行为：先 RemoveAll 清除历史残留防止重复绑定，然后用 AddUObject 将本 UI 的 OnHealthDataChanged 函数注册进广播名单
+		CombatComp->OnHealthChangedNative.RemoveAll(this);
+		CombatComp->OnHealthChangedNative.AddUObject(this, &UMyCharacterStatusWidget::OnHealthDataChanged);
 	}
 
 
@@ -192,8 +207,33 @@ void UMyCharacterStatusWidget::NativeDestruct()
 		ActiveCharChangedHandle.Reset();
 	}
 
+	// 3.【清除 血量变化广播的订阅记录】
+	// 内存安全兜底：UI 销毁前（比如切场景或关掉菜单），必须主动拔掉血量监听网线。
+	// 去 UMyCombatComponent 的广播名单里，把当前 UI (this) 的收音机砸掉，防止组件对一个死掉的 UI 发送数据导致野指针崩溃。
+	if (CachedCharacterRef.IsValid())
+	{
+		if (UMyCombatComponent* CombatComp = CachedCharacterRef->GetCombatComponent())
+		{
+			CombatComp->OnHealthChangedNative.RemoveAll(this);
+		}
+	}
+
 	// ===================== 【执行底层原生销毁】 =====================
 	Super::NativeDestruct();
+}
+
+
+void UMyCharacterStatusWidget::OnHealthDataChanged(float NewHealth, float MaxHealth)
+{
+	if (CharacterVM)
+	{
+		// 绝不在 UI 代码里直接操作界面控件！
+		// 这里严格调用 MyCharacterViewModel.h 中写好的 SetHealth 和 SetMaxHealth 接口。
+		// 数据流向：这两个 Setter 函数内部会执行 UE_MVVM_SET_PROPERTY_VALUE 宏。
+		// 最终结果：底层触发 FieldNotify 机制，通知蓝图 UMG 里绑定了 Health 变量的进度条自动缩放。
+		CharacterVM->SetHealth(NewHealth);
+		CharacterVM->SetMaxHealth(MaxHealth);
+	}
 }
 
 #pragma endregion

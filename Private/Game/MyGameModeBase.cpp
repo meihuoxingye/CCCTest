@@ -227,8 +227,15 @@ void AMyGameModeBase::GetSeamlessTravelActorList(bool bToTransition, TArray<AAct
 
 void AMyGameModeBase::PostLogin(APlayerController* NewPlayer)
 {
-	UE_LOG(LogTemp, Warning, TEXT("========================================================="));
-	UE_LOG(LogTemp, Warning, TEXT("🟢 [GameMode] 客机玩家正式完成连接！Controller: %s"), *GetNameSafe(NewPlayer));
+	// 💥【修复】：利用本地控制器标识，精准区分 Listen Server 房主与远程副机
+	if (NewPlayer && NewPlayer->IsLocalController())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("🟢 [GameMode] 主机玩家正式完成连接！Controller: %s"), *GetNameSafe(NewPlayer));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("🟢 [GameMode] 客机玩家正式完成连接！Controller: %s"), *GetNameSafe(NewPlayer));
+	}
 
 	Super::PostLogin(NewPlayer);
 }

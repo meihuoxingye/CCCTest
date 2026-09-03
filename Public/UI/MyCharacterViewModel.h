@@ -33,14 +33,27 @@ public:
 
 	// 实际存储当前生命值的底层数据字段
 	// BlueprintReadOnly: 在蓝图节点中只读
-	// FieldNotify: 核心宏，标记此变量被纳入 MVVM 监听网络
-	// Setter/Getter: 绑定具体的读写函数。警告虚幻引擎的反射系统（尤其是蓝图），想读写必须通过 Setter/Getter
+	// FieldNotify: 核心宏，标记此变量被纳入 MVVM 监听网络，通过外部广播调用 MVVM 宏即可实现实时监听
+	// Setter/Getter: 绑定具体的读写函数。
+	// 警告虚幻引擎的反射系统（尤其是蓝图），想读写必须通过 Setter/Getter
 	// 只要这个变量的数值通过 Setter 函数发生变化，引擎底层就会发出一个事件通知，调用 Getter 和原生 UI 函数修改 UI 显示
 	UPROPERTY(BlueprintReadOnly, FieldNotify, Setter = SetHealth, Getter = GetHealth, Category = "MVVM")
 	float Health = 100.f;
 
+	// 实际存储最大生命值的底层数据字段
+	// 想读写必须通过 Setter / Getter
+	// FieldNotify: 核心宏，标记此变量被纳入 MVVM 监听网络，通过外部广播调用 MVVM 宏即可实现实时监听
 	UPROPERTY(BlueprintReadOnly, FieldNotify, Setter = SetMaxHealth, Getter = GetMaxHealth, Category = "MVVM")
 	float MaxHealth = 100.f;
+
+	// 获取血量百分比（供 UI 进度条直接读取，绝对安全）
+	// FieldNotify: 核心宏，标记此变量被纳入 MVVM 监听网络
+	// 【计算型函数的连带广播机制】
+	// 1. 此函数是纯计算的“哑巴”，没有 Setter，UI 无法自动感知它的变化。
+	// 2. 它必须依靠 Health 或 MaxHealth 被修改时，在它们的 Setter 里手动调用广播宏。
+	// 3. 相当于底层数据变动时“顺便替它向外喊话”，通知 UI 进度条顺着 FieldNotify 频道重新读取此函数的结果。
+	UFUNCTION(BlueprintPure, FieldNotify, Category = "MVVM")
+	float GetHealthPercent() const;
 
 	// 同上，将头像软引用标记为 MVVM 字段。UI 绑定后，配合你写的转换器函数进行加载与渲染
 	// 实际存储头像图片硬盘路径的软引用指针

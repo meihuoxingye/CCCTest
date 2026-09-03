@@ -588,15 +588,36 @@ void UMyGameInstance::PollEngineReadyStatus()
 #endif
 
 		// =====================================================================
-		// 【时序大一统】：引擎 Ready 后，通知子系统触发大一统物理流送与排队查验！
+		// 💥【时序致命修复】：必须先翻转自身的就绪状态，再呼叫外部总闸！
+		// 物理总闸 CheckAndExecutePhysicalDeployment 内部会回调 GI->IsEngineReady() 索要凭证。
+		// 如果不提前设为 true，总闸会因为验证失败而当场 return，导致死锁！
+		// =====================================================================
+		bEngineIsReady = true;
+
+		// =====================================================================
+		// 💥【修复与释疑】：引擎 Ready 后，通知子系统触发大一统物理总闸，绝不越权直调底层！
+		// 
+		// 为什么不能像以前一样，在本函数 (本地雷达端) 发现引擎加载完毕后，直接调用底层的 TravelSub->SnapPlayerToDestination()？
+		// 
+		// 因为在联机环境下，系统天然存在两条平行的触发管线：一条是客机发回 Ack 信号触发的【令牌网络端】(HandleDeploymentTokenUpdate)，
+		// 另一条就是本函数所在的【本地雷达端】(PollEngineReadyStatus)。
+		// 
+		// 令牌网络端非常守规矩，它呼叫的是带有去重防线的【物理总闸】(CheckAndExecutePhysicalDeployment，内部第一行就有 bIsPhysicalLayoutReady 拦截)；
+		// 而 SnapPlayerToDestination 则是极其底层的【无锁死逻辑】(一旦调用，必然执行物理搬运，并在结束后强行关闭开荒锁 bIsCurrentMapInitialBoot)。
+		// 
+		// 如果本地雷达端绕过总闸，直接调用这个死逻辑，就会在微秒级的时间差内发生致命的“双轨踩踏”：
+		// 假设令牌网络端先完成了同步并触发总闸，完美执行了开荒原位夺舍，随后将开荒锁设为了 false；
+		// 紧接着，本地雷达端也侦测到引擎加载完毕，如果它直调 SnapPlayerToDestination，就会完全无视总闸的拦截锁。
+		// 此时，由于开荒锁已经被上一波关闭，雷达的这次越权直调会把原本完美的开荒图当成【动态排队图】，
+		// 强行把玩家从原生假人的位置拽走，并套上 2.5D 的 120 偏移量排队阵型，彻底摧毁开荒现场！
+		// 
+		// 【大一统收束】：因此，必须把本地雷达也接入 CheckAndExecutePhysicalDeployment，
+		// 让这两条管线在同一个总闸前汇合，利用 bIsPhysicalLayoutReady 锁完美挡下时序交织带来的重复越权指令！
 		if (UMyMapTravelSubsystem* TravelSub = World->GetSubsystem<UMyMapTravelSubsystem>())
 		{
-			TravelSub->SnapPlayerToDestination();
+			TravelSub->CheckAndExecutePhysicalDeployment();
 		}
 		// =====================================================================
-
-		// 宣布就绪！UI 此时接收到该状态变动信号，瞬间触发平滑提速变轨逻辑
-		bEngineIsReady = true;
 
 		if (bMinTimeElapsed)
 		{

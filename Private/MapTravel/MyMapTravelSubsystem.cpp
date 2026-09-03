@@ -106,8 +106,8 @@ void UMyMapTravelSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	// 调用父类逻辑
 	Super::OnWorldBeginPlay(InWorld);
 
-	// 💥【架构新增】：世界刚建立时，物理阵型绝对没有就绪！必须锁死！
-	bIsPhysicalLayoutReady = false;
+	// 💥💥💥 彻底移除了原有的 bIsPhysicalLayoutReady = false; 💥💥💥
+	// 绝对禁止在这里重置地基锁！开荒夺舍比这里执行得更早，绝不能把建好的锁砸烂。
 
 	// 获取当前刚落地的世界地图的原始长名称
 	FString CurrentMapName = InWorld.GetMapName();
@@ -149,12 +149,37 @@ void UMyMapTravelSubsystem::HandleDeploymentTokenUpdate(UMyMapTravelStateCompone
 	if (!GI) return;
 
 	// ==============================================================================
+	// 💥【修复：保存入场状态快照，防止被后续代码中途篡改】
+	// 
+	// 为什么不能在最底下的 switch 中直接写 switch (PS->DeploymentStatus) ？
+	// 请看下面这个极度危险的函数嵌套调用顺序：
+	// 1. 本次函数被触发，玩家带着【WaitingForShell】的状态进来了。
+	// 2. 代码往下走，调用了下方的物理总闸 CheckAndExecutePhysicalDeployment()。
+	// 3. 总闸在里面把肉体分配好了，并且直接在内存里把玩家的状态改成了【ReadyToPossess】。
+	// 4. 总闸执行完毕，代码退回到这里，继续往下走，来到了最底部的 switch 语句。
+	// 5. 如果此时 switch 去读 PS->DeploymentStatus，它读到的会是刚刚被改写的【ReadyToPossess】！
+	// 6. 结果：本次函数原本是为了处理 WaitingForShell，却阴差阳错地跑进了 ReadyToPossess 的分支，导致逻辑错乱（出现双重打印）。
+	// 
+	// 【解法】：在函数第一行，立刻把玩家刚进门时的状态“复印”一份 (SnapshotStatus)。
+	// 无论中间的深层函数怎么改写内存里的状态，我们接下来的代码只认这份复印件！
+	// ==============================================================================
+	ETravelDeploymentStatus SnapshotStatus = PS->DeploymentStatus;
+
+	// ==============================================================================
 	// 👑【服务器权威管线】：绝对不能被下方查找 LocalPC 的表现层逻辑阻塞！
 	// 服务器必须第一时间无条件处理所有副机的 Ack，否则大一统总闸必定死锁！
 	// ==============================================================================
 	if (OwningPS->HasAuthority())
 	{
-		if (PS->DeploymentStatus == ETravelDeploymentStatus::WaitingForShell)
+		// ==============================================================================
+		// 💥【架构一致性：服务器端快照核验】
+		// 为什么服务器端也必须使用 SnapshotStatus 而不是 PS->DeploymentStatus？
+		// 因为这段服务器代码，恰恰就是触发“状态中途被篡改”的作案源头！
+		// 如果这里不使用快照，一旦内部的 CheckAndExecutePhysicalDeployment 成功发牌解封，
+		// 那么在同一个函数的上下文中，物理概念上的“当前状态”就发生了撕裂。
+		// 统一使用快照，确保“一次事件回调，只处理一个绝对的历史瞬间”，坚决贯彻 C++ 的决定论原则！
+		// ==============================================================================
+		if (SnapshotStatus == ETravelDeploymentStatus::WaitingForShell)
 		{
 			if (!bIsPhysicalLayoutReady)
 			{
@@ -258,8 +283,10 @@ void UMyMapTravelSubsystem::HandleDeploymentTokenUpdate(UMyMapTravelStateCompone
 		return;
 	}
 
-	// 【自动化契约响应】：根据令牌执行绝对无条件的表现层操作
-	switch (PS->DeploymentStatus)
+	// ==============================================================================
+	// 💥 严禁读取内存里的最新状态 ! 必须使用第一行的复印件（快照）进行本地响应！
+	// ==============================================================================
+	switch (SnapshotStatus)
 	{
 	case ETravelDeploymentStatus::Traveling:
 	{
@@ -401,8 +428,21 @@ void UMyMapTravelSubsystem::NotifyLocalScreenOffFinished()
 		{
 			if (UMyMapTravelStateComponent* NetComp = MyPS->MapTravelComponent)
 			{
-				UE_LOG(LogTemp, Warning, TEXT("📺 [表现层] 熄屏 UI 彻底闭合黑透！向服务器正式发射就绪 Ack！"));
-				NetComp->Server_AckScreenOffReady();
+				// ==============================================================================
+				// 💥【核心修复：状态机单向防反转锁】
+				// 只有在没就绪 (如 Traveling 或 刚连入) 时，才允许通过 Ack 切换为 WaitingForShell。
+				// 如果玩家早就已经是 ReadyToPossess (例如冷启动开荒早在 RestartPlayer 就已完成附身夺舍)，
+				// 绝不允许迟来的 UI 遮罩信号将其状态【降级】打回 WaitingForShell！
+				// ==============================================================================
+				if (NetComp->DeploymentStatus != ETravelDeploymentStatus::ReadyToPossess)
+				{
+					UE_LOG(LogTemp, Warning, TEXT("📺 [表现层] 熄屏 UI 彻底闭合黑透！向服务器正式发射就绪 Ack！"));
+					NetComp->Server_AckScreenOffReady();
+				}
+				else
+				{
+					UE_LOG(LogTemp, Warning, TEXT("📺 [表现层] 熄屏 UI 掩护就绪，但玩家已处于 ReadyToPossess 状态，静默忽略 Ack 以防状态倒车。"));
+				}
 			}
 		}
 	}
@@ -601,8 +641,24 @@ void UMyMapTravelSubsystem::CheckAndExecutePhysicalDeployment()
 				{
 					if (UMyMapTravelStateComponent* NetPS = MyPS->MapTravelComponent)
 					{
-						// 下发解封令牌，触发三锁合一！
-						NetPS->SetDeploymentStatus(ETravelDeploymentStatus::ReadyToPossess);
+						// ==============================================================================
+						// 💥【修复与释疑】：防重复发牌与状态机踩踏。如果 Director 内部已经为其发了解封令牌，这里直接跳过
+						// 为什么此时 Director 内部已经发过牌了？这是由严密的决定论管线保证的：
+						// 
+						// 前置流转：刚才执行的 SnapPlayerToDestination() 内部会遍历所有处于 WaitingForShell 的玩家，并调用 RestartPlayer。
+						// 
+						// 场景 A【开荒】：SnapPlayerToDestination 识别到开荒锁，执行原生躯壳夺舍。夺舍成功后，底层的 ExecuteDeploymentDirector 会立刻下发 ReadyToPossess 令牌。
+						// 场景 B【非开荒/跨图】：SnapPlayerToDestination 提取坐标，执行动态捏人或排队。捏人/接管成功后，底层的 ExecuteDeploymentDirector 同样会立刻下发 ReadyToPossess 令牌。
+						// 
+						// 结论：只要玩家在这个周期内成功分配到了肉体，当代码执行流从 SnapPlayerToDestination() 退出并走到这里时，
+						// 玩家的令牌【100% 必然】已经被底层的导演系统翻转为 ReadyToPossess！
+						// 如果这里不加 != ReadyToPossess 的判断直接无脑 Set，就会对同一个玩家触发双重解封信号，导致 UI 状态机重入与渲染踩踏！
+						// ==============================================================================
+						if (NetPS->DeploymentStatus != ETravelDeploymentStatus::ReadyToPossess)
+						{
+							// 下发解封令牌，触发三锁合一！
+							NetPS->SetDeploymentStatus(ETravelDeploymentStatus::ReadyToPossess);
+						}
 					}
 				}
 			}
@@ -1383,8 +1439,9 @@ bool UMyMapTravelSubsystem::ExecuteDeploymentDirector(AController* NewPlayer, AM
 	// ==============================================================================
 	if (!bIsPhysicalLayoutReady)
 	{
-		PS->SetDeploymentStatus(ETravelDeploymentStatus::WaitingForShell);
+		// 💥【修复】：永远先打印拦截日志，再下发令牌！防止同步状态机导致的时序倒错
 		UE_LOG(LogTemp, Warning, TEXT("🛑 [DeploymentDirector] 物理阵型未就绪，拦截生成，强制玩家进入 WaitingForShell 挂起状态！"));
+		PS->SetDeploymentStatus(ETravelDeploymentStatus::WaitingForShell);
 		return true;
 	}
 

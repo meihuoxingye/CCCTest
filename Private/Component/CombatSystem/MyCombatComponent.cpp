@@ -25,6 +25,14 @@
 // 使用静态网格体的独有函数
 #include "Components/StaticMeshComponent.h"
 
+#include "Kismet/GameplayStatics.h"
+#include "Character/CharacterAttributeDataAsset.h"
+#include "Engine/HitResult.h"
+#include "GameFramework/DamageType.h"
+
+// 💥【修改说明】：补充计时器系统头文件，解决 FTimerManager 不完整类型报错
+#include "TimerManager.h"
+
 
 // ==============================================================================
 // 核心生命周期 (Core Lifecycle)
@@ -49,6 +57,32 @@ void UMyCombatComponent::BeginPlay()
 
 	// 缓存组件拥有者
 	CachedOwner = Cast<ABaseCharacter>(GetOwner());
+
+	// 【新增代码】：初始化血量并接入痛觉神经
+	if (CachedOwner)
+	{
+		// 1. 一次性提取并缓存数据资产中的 MaxHealth，消除运行时指针跳转开销
+		if (const UCharacterAttributeDataAsset* Config = CachedOwner->GetAttributeConfig())
+		{
+			CachedMaxHealth = Config->MaxHealth;
+			CurrentHealth = CachedMaxHealth; // 满血出生
+		}
+
+		// 2. 将组件的受击神经，死死焊在宿主(角色)的底层受击事件上
+		CachedOwner->OnTakeAnyDamage.AddDynamic(this, &UMyCombatComponent::HandleTakeDamage);
+	}
+}
+
+void UMyCombatComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// 致命防御：如果组件被摧毁（跨图、死亡），必须强行掐死发车倒计时！
+	// 防止定时器触发已释放的内存指针 (FlushDamageBatch) 引发核心崩溃。
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(BatchTimerHandle);
+	}
+
+	Super::EndPlay(EndPlayReason);
 }
 
 // Called every frame
@@ -201,6 +235,47 @@ void UMyCombatComponent::ExecuteAttack()
 	}
 }
 
+void UMyCombatComponent::ProcessBulletHit(const FHitResult& Hit)
+{
+	// 防御校验，确保打中了东西，且数据资产还在
+	if (!Hit.GetActor() || !CachedConfig) return;
+
+	// 💥【修改说明】：第二条轨的“本地防火墙”。如果是多播在队友屏幕上生成的子弹撞到了怪，立刻掐断！
+	// 只有控制这个角色的本地玩家本机，才有资格下发真实的物理扣血指令，彻底杜绝一枪多倍伤害。
+	if (CachedOwner && !CachedOwner->IsLocallyControlled()) return;
+
+	// 💥【修改说明】：不立刻发 RPC，而是将目标压入打包缓冲池，使用 AddUnique 防止散弹枪同一帧多次命中同一部位重复入栈
+	BatchedTargets.AddUnique(Hit.GetActor());
+
+	// 💥【修改说明】：微型窗口聚合机制。
+	// 如果这是缓冲池里的第一颗子弹（计时器未激活），则立刻启动 0.05 秒（50毫秒）的发车倒计时。
+	// 这 50ms 内后续所有的命中，只会被压入数组，不会触发新的倒计时。
+	if (!GetWorld()->GetTimerManager().IsTimerActive(BatchTimerHandle))
+	{
+		GetWorld()->GetTimerManager().SetTimer(BatchTimerHandle, this, &UMyCombatComponent::FlushDamageBatch, 0.05f, false);
+	}
+}
+
+void UMyCombatComponent::HandleTakeDamage(AActor* DamagedActor, float Damage, const class UDamageType* DamageType, class AController* InstigatedBy, AActor* DamageCauser)
+{
+	if (Damage <= 0.f || CurrentHealth <= 0.f) return;
+
+	// 真实扣血，使用预缓存的 CachedMaxHealth 做界限钳制
+	CurrentHealth = FMath::Clamp(CurrentHealth - Damage, 0.f, CachedMaxHealth);
+
+	// 立刻拉响原生广播！通知挂载此频道的 UI 刷新血条
+	OnHealthChangedNative.Broadcast(CurrentHealth, CachedMaxHealth);
+
+	if (CurrentHealth > 0.f)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[%s] 挨打了！掉了 %f 血，还剩 %f，正在播放受击僵直！"), *DamagedActor->GetName(), Damage, CurrentHealth);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[%s] 寄了！"), *DamagedActor->GetName());
+	}
+}
+
 #pragma endregion
 
 
@@ -232,7 +307,7 @@ void UMyCombatComponent::PerformHitscan()
 	if (!CachedOwnerController) return;
 	if (!(CachedPlayerController || CachedAIController)) return;
 
-	// 一次性获取完整的 Transform（包含位置、旋转、缩放），底层骨骼树查询开销直接砍掉 2/3！
+	// 💥【修改说明】：5.8 内部优化路径，如果不需要缩放，直接拿位姿更省性能
 	const FTransform MuzzleTransform = CachedWeaponMesh->GetSocketTransform(CachedMuzzleSocket, RTS_World);
 
 	// 从 Transform 中直接拆出位置
@@ -274,8 +349,9 @@ void UMyCombatComponent::PerformHitscan()
 				float CosAlpha = FMath::Cos(FMath::DegreesToRadians(CamPitch));
 
 				// 修正系数 = 1 / Cos(相机角)
-				// 防止相机完全垂直（90度）时除以0导致无穷大，设定一个安全上限
-				CorrectionFactor = 1.0f / FMath::Max(0.01f, FMath::Abs(CosAlpha));
+				// 💥【修改说明】：采纳稳定性建议，使用 Clamp 将底层余弦值限制在 0.05 ~ 1.0 之间
+				// 完美规避极限垂直视角（接近90度）下的除零或浮点数爆炸危险
+				CorrectionFactor = 1.0f / FMath::Clamp(FMath::Abs(CosAlpha), 0.05f, 1.0f);
 			}
 
 			// 使用修正后的 Y 轴计算夹角
@@ -311,6 +387,9 @@ void UMyCombatComponent::PerformHitscan()
 	{
 		// 传参：谁开的枪，哪里开的，方向，速度，寿命
 		CachedBulletSubsystem->FireBullet(CachedOwner, MuzzleLoc, Dir, CachedConfig->BulletSpeed, CachedConfig->BulletLifespan);
+
+		// 💥【修改说明】：第一条轨启动。同一帧发射 Server RPC 向服务器上报动作请求，触发全网多播
+		Server_PlayFireAction(MuzzleLoc, Dir);
 	}
 }
 
@@ -363,6 +442,96 @@ void UMyCombatComponent::CachedController()
 		CachedPlayerController = nullptr;
 		CachedCameraManager = nullptr;
 	}
+}
+
+#pragma endregion
+
+
+// ==============================================================================
+// 联机底层探针 (Network Probes)
+// ==============================================================================
+#pragma region
+
+void UMyCombatComponent::Server_PlayFireAction_Implementation(FVector MuzzleLoc, FVector FireDirection)
+{
+	// 💥【修改说明】：收到开火上报，服务器不做任何校验阻滞，当一个无情的信号塔，向全网所有副机广播该视觉动作
+	Multicast_PlayFireAction(MuzzleLoc, FireDirection);
+}
+
+void UMyCombatComponent::Multicast_PlayFireAction_Implementation(FVector MuzzleLoc, FVector FireDirection)
+{
+	// 💥【修改说明】：视觉防重影锁。如果是开枪的玩家本人，直接驳回（因为他已经在 PerformHitscan 里播过本地特效了）
+	if (CachedOwner && CachedOwner->IsLocallyControlled()) return;
+
+	// 💥【修改说明】：队友屏幕上的视觉同步。发射出一颗一模一样的子弹（轨迹、速度完全一致）
+	// 当这颗子弹撞墙或撞怪时，也会进入 ProcessBulletHit 流程，但会被那里的本地判定锁拦截，避免对怪物造成二次虚假伤害！
+	if (CachedBulletSubsystem && CachedConfig)
+	{
+		CachedBulletSubsystem->FireBullet(CachedOwner, MuzzleLoc, FireDirection, CachedConfig->BulletSpeed, CachedConfig->BulletLifespan);
+	}
+}
+
+void UMyCombatComponent::Server_ApplyBatchedDamage_Implementation(const TArray<AActor*>& TargetEnemies)
+{
+	// 💥【修改说明】：服务器权威执行伤害。不信任客户端传来的数值，直接从配置表强读 CachedConfig->Damage
+	if (!CachedOwner || !CachedConfig) return;
+
+	// 缓存数据，避免在循环中反复跳转指针查表
+	const float ActualDamage = CachedConfig->Damage;
+	AController* InstigatorCtrl = CachedOwner->GetController(); // 动态获取最新控制器避免缓存脱节
+
+	// 💥【修改说明】：计算物理射程极限（子弹速度 * 寿命）。追加 500.f 的冗余量以容忍客户端与服务器之间的网络漂移
+	const float MaxRangeSq = FMath::Square(CachedConfig->BulletSpeed * CachedConfig->BulletLifespan + 500.f);
+	const FVector ShooterLoc = CachedOwner->GetActorLocation();
+
+	// 拆包并逐个执行权威扣血
+	for (AActor* Target : TargetEnemies)
+	{
+		// 💥【修改说明】：严密防御。使用 IsValid 替代指针判空，防止目标正在处于 PendingKill（即将被回收）状态
+		if (IsValid(Target))
+		{
+			// 💥【修改说明】：防全图秒杀底线校验。判断距离是否超出物理极限，如果是，直接过滤该非法伤害请求
+			float DistSq = FVector::DistSquared(ShooterLoc, Target->GetActorLocation());
+			if (DistSq <= MaxRangeSq)
+			{
+				// 核心解耦：使用 UE 全局伤害总线，替代繁琐的 Cast<ABaseCharacter> 类型判断。
+				// 1. 泛用性：无视目标类型（角色、木箱或油桶），只要对方绑定了 OnTakeAnyDamage 委托就能接收到伤害。
+				// 2. AI 联动：该接口会自动把开火者（CachedOwnerController）的信息传给虚幻底层的 AI 感知系统。
+				// 3. 仇恨机制：这能让受击的 AI 明确知道“是谁打了我”，从而执行正确的转身或追击逻辑。
+				UGameplayStatics::ApplyDamage(
+					Target,
+					ActualDamage,
+					InstigatorCtrl,
+					CachedOwner,
+					UDamageType::StaticClass()
+				);
+			}
+		}
+	}
+}
+
+void UMyCombatComponent::FlushDamageBatch()
+{
+	// 准备一个干净的原始指针数组用于网络传输
+	TArray<AActor*> ValidTargets;
+
+	for (const TWeakObjectPtr<AActor>& WeakTarget : BatchedTargets)
+	{
+		// 严密防御：只有在这 50ms 内依然存活（没被别人打死或被 GC）的合法活体目标，才有资格结算伤害
+		if (WeakTarget.IsValid())
+		{
+			ValidTargets.Add(WeakTarget.Get());
+		}
+	}
+
+	// 只要存在有效目标，一脚油门发往服务器
+	if (ValidTargets.Num() > 0)
+	{
+		Server_ApplyBatchedDamage(ValidTargets);
+	}
+
+	// 清空缓冲池，等待下一波扣动扳机
+	BatchedTargets.Empty();
 }
 
 #pragma endregion

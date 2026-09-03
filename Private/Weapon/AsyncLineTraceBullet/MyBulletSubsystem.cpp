@@ -8,6 +8,10 @@
 // 绘制调试线和调试球
 #include "DrawDebugHelpers.h"
 
+#include "Character/BaseCharacter.h"
+#include "Component/CombatSystem/MyCombatComponent.h"
+
+
 void UMyBulletSubsystem::FireBullet(AActor* InOwner, const FVector& StartLoc, const FVector& Direction, float Speed, float LifeTime)
 {
     // 定义一个新的子弹数据结构体并设置参数
@@ -77,11 +81,19 @@ void UMyBulletSubsystem::Tick(float DeltaTime)
             // 有真正的异步射线检测函数且性能更好，但也有响应的问题且更复杂
             if (World->LineTraceSingleByChannel(Hit, Bullet.Position, NextLoc, ECC_Visibility, Params))
             {
-                // 射线命中逻辑
-                if (Hit.GetActor())
+                // 【修改代码】：射线命中逻辑，向战斗组件回调
+                if (Hit.GetActor() && Bullet.Owner.IsValid())
                 {
-                    // 这里调用你的伤害接口，例如：
-                    // UGameplayStatics::ApplyDamage(Hit.GetActor(), 20.f, ...);
+                    // 把弱指针转为基础角色类
+                    if (ABaseCharacter* Shooter = Cast<ABaseCharacter>(Bullet.Owner.Get()))
+                    {
+                        // 通过接口获取开火者的战斗组件
+                        if (UMyCombatComponent* CombatComp = Shooter->GetCombatComponent())
+                        {
+                            // 将击中结果原封不动地传回给战斗组件！
+                            CombatComp->ProcessBulletHit(Hit);
+                        }
+                    }
                 }
 
                 // 绘制命中点（调试用）

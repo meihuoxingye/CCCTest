@@ -55,6 +55,11 @@ private:
 	UPROPERTY()
 	TObjectPtr<class UMyCharacterViewModel> CharacterVM;
 
+protected:
+	// 监听器函数：专门用于接收来自 UMyCombatComponent (战斗组件) 的血量变化。
+	// 触发源头：当角色挨打，并在 UMyCombatComponent::HandleTakeDamage 中完成扣血结算后，通过 OnHealthChangedNative 委托触发此函数。
+	void OnHealthDataChanged(float NewHealth, float MaxHealth);
+
 
 	// ==============================================================================
 	// 高频 SP 材质渲染管线 (High-Frequency SP Material Pipeline)
