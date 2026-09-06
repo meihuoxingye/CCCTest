@@ -35,6 +35,9 @@
 
 #include "UI/Transition/MyScreenOffWidget.h"
 
+// 引入全局公共状态板
+#include "Game/MyGameStateBase.h"
+
 
 // ==============================================================================
 // 内部安全获取真实玩家控制器的工具函数 (防无缝传送假身)
@@ -557,9 +560,11 @@ void UMyMapTravelSubsystem::ExecuteSameMapTravel(AActor* TeleportingActor, UTele
 	// 在触发黑幕和网络等待前，立刻在物理世界封印全队（包括所有 AI 队友）的运动状态！
 	// 绝对防止在等待数据层预热和客机 UI 的这几秒钟里，队友因重力坠落或遭受物理推挤产生位移。
 	// ==============================================================================
-	if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(World->GetAuthGameMode()))
+	// 💥【修改说明】架构迁移：GameMode 的私有小本子已销毁，现在必须向 GameState 索要存活大名单
+	// 才能对所有存活队友执行物理点穴。
+	if (AMyGameStateBase* GS = World->GetGameState<AMyGameStateBase>())
 	{
-		for (ATopCharacter* Teammate : GM->FriendlyRoster)
+		for (ATopCharacter* Teammate : GS->FriendlyRoster)
 		{
 			if (Teammate && !Teammate->IsActorBeingDestroyed())
 			{
@@ -878,10 +883,11 @@ void UMyMapTravelSubsystem::InternalExecuteTravel(FName TargetLevelName, const F
 	// ==============================================================================
 	if (GI)
 	{
-		// 寻找当前世界的游戏模式，索要最权威的小队花名册
-		if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(World->GetAuthGameMode()))
+		// 💥【修改说明】架构迁移：服务器 GameMode 已不再直接存储名单。
+		// 现改为直接从 GameState 上的公共大屏幕提取所有幸存队友进行打包跨图流送。
+		if (AMyGameStateBase* GS = World->GetGameState<AMyGameStateBase>())
 		{
-			for (ATopCharacter* Teammate : GM->FriendlyRoster)
+			for (ATopCharacter* Teammate : GS->FriendlyRoster)
 			{
 				// 防御性校验：确保实体有效且未被销毁
 				if (Teammate && !Teammate->IsActorBeingDestroyed())
@@ -1095,9 +1101,10 @@ void UMyMapTravelSubsystem::RestorePlayerInput()
 		// 之前在同图传送时，由于只唤醒了玩家真身，队友被 DisableMovement 永久定格在了空中！
 		// 在这里必须向全队下达解穴令，让底层的 FindFloor 瞬间完成贴地吸附！
 		// ==============================================================================
-		if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(World->GetAuthGameMode()))
+		// 💥【修改说明】架构迁移：唤醒队友时，同样需要去大屏幕 (GameState) 上提取队伍花名册。
+		if (AMyGameStateBase* GS = World->GetGameState<AMyGameStateBase>())
 		{
-			for (ATopCharacter* Teammate : GM->FriendlyRoster)
+			for (ATopCharacter* Teammate : GS->FriendlyRoster)
 			{
 				if (Teammate)
 				{
@@ -1665,6 +1672,11 @@ ATopCharacter* UMyMapTravelSubsystem::FindSquadTeammateShell(UWorld* World, AMyG
 	ATopCharacter* FoundShell = nullptr;
 	if (!GameMode) return nullptr;
 
+	// 💥【修改说明】提前从世界上下文中提取 GameState，
+	// 联机状态下副机连入时必须依靠大屏幕上的数据来核对躯壳是否合法。
+	AMyGameStateBase* GS = World->GetGameState<AMyGameStateBase>();
+	if (!GS) return nullptr;
+
 	for (TActorIterator<ATopCharacter> It(World); It; ++It)
 	{
 		ATopCharacter* Character = *It;
@@ -1676,7 +1688,8 @@ ATopCharacter* UMyMapTravelSubsystem::FindSquadTeammateShell(UWorld* World, AMyG
 		{
 			// 1. 副机连入时：房主动态生成的待命队友没有 RF_WasLoaded，但已注册进 FriendlyRoster 大名单！
 			// 2. !RF_Transient: 确保它不是运行时产生的临时垃圾或预览对象
-			if (!Character->HasAnyFlags(RF_Transient) && GameMode->FriendlyRoster.Contains(Character))
+			// 💥【修改说明】使用 GS->FriendlyRoster 替代废弃的 GameMode->FriendlyRoster 进行合法性比对。
+			if (!Character->HasAnyFlags(RF_Transient) && GS->FriendlyRoster.Contains(Character))
 			{
 				if (FoundShell == nullptr)
 				{
@@ -1748,8 +1761,10 @@ void UMyMapTravelSubsystem::ExecuteSquadFormationDeployment(UWorld* World, const
 {
 	if (!World) return;
 
-	AMyGameModeBase* GM = Cast<AMyGameModeBase>(World->GetAuthGameMode());
-	if (!GM) return;
+	// 💥【修改说明】排队系统现在必须由 GameState 提供权威的实体名单。
+	// 原 GameMode 中的名单已作废。
+	AMyGameStateBase* GS = World->GetGameState<AMyGameStateBase>();
+	if (!GS) return;
 
 	// 提取安全兜底坐标的绝对地板 Z 坐标，杜绝 90cm 悬空
 	float BaseFloorZ = BaseTransform.GetLocation().Z;
@@ -1774,7 +1789,8 @@ void UMyMapTravelSubsystem::ExecuteSquadFormationDeployment(UWorld* World, const
 	bool bFlipOffset = true;
 
 	// 直接遍历已经存在于当前地图上的队友肉体
-	for (ATopCharacter* Teammate : GM->FriendlyRoster)
+	// 💥【修改说明】遍历大屏幕上的名单进行阵型展开
+	for (ATopCharacter* Teammate : GS->FriendlyRoster)
 	{
 		// 1. 基础安全校验
 		if (!Teammate || Teammate->IsActorBeingDestroyed()) continue;

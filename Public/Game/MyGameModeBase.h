@@ -9,8 +9,6 @@
 
 #include "MyGameModeBase.generated.h"
 
-// 定义一个多播委托，当友军名册发生变动时广播信号
-DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRosterChangedSignature);
 
 /**
  * */
@@ -46,13 +44,8 @@ protected:
 	// 队伍名册系统 (Squad Roster System)
 	// ==============================================================================
 public:
-	// 动态维护当前存活友军的轻量级指针数组
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Roster")
-	TArray<class ATopCharacter*> FriendlyRoster;
-
-	// 名册变动广播频道
-	UPROPERTY(BlueprintAssignable, Category = "Roster|Event")
-	FOnRosterChangedSignature OnRosterChanged;
+	// 💥【修改说明】彻底删除了原有的 FriendlyRoster 数组和 OnRosterChanged 委托。
+	// 这些数据已经被转移到了 MyGameStateBase 中进行全服同步。
 
 	// 外部调用：角色出生时注册
 	void RegisterFriendly(class ATopCharacter* Character);

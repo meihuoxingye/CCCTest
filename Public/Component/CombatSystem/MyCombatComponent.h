@@ -41,6 +41,9 @@ protected:
 	// 💥【修改说明】：重写 EndPlay，负责组件销毁时的内存级清理，斩断定时器野指针
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+	// 💥【修改说明】：补全组件的网络生命周期，用于注册需要跨网同步的变量
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
 public:
 	// Called every frame
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
@@ -74,7 +77,8 @@ public:
 	void StopWeaponFire();
 
 	// 供 MyBulletSubsystem 射线打中目标后回调的命中处理函数
-	void ProcessBulletHit(const struct FHitResult& Hit);
+	// 💥【修改说明】：接收子弹击中时传回的“该子弹开火瞬间绑定的数据资产”，解决换枪导致的配置劫持，且利于后续扩展其他属性读取。
+	void ProcessBulletHit(const struct FHitResult& Hit, const class UMyWeaponDataAsset* HitWeaponConfig);
 
 	// 给外界（UI）开放一个获取当前血量的接口
 	FORCEINLINE float GetCurrentHealth() const { return CurrentHealth; }
@@ -85,7 +89,8 @@ public:
 private:
 	// 真实的活体当前血量
 	// 在 C++ 层面绝对私有，但在蓝图层面允许读取，只需加上 meta = (AllowPrivateAccess = "true")
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Attributes", meta = (AllowPrivateAccess = "true"))
+	// 💥【修改说明】：添加 ReplicatedUsing。当服务器的血量同步到客户端时，底层会自动唤醒 OnRep_CurrentHealth！
+	UPROPERTY(ReplicatedUsing = OnRep_CurrentHealth, VisibleAnywhere, BlueprintReadOnly, Category = "Attributes", meta = (AllowPrivateAccess = "true"))
 	float CurrentHealth;
 
 	// 缓存的最大血量，杜绝受伤时高频访问 DataAsset 指针
@@ -94,6 +99,11 @@ private:
 	// 挂载到原生底层受击委托 OnTakeAnyDamage 的回调函数
 	UFUNCTION()
 	void HandleTakeDamage(AActor* DamagedActor, float Damage, const class UDamageType* DamageType, class AController* InstigatedBy, AActor* DamageCauser);
+
+	// 💥【修改说明】：网络同步回调函数，当客机收到新血量时自动执行。
+	// 虚幻的神仙机制：给 OnRep 函数加上一个同类型的参数 (OldHealth)，引擎底层就会自动把修改前的“旧血量”塞进来，方便我们算差值！
+	UFUNCTION()
+	void OnRep_CurrentHealth(float OldHealth);
 
 
 	// ==============================================================================
@@ -179,13 +189,18 @@ public:
 
 	// 轨道二：批量伤害裁决 RPC (数值层)
 	// 统一走数组通道。单发武器数组 Size 为 1，高射速或散弹枪 Size 为 N。完美适配所有枪械。
+	// 💥【修改说明】：追加 HitWeaponConfig 参数，服务器直接从这个被固化的历史数据资产中读取伤害等结算数值。
 	UFUNCTION(Server, Reliable)
-	void Server_ApplyBatchedDamage(const TArray<AActor*>& TargetEnemies);
+	void Server_ApplyBatchedDamage(const TArray<AActor*>& TargetEnemies, const class UMyWeaponDataAsset* HitWeaponConfig);
 
 private:
 	// 伤害批量打包缓冲池。
 	// 必须使用弱指针 (TWeakObjectPtr)，防止怪物在 50ms 的缓冲期内因其他原因死亡，导致发送野指针崩溃。
 	TArray<TWeakObjectPtr<AActor>> BatchedTargets;
+
+	// 💥【修改说明】：用于在 50ms 缓冲期内，暂存当前批次子弹所对应的数据资产指针，等待发往服务器。
+	UPROPERTY()
+	TObjectPtr<const class UMyWeaponDataAsset> PendingBatchConfig;
 
 	// 打包发送发车计时器
 	FTimerHandle BatchTimerHandle;

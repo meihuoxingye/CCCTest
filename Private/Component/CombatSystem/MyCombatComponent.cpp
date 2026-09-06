@@ -33,6 +33,9 @@
 // 💥【修改说明】：补充计时器系统头文件，解决 FTimerManager 不完整类型报错
 #include "TimerManager.h"
 
+// 💥【修改说明】：补充网络同步头文件，以支持 DOREPLIFETIME 宏
+#include "Net/UnrealNetwork.h"
+
 
 // ==============================================================================
 // 核心生命周期 (Core Lifecycle)
@@ -83,6 +86,14 @@ void UMyCombatComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 
 	Super::EndPlay(EndPlayReason);
+}
+
+void UMyCombatComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	// 💥【修改说明】：向底层引擎注册 CurrentHealth，正式为其接通全服下发的网络光缆
+	DOREPLIFETIME(UMyCombatComponent, CurrentHealth);
 }
 
 // Called every frame
@@ -235,24 +246,40 @@ void UMyCombatComponent::ExecuteAttack()
 	}
 }
 
-void UMyCombatComponent::ProcessBulletHit(const FHitResult& Hit)
+void UMyCombatComponent::ProcessBulletHit(const FHitResult& Hit, const class UMyWeaponDataAsset* HitWeaponConfig)
 {
-	// 防御校验，确保打中了东西，且数据资产还在
-	if (!Hit.GetActor() || !CachedConfig) return;
+	// 防御校验，确保打中了东西，且固化的历史配置资产没有被意外回收
+	// 💥【修改说明】：将原先校验组件实时的 CachedConfig，改为校验子弹“随身携带”的 HitWeaponConfig
+	if (!Hit.GetActor() || !HitWeaponConfig) return;
 
 	// 💥【修改说明】：第二条轨的“本地防火墙”。如果是多播在队友屏幕上生成的子弹撞到了怪，立刻掐断！
 	// 只有控制这个角色的本地玩家本机，才有资格下发真实的物理扣血指令，彻底杜绝一枪多倍伤害。
 	if (CachedOwner && !CachedOwner->IsLocallyControlled()) return;
 
-	// 💥【修改说明】：不立刻发 RPC，而是将目标压入打包缓冲池，使用 AddUnique 防止散弹枪同一帧多次命中同一部位重复入栈
-	BatchedTargets.AddUnique(Hit.GetActor());
-
-	// 💥【修改说明】：微型窗口聚合机制。
-	// 如果这是缓冲池里的第一颗子弹（计时器未激活），则立刻启动 0.05 秒（50毫秒）的发车倒计时。
-	// 这 50ms 内后续所有的命中，只会被压入数组，不会触发新的倒计时。
-	if (!GetWorld()->GetTimerManager().IsTimerActive(BatchTimerHandle))
+	if (UWorld* World = GetWorld())
 	{
-		GetWorld()->GetTimerManager().SetTimer(BatchTimerHandle, this, &UMyCombatComponent::FlushDamageBatch, 0.05f, false);
+		// 💥【修改说明】：异构强制发车检查。
+		// 如果当前已经有正在打包的缓冲池，并且新命中的子弹所属的数据资产与池子里的【不一样】
+		if (World->GetTimerManager().IsTimerActive(BatchTimerHandle))
+		{
+			if (PendingBatchConfig != HitWeaponConfig)
+			{
+				// 立刻终止倒计时，把旧批次强行发往服务器结算
+				World->GetTimerManager().ClearTimer(BatchTimerHandle);
+				FlushDamageBatch();
+			}
+		}
+
+		// 不立刻发 RPC，而是将目标压入打包缓冲池，使用 AddUnique 防止散弹枪同一帧多次命中同一部位重复入栈
+		BatchedTargets.AddUnique(Hit.GetActor());
+
+		// 如果当前没有激活的缓冲池（要么是第一发，要么是刚刚因为异构被强制发车清空了）
+		if (!World->GetTimerManager().IsTimerActive(BatchTimerHandle))
+		{
+			// 记录下这颗子弹的新资产，并启动/重新启动 50ms 的打包倒计时
+			PendingBatchConfig = HitWeaponConfig;
+			World->GetTimerManager().SetTimer(BatchTimerHandle, this, &UMyCombatComponent::FlushDamageBatch, 0.05f, false);
+		}
 	}
 }
 
@@ -260,19 +287,41 @@ void UMyCombatComponent::HandleTakeDamage(AActor* DamagedActor, float Damage, co
 {
 	if (Damage <= 0.f || CurrentHealth <= 0.f) return;
 
+	// 💥【修改说明】：因为这个函数是被 ApplyDamage 唤醒的，所以它【绝对只会在服务器执行】。
+	// 先把当前的血量存下来，作为“旧血量”备用
+	float OldHealth = CurrentHealth;
+
 	// 真实扣血，使用预缓存的 CachedMaxHealth 做界限钳制
 	CurrentHealth = FMath::Clamp(CurrentHealth - Damage, 0.f, CachedMaxHealth);
+
+	// 💥【核心架构：双轨驱动 UI】
+	// 1. 客机：服务器改完 CurrentHealth 后，引擎会自动把数据发给客机，客机的 OnRep_CurrentHealth 会自动触发。
+	// 2. 主机（Listen Server 房主）：引擎底层规定 OnRep 不会在修改变量的本地机器上触发！所以房主必须手动调用，否则房主自己反倒成了瞎子！
+	if (GetOwner()->HasAuthority())
+	{
+		OnRep_CurrentHealth(OldHealth);
+	}
+}
+
+void UMyCombatComponent::OnRep_CurrentHealth(float OldHealth)
+{
+	// 💥【修改说明】：将所有“只属于本地屏幕”的表现层（播UI、打日志）统统移到这里！
+	// 因为这个函数不论是房主（手动调用）还是客机（网络同步），都会在本地绝对执行一次！
 
 	// 立刻拉响原生广播！通知挂载此频道的 UI 刷新血条
 	OnHealthChangedNative.Broadcast(CurrentHealth, CachedMaxHealth);
 
+	// 算出具体掉了多少血，供日志精准打印
+	float DamageTaken = OldHealth - CurrentHealth;
+	FString ActorName = CachedOwner ? CachedOwner->GetName() : TEXT("未知实体");
+
 	if (CurrentHealth > 0.f)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[%s] 挨打了！掉了 %f 血，还剩 %f，正在播放受击僵直！"), *DamagedActor->GetName(), Damage, CurrentHealth);
+		UE_LOG(LogTemp, Warning, TEXT("[%s] 挨打了！掉了 %f 血，还剩 %f，正在播放受击僵直！"), *ActorName, DamageTaken, CurrentHealth);
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[%s] 寄了！"), *DamagedActor->GetName());
+		UE_LOG(LogTemp, Warning, TEXT("[%s] 寄了！"), *ActorName);
 	}
 }
 
@@ -386,7 +435,8 @@ void UMyCombatComponent::PerformHitscan()
 	if (CachedBulletSubsystem)
 	{
 		// 传参：谁开的枪，哪里开的，方向，速度，寿命
-		CachedBulletSubsystem->FireBullet(CachedOwner, MuzzleLoc, Dir, CachedConfig->BulletSpeed, CachedConfig->BulletLifespan);
+		// 💥【修改说明】：将当前武器的数据资产指针 (CachedConfig) 整体传入子弹系统进行固化绑定
+		CachedBulletSubsystem->FireBullet(CachedOwner, MuzzleLoc, Dir, CachedConfig->BulletSpeed, CachedConfig->BulletLifespan, CachedConfig);
 
 		// 💥【修改说明】：第一条轨启动。同一帧发射 Server RPC 向服务器上报动作请求，触发全网多播
 		Server_PlayFireAction(MuzzleLoc, Dir);
@@ -452,12 +502,18 @@ void UMyCombatComponent::CachedController()
 // ==============================================================================
 #pragma region
 
+// 轨道一（上半截：向总台上报）
+// 客机无权直接广播。本地开火时，向服务器发射 Server RPC 请求代为广播。
+// 极高频瞬态事件，无需可靠传输，丢失即弃绝不阻塞带宽。
 void UMyCombatComponent::Server_PlayFireAction_Implementation(FVector MuzzleLoc, FVector FireDirection)
 {
 	// 💥【修改说明】：收到开火上报，服务器不做任何校验阻滞，当一个无情的信号塔，向全网所有副机广播该视觉动作
 	Multicast_PlayFireAction(MuzzleLoc, FireDirection);
 }
 
+// 轨道一（下半截：向全网下发）
+// 服务器收到上报后，充当信号塔，向全网所有客机下发 Multicast RPC 视觉动作。
+// 配合 cpp 里的 IsLocallyControlled() 拦截，实现队友看特效，自己不重复看。
 void UMyCombatComponent::Multicast_PlayFireAction_Implementation(FVector MuzzleLoc, FVector FireDirection)
 {
 	// 💥【修改说明】：视觉防重影锁。如果是开枪的玩家本人，直接驳回（因为他已经在 PerformHitscan 里播过本地特效了）
@@ -467,14 +523,18 @@ void UMyCombatComponent::Multicast_PlayFireAction_Implementation(FVector MuzzleL
 	// 当这颗子弹撞墙或撞怪时，也会进入 ProcessBulletHit 流程，但会被那里的本地判定锁拦截，避免对怪物造成二次虚假伤害！
 	if (CachedBulletSubsystem && CachedConfig)
 	{
-		CachedBulletSubsystem->FireBullet(CachedOwner, MuzzleLoc, FireDirection, CachedConfig->BulletSpeed, CachedConfig->BulletLifespan);
+		// 💥【修改说明】：多播同步表现时，也把 CachedConfig 原样传给子弹系统，保持接口签名一致
+		CachedBulletSubsystem->FireBullet(CachedOwner, MuzzleLoc, FireDirection, CachedConfig->BulletSpeed, CachedConfig->BulletLifespan, CachedConfig);
 	}
 }
 
-void UMyCombatComponent::Server_ApplyBatchedDamage_Implementation(const TArray<AActor*>& TargetEnemies)
+// 轨道二：批量伤害裁决 RPC (数值层)
+// 统一走数组通道。单发武器数组 Size 为 1，高射速或散弹枪 Size 为 N。完美适配所有枪械。
+// 💥【修改说明】：追加 HitWeaponConfig 参数，服务器直接从这个被固化的历史数据资产中读取伤害等结算数值。
+void UMyCombatComponent::Server_ApplyBatchedDamage_Implementation(const TArray<AActor*>& TargetEnemies, const class UMyWeaponDataAsset* HitWeaponConfig)
 {
-	// 💥【修改说明】：服务器权威执行伤害。不信任客户端传来的数值，直接从配置表强读 CachedConfig->Damage
-	if (!CachedOwner || !CachedConfig) return;
+	// 💥【修改说明】：服务器端同样弃用组件实时的 CachedConfig，直接从发车带来的历史配置表读取
+	if (!CachedOwner || !HitWeaponConfig) return;
 
 	// 缓存数据，避免在循环中反复跳转指针查表
 	const float ActualDamage = CachedConfig->Damage;
@@ -527,7 +587,8 @@ void UMyCombatComponent::FlushDamageBatch()
 	// 只要存在有效目标，一脚油门发往服务器
 	if (ValidTargets.Num() > 0)
 	{
-		Server_ApplyBatchedDamage(ValidTargets);
+		// 💥【修改说明】：发车时，将这 50ms 批次共享的数据资产指针一并带给服务器
+		Server_ApplyBatchedDamage(ValidTargets, PendingBatchConfig);
 	}
 
 	// 清空缓冲池，等待下一波扣动扳机

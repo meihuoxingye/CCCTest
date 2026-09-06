@@ -17,6 +17,9 @@
 
 #include "Engine/Engine.h"
 
+// 在文件顶部的 include 区域加上这行
+#include "Game/MyGameStateBase.h"
+
 
 UMyUIHandlerComponent::UMyUIHandlerComponent()
 {
@@ -44,11 +47,13 @@ void UMyUIHandlerComponent::BeginPlay()
 	// ==============================================================================
 	if (!CachedPC || !CachedPC->IsLocalController()) return;
 
-	// 【架构核心】：主动监听 GameMode 的名册更新频道，实现真正的事件驱动
-	if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(GetWorld()->GetAuthGameMode()))
+	// 💥【修改说明】摒弃 GameMode，改用 GameState。
+	// GameMode 在客户端永远为空。必须向 GameState (全服同步的公共揭示板) 订阅事件，
+	// 确保所有连入房间的本地玩家都能正常接收到数据刷新的广播。
+	if (AMyGameStateBase* GS = GetWorld()->GetGameState<AMyGameStateBase>())
 	{
 		// 无论何时，只要有人调用了 Broadcast，底层的事件系统会自动唤醒这里的 UpdateHUD 进行刷新
-		GM->OnRosterChanged.AddUniqueDynamic(this, &UMyUIHandlerComponent::UpdateHUD);
+		GS->OnRosterChanged.AddUniqueDynamic(this, &UMyUIHandlerComponent::UpdateHUD);
 	}
 
 	// HUD 控件的初始化与首帧构建
@@ -226,13 +231,14 @@ void UMyUIHandlerComponent::UpdateHUD()
 	// 如果 UI 面板还未就绪，或者不在游戏世界里，直接返回
 	if (!MainHUDInstance || !GetWorld()) return;
 
-	// O(1) 极速调取：向当前 GameMode 索要已过滤好、最干净的存活友军名单
-	if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(GetWorld()->GetAuthGameMode()))
+	// 💥【修改说明】GameMode 在客户端为 nullptr 会导致崩溃或无法执行。
+	// O(1) 极速调取：向当前 GameState 索要已同步好、最干净的存活友军名单。
+	if (AMyGameStateBase* GS = GetWorld()->GetGameState<AMyGameStateBase>())
 	{
 		// 【进阶优化】：直接使用预先缓存的 CachedPC 提取 Pawn，消灭 Cast<APlayerController>(GetOwner())
 		ATopCharacter* MyPawn = CachedPC ? Cast<ATopCharacter>(CachedPC->GetPawn()) : nullptr;
 		// 传递名单，并将当前玩家控制器所附身的 Pawn 转化为 ATopCharacter 作为当前活跃单位传入
-		MainHUDInstance->UpdateSquadList(GM->FriendlyRoster, MyPawn);
+		MainHUDInstance->UpdateSquadList(GS->FriendlyRoster, MyPawn);
 	}
 }
 

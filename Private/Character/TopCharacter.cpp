@@ -253,7 +253,9 @@ void ATopCharacter::ExecuteSelfSanitization()
 	// 从总线名册中自首注销
 	if (AMyGameModeBase* GM = Cast<AMyGameModeBase>(GetWorld()->GetAuthGameMode()))
 	{
-		GM->FriendlyRoster.Remove(this);
+		// 💥【修改说明】底层逻辑修正：绝不能再去直接操作被删掉的 GM->FriendlyRoster！
+		// 直接呼叫 GameMode 上我们刚刚保留好的标准注销接口，让裁判去安全地修改大屏幕！
+		GM->UnregisterFriendly(this);
 	}
 
 	// 执行“完美软禁”，保留组件结构但封死一切接收路径

@@ -23,6 +23,9 @@
 // 【新增】：引入纯净的全局玩家状态基类
 #include "PlayerState/MyPlayerState.h"
 
+// 在文件顶部的 include 区域加上这行
+#include "Game/MyGameStateBase.h"
+
 
 // ==============================================================================
 // 生命周期 (Lifecycle)
@@ -180,11 +183,18 @@ void AMyGameModeBase::RegisterFriendly(ATopCharacter* Character)
 {
 	if (Character)
 	{
-		// 在数组里从头到尾扫一遍，看看有没有一模一样的指针，没有则塞入
-		FriendlyRoster.AddUnique(Character);
+		// 💥【修改说明】跨系统寻址：GameMode (裁判) 获取 GameState (大屏幕)
+		if (AMyGameStateBase* GS = GetGameState<AMyGameStateBase>())
+		{
+			// 修改大屏幕上的全服同步名单
+			GS->FriendlyRoster.AddUnique(Character);
 
-		// 向全宇宙广播：友军名单已更新！(不在乎谁在听，完全解耦)
-		OnRosterChanged.Broadcast();
+			// 💥【关键架构细节】：为什么要在服务器再 Broadcast 一次？
+			// 因为在虚幻底层，ReplicatedUsing (OnRep) 函数【绝对不会在修改数据的服务器本地触发】！
+			// 如果你开的是“监听服务器(Listen Server)”，房主自己也是个玩家。
+			// 为了让房主自己的 UI 也能更新，必须在服务器修改数据后，手动拉响一次广播！
+			GS->OnRosterChanged.Broadcast();
+		}
 	}
 }
 
@@ -192,12 +202,14 @@ void AMyGameModeBase::UnregisterFriendly(ATopCharacter* Character)
 {
 	if (Character)
 	{
-		// 遵循你的设计：目前直接移除，未来可扩展为灰色显示
-		// 放弃冷冰冰的系统内置排序，可以让玩家自主手动调整位置
-		FriendlyRoster.Remove(Character);
+		// 💥【修改说明】同样去修改 GameState 的数组
+		if (AMyGameStateBase* GS = GetGameState<AMyGameStateBase>())
+		{
+			GS->FriendlyRoster.Remove(Character);
 
-		// 向全宇宙广播：友军名单已更新！
-		OnRosterChanged.Broadcast();
+			// 手动给房主拉响广播，客机的更新交由引擎底层的 OnRep 自动触发
+			GS->OnRosterChanged.Broadcast();
+		}
 	}
 }
 

@@ -12,7 +12,7 @@
 #include "Component/CombatSystem/MyCombatComponent.h"
 
 
-void UMyBulletSubsystem::FireBullet(AActor* InOwner, const FVector& StartLoc, const FVector& Direction, float Speed, float LifeTime)
+void UMyBulletSubsystem::FireBullet(AActor* InOwner, const FVector& StartLoc, const FVector& Direction, float Speed, float LifeTime, const class UMyWeaponDataAsset* WeaponConfig)
 {
     // 定义一个新的子弹数据结构体并设置参数
     FVirtualBulletData NewBullet;
@@ -21,14 +21,26 @@ void UMyBulletSubsystem::FireBullet(AActor* InOwner, const FVector& StartLoc, co
     NewBullet.Velocity = Direction * Speed;
     NewBullet.RemainingLife = LifeTime;
     
+    // 💥【修改说明】：将接收到的数据资产指针存入子弹内存
+    NewBullet.WeaponConfig = WeaponConfig;
+
     // 将结构体添加到子弹池
     ActiveBullets.Add(NewBullet);
 }
 
 void UMyBulletSubsystem::Tick(float DeltaTime)
 {
+    // 优化：外部缓存 World 指针
+    // 避免在嵌套循环中几十次、上百次地反复调用 GetWorld()
+    UWorld* World = GetWorld();
+    if (!World) return;
+
     // 如果子弹池为空，则跳过更新，节省性能
-    if (ActiveBullets.Num() == 0) return;
+    if (ActiveBullets.Num() == 0)
+    {
+        Accumulator = 0.f; // 💥【修改说明】：掐死时间幽灵
+        return;
+    }
 
     // 累积时间
     Accumulator += DeltaTime;
@@ -42,11 +54,6 @@ void UMyBulletSubsystem::Tick(float DeltaTime)
 
         // 永远固定的步长时间
         const float FixedStep = TargetUpdateInterval;
-
-        // 优化：外部缓存 World 指针
-        // 避免在嵌套循环中几十次、上百次地反复调用 GetWorld()
-        UWorld* World = GetWorld();
-        if (!World) return;
 
         // 将结构体声明在 for 循环外面，只分配一次内存
         // FCollisionQueryParams 是虚幻引擎提供的一个结构体，相当于一份碰撞规则调查问卷或过滤清单
@@ -90,8 +97,8 @@ void UMyBulletSubsystem::Tick(float DeltaTime)
                         // 通过接口获取开火者的战斗组件
                         if (UMyCombatComponent* CombatComp = Shooter->GetCombatComponent())
                         {
-                            // 将击中结果原封不动地传回给战斗组件！
-                            CombatComp->ProcessBulletHit(Hit);
+                            // 💥【修改说明】：将击中结果，以及这颗子弹身上“固化”的数据资产指针，一起传回给战斗组件！
+                            CombatComp->ProcessBulletHit(Hit, Bullet.WeaponConfig);
                         }
                     }
                 }

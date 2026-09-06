@@ -54,6 +54,9 @@ struct FVirtualBulletData
     // 优化：改为弱指针！防野指针防内存泄漏
     UPROPERTY()
     TWeakObjectPtr<AActor> Owner;
+
+    // 💥【修改说明】：新增数据资产指针。子弹生成时将开火瞬间的配置表固化在自己身上
+    const class UMyWeaponDataAsset* WeaponConfig = nullptr;
 };
 
 UCLASS()
@@ -65,7 +68,8 @@ public:
     // 外部调用入口，输入子弹参数并把子弹添加到子弹池
     // FVector 占 24 字节，按值传递会产生内存拷贝
     // 只读的输入参数，最佳实践是使用常量引用
-    void FireBullet(AActor* InOwner, const FVector& StartLoc, const FVector& Direction, float Speed, float LifeTime);
+    // 💥【修改说明】：追加 WeaponConfig 参数，接收战斗组件传来的固化配置
+    void FireBullet(AActor* InOwner, const FVector& StartLoc, const FVector& Direction, float Speed, float LifeTime, const class UMyWeaponDataAsset* WeaponConfig);
 
     // --- FTickableGameObject 接口 ---
     virtual void Tick(float DeltaTime) override;
