@@ -151,6 +151,20 @@ void UMyGameInstance::OnStart()
 {
 	Super::OnStart();
 
+	// 【最高层拦截 1】：解决 PIE (编辑器播放) 模式下，PostLoadMapWithWorld 从不触发导致的死锁
+	if (UWorld* World = GetWorld())
+	{
+		if (World->IsPlayInEditor())
+		{
+			// 【高层拦截】：只有当前世界是战斗模式（AMyGameModeBase），才允许手动推入落地管线！
+			// 主菜单在此处直接被放养，干干净净，再也不会强拉加载屏！
+			if (Cast<AMyGameModeBase>(World->GetAuthGameMode()))
+			{
+				HandleEndTravel(World);
+			}
+		}
+	}
+
 	// 【核心修复】：解决 PIE (编辑器播放) 模式下，PostLoadMapWithWorld 从不触发导致的死锁
 	if (UWorld* World = GetWorld())
 	{
@@ -465,6 +479,25 @@ void UMyGameInstance::HandleStartTravel(UWorld* CurrentWorld)
 void UMyGameInstance::HandleEndTravel(UWorld* NewWorld)
 {
 	if (!NewWorld) return;
+
+	// ==============================================================================
+	// 【最高层拦截 2：剥离主菜单与非战斗关卡】
+	// ==============================================================================
+	// 无论跨入什么世界，落地第一帧必须解除黑幕扩展，防止永久黑屏死锁
+	if (BlackoutExt.IsValid())
+	{
+		BlackoutExt->bIsActive = false;
+	}
+
+	// 核心拦截：如果当前世界的 GameMode 不是我们的战斗基类 (AMyGameModeBase)
+	// 说明这是主菜单、展示大厅等纯 UI 场景！
+	// 大管家直接下班！后续所有的地图解析、加载屏掩护、物理排队代码统统不执行！
+	if (!Cast<AMyGameModeBase>(NewWorld->GetAuthGameMode()))
+	{
+		// 顺手清空可能挂起的车票残骸，保持大管家手底干净
+		PendingTargetMapName = NAME_None;
+		return;
+	}
 
 	// ==============================================================================
 	// 1. 【本地冷启动 / 副机被动落地判定】

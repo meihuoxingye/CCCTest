@@ -46,6 +46,9 @@ void UMySaveMenuWidget::NativeOnInitialized()
 	if (Btn_ClearPage) Btn_ClearPage->OnClicked().AddUObject(this, &UMySaveMenuWidget::OnClearPageClicked);
 	if (Btn_CompactPages) Btn_CompactPages->OnClicked().AddUObject(this, &UMySaveMenuWidget::OnCompactPagesClicked);
 
+	// 💥【修改说明】将 UI 蓝图中的关闭按钮点击事件与 C++ 层的关闭指令强绑定，保证生命周期解绑安全。
+	if (Btn_Close) Btn_Close->OnClicked().AddUObject(this, &UMySaveMenuWidget::OnCloseClicked);
+
 	// 2. 找到全局的存档大管家，戴上耳机监听它的广播；缓存每页档位数、最高页数上限
 	if (UGameInstance* GI = GetGameInstance())
 	{
@@ -132,6 +135,24 @@ UWidget* UMySaveMenuWidget::NativeGetDesiredFocusTarget() const
 void UMySaveMenuWidget::NativeOnActivated()
 {
 	Super::NativeOnActivated();
+
+	// 💥【修改说明】面板从隐藏重新激活时（例如关掉上面覆盖的其他UI），主动向大管家拉取刷新，防止面板被复用后数据脱钩停留在旧状态。
+	BuildSaveSlotList();
+}
+
+#pragma endregion
+
+
+// ==============================================================================
+// 面板控制与基础交互 (Panel Control & Basic Interaction)
+// ==============================================================================
+#pragma region
+
+void UMySaveMenuWidget::OnCloseClicked()
+{
+	// 💥【修改说明】触发 CommonUI 核心生命周期闭环。
+	// DeactivateWidget 会将面板从激活态平滑移除，释放焦点并自动归还给底层 GameViewport 或栈内的上一层 UI。
+	DeactivateWidget();
 }
 
 #pragma endregion
@@ -247,6 +268,13 @@ void UMySaveMenuWidget::BuildSaveSlotList()
 		// 取出专属 ViewModel 走纯数据同步
 		// 从数据池中，抽出跟当前这张 UI 卡片一对一物理绑死的底层机顶盒。
 		UMySaveDataObj* ViewModel = ViewModelPool[i];
+
+		// ==========================================================
+		// 【新增：强行注入只读锁！】
+		// 无论这张卡片是不是空档，直接把当前面板的最高只读意志压进机顶盒里。
+		// UMG 蓝图接收到后，直接用这个变量去控制 Btn_Save 的 Visibility (Visible/Collapsed)。
+		// ==========================================================
+		ViewModel->SetIsLoadOnlyMode(this->bIsLoadOnlyMode);
 
 		// ViewModel 的 Setter 会利用 FFieldNotificationId 自动广播，完成局部刷新
 		// 将新算出的存档名称直接灌入机顶盒，底层立刻触发精准的局部重绘。

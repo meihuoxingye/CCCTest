@@ -11,6 +11,7 @@ class UTextBlock;
 class UVerticalBox;
 class UMySaveSlotWidget;
 
+
 // ==============================================================================
 // 存档菜单面板 (Save Menu Widget)
 // ==============================================================================
@@ -62,6 +63,23 @@ protected:
 	// 属于 CommonUI 插件，调用时机：
 	// 每次面板成功变为“激活（Active）”状态的那一瞬间触发（每次打开面板都会执行，用来做状态刷新）。
 	virtual void NativeOnActivated() override;
+
+
+	// ==============================================================================
+	// 面板控制与基础交互 (Panel Control & Basic Interaction)
+	// ==============================================================================
+protected:
+
+	// 💥【修改说明】增加关闭面板按钮的控件绑定，暴露给 UMG 蓝图。必须在蓝图中创建一个名为 Btn_Close 的同类型控件。
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<class UMyCommonButtonBase> Btn_Close;
+
+private:
+
+	// 💥【修改说明】挂载于 UI 关闭按钮的回调函数，必须带 UFUNCTION() 才能参与动态多播委托绑定。
+	UFUNCTION()
+	void OnCloseClicked();
+
 
 	// ==============================================================================
 	// 绝对排版与分页系统 (Absolute Layout & Pagination)
@@ -179,4 +197,14 @@ protected:
 	// 父级的 Opening/Closing：控制的是面板的“生存状态”；子级的 SaveSuccess：控制的是具体的“业务状态”。
 	UFUNCTION(BlueprintImplementableEvent, Category = "SaveMenu|Animation")
 	void BP_PlaySaveSuccessAnimation();
+
+
+	// ==============================================================================
+	// 对外的模式控制锁
+	// ==============================================================================
+public:
+	// 【只读模式锁】：由外部（如主菜单）在 CreateWidget 之后、ActivateWidget 之前强行设为 true。
+	// 若为 true，底层将向所有卡片下发只读指令，彻底屏蔽存档与新建功能。
+	UPROPERTY(BlueprintReadWrite, Category = "SaveMenu|State")
+	bool bIsLoadOnlyMode = false;
 };

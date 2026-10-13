@@ -89,4 +89,21 @@ public:
 
 	// MVVM 数据拉取口。蓝图 UI 收到上方广播后，会自动调用此 Getter 拿走最新结构体用于渲染。
 	bool GetIsEmptySlot() const { return bIsEmptySlot; }
+
+
+	// ==============================================================================
+	// 对外的模式控制锁
+	// ==============================================================================
+public:
+	// 只读模式标示。前端 UI 侦测到为 true 时，自动隐藏“保存”按钮和“加号（新建存档）”界面
+	UPROPERTY(BlueprintReadOnly, FieldNotify, Setter = "SetIsLoadOnlyMode", Getter = "GetIsLoadOnlyMode", Category = "SaveData")
+	bool bIsLoadOnlyMode;
+
+	// 【只读锁翻转】利用引擎原生的 MVVM 赋值宏，精准处理防抖与广播。
+	void SetIsLoadOnlyMode(bool bInIsLoadOnlyMode)
+	{
+		UE_MVVM_SET_PROPERTY_VALUE(bIsLoadOnlyMode, bInIsLoadOnlyMode);
+	}
+
+	bool GetIsLoadOnlyMode() const { return bIsLoadOnlyMode; }
 };
